@@ -1,2 +1,2 @@
-# backend/api/__init__.py
-# This file tells Python that the 'api' directory is a package.
+# This file can be empty or contain package-level initializations
+pass

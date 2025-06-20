@@ -1,21 +1,25 @@
-# ai-nudge/backend/Dockerfile (Minimal for Docker Test)
+# Use an official Python runtime as a parent image
+FROM python:3.11-slim
 
-# Use a lean Python 3.11 base image.
-FROM python:3.11-slim-bookworm
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
 
-# Set working directory inside the container.
-WORKDIR /app/backend
+# Set work directory
+WORKDIR /app
 
-# Copy *only* the minimal requirements for this test.
-# FastAPI needs uvicorn, so ensure your requirements.txt only lists that for now, or just install them directly here.
-# For simplicity in this test, let's install directly.
-RUN pip install fastapi uvicorn
+# Install system dependencies if any (e.g., for psycopg2, add libpq-dev)
+# RUN apt-get update && apt-get install -y ...
 
-# Copy your minimal app code.
-COPY api/main.py api/main.py
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose the port Uvicorn will run on.
+# Copy application code
+COPY . .
+
+# Expose port 8000 for the FastAPI app (though docker-compose handles the mapping)
 EXPOSE 8000
 
-# Command to run Uvicorn when container starts.
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Command to run the application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

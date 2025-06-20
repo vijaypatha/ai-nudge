@@ -1,24 +1,38 @@
-# ai-nudge/docker-compose.yml
-
 version: '3.8'
 
 services:
-  backend-test: # Service name for the temporary test backend
+  backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      # --- CHANGE THIS LINE ---
-      # OLD: - "8000:8000"
-      # NEW: Map host port 8001 to container port 8000
-      - "8001:8000" # <--- CHANGED: Host port is now 8001
-      
+      - "8001:8000"
     volumes:
-      - .:/app
-      
+      - ./backend:/app
+      - ./backend/.env:/app/.env
     env_file:
       - ./backend/.env
-      
-    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    networks:
+      - ai_nudge_net
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
-    restart: unless-stopped
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+    networks:
+      - ai_nudge_net
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+
+networks:
+  ai_nudge_net:
+    driver: bridge

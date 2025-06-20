@@ -1,25 +1,25 @@
-/** @type {import('next').NextConfig} */
+/** @type {import('tailwindcss').Config} */
 module.exports = {
-    content: [
-      './pages/**/*.{js,ts,jsx,tsx,mdx}',
-      './components/**/*.{js,ts,jsx,tsx,mdx}',
-      './app/**/*.{js,ts,jsx,tsx,mdx}',
-    ],
-    theme: {
-      extend: {
-        // Define your application's brand color palette here
-        colors: {
-          brand: {
-            dark: '#0B112B', // Deep, dark blue from your background
-            'accent': '#20D5B3',      // The vibrant teal/mint green
-            'accent-light': '#4EDAA8', // The lighter green for gradients
-            'text-main': '#FFFFFF',
-            'text-muted': '#C4C4C4',
-          },
-          // We can also define component-specific colors for a clean system
-          "primary-action": "#20D5B3",
-        },
+  content: [
+    "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./components/**/*.{js,ts,jsx,tsx,mdx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        'brand-primary': '#191C36', // Dark Blue/Black
+        'brand-secondary': '#20D5B3', // Bright Teal
+        'brand-accent': '#4EDAA8',   // Lighter Green
+        'brand-white': '#FFFFFF',
+        'brand-gray': '#C4C4C4',
+      },
+      backgroundImage: {
+        "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
+        "gradient-conic":
+          "conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))",
       },
     },
-    plugins: [],
-  };
+  },
+  plugins: [],
+};

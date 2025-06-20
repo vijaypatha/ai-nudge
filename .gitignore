@@ -1,4 +1,32 @@
-# ai-nudge/.gitignore
+# Docker
+.dockerignore
+docker-compose.override.yml
 
-# Ignore environment variables file
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
 .env
+venv/
+.venv/
+env/
+ENV/
+pip-cache/
+.pytest_cache/
+*.sqlite3
+
+# Node
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json # User explicitly asked for minimal package-lock.json, implying it might be generated later or managed carefully.
+# frontend/package-lock.json # More specific if needed
+
+# IDE / OS
+.vscode/
+.idea/
+*.DS_Store
