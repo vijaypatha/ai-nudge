@@ -1,0 +1,4 @@
+# ai-nudge/.gitignore
+
+# Ignore environment variables file
+.env
