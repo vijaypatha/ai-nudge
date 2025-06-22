@@ -8,7 +8,7 @@
 # without needing a live connection to a real MLS provider during development.
 
 from typing import List, Optional
-from backend.data.models.property import Property, PropertyCreate # Import Property models
+from data.models.property import Property, PropertyCreate # Import Property models
 import uuid # For generating unique IDs
 from datetime import datetime
 

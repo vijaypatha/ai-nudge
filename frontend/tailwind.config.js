@@ -8,9 +8,18 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        'brand-primary': '#191C36', // Dark Blue/Black
-        'brand-secondary': '#20D5B3', // Bright Teal
-        'brand-accent': '#4EDAA8',   // Lighter Green
+        // --- CORE THEME ---
+        'brand-dark': '#0B112B', // Deep, dark blue for backgrounds
+        'brand-text-main': '#E5E7EB', // Off-white for primary text
+        'brand-text-muted': '#9CA3AF', // Gray for secondary/muted text
+
+        // --- ACTION & ACCENT COLORS ---
+        'primary-action': '#20D5B3', // Bright teal for primary buttons/actions
+        'brand-accent': '#4EDAA8',   // Lighter green for highlights and secondary elements
+
+        // --- Original colors for reference, can be removed if unused ---
+        'brand-primary': '#191C36',
+        'brand-secondary': '#20D5B3',
         'brand-white': '#FFFFFF',
         'brand-gray': '#C4C4C4',
       },

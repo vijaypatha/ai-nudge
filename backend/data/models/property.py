@@ -49,7 +49,7 @@ class Property(BaseModel):
 class PropertyCreate(BaseModel):
     """
     Data required to create a new property listing.
-    ID and default status/last_updated are handled by the backend.
+    ID and default status/last_updated are handled by the 
     """
     address: str = Field(min_length=5, description="Full address of the property.")
     price: float = Field(gt=0, description="Current listing price of the property.")

@@ -6,9 +6,9 @@ from typing import Dict, Any, Optional
 import uuid
 
 # Import the real OpenAI service for generating AI responses.
-from backend.integrations import openai as openai_service
+from integrations import openai as openai_service
 # Import the mock MLS/Zillow service to provide property data to the AI.
-from backend.integrations import mls as mls_service
+from integrations import mls as mls_service
 
 
 # The _mock_llm_generate function is removed as we are now using OpenAI.

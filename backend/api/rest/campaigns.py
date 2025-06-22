@@ -1,37 +1,36 @@
-from fastapi import APIRouter, HTTPException, Body
-from pydantic import BaseModel
-import logging
+# ---
+# File Path: backend/api/rest/campaigns.py
+# Purpose: Defines API endpoints for outbound communications by calling the orchestrator.
+# ---
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, HTTPException, status
+from uuid import UUID
 
-router = APIRouter()
+from data.models.message import SendMessageImmediate
+from agent_core import orchestrator # Import the orchestrator
 
-class MessageSendRequest(BaseModel):
-    message: str
-    recipient_id: str # Example: client_id or property_id
-    # Add any other relevant fields, e.g., sender_id if not implicit
-    # context: Optional[dict] = None
+router = APIRouter(
+    prefix="/campaigns",
+    tags=["Campaigns"]
+)
 
-@router.post("/messages/send-now/", summary="Send a message immediately")
-async def send_message_now(payload: MessageSendRequest = Body(...)):
-    logger.info(f"Received request to send message: '{payload.message}' to recipient ID: {payload.recipient_id}")
+@router.post("/messages/send-now", status_code=status.HTTP_200_OK)
+async def send_message_now(message_data: SendMessageImmediate):
+    """
+    Sends a message immediately by calling the central orchestrator.
+    This keeps the API layer clean and free of business logic.
+    """
+    # The API layer's only job is to validate input and call the service layer.
+    success = await orchestrator.orchestrate_send_message_now(
+        client_id=message_data.client_id,
+        content=message_data.content
+    )
     
-    if not payload.message or not payload.recipient_id:
-        logger.error("Validation error: Message or recipient_id missing in payload.")
-        raise HTTPException(status_code=400, detail="Message and recipient_id are required.")
-    
-    # Mock sending logic: In a real app, this would integrate with an email/SMS service
-    # For now, we just log and return a success response.
+    if success:
+        return {"message": "Message sent successfully!", "client_id": message_data.client_id}
+    else:
+        # The orchestrator handles logging details; the API returns a generic error.
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to send message.")
 
-    response_message = f"Message successfully simulated as sent to recipient {payload.recipient_id}."
-    logger.info(response_message)
-    return {
-        "status": "success",
-        "message": response_message,
-        "details": {
-            "recipient_id": payload.recipient_id,
-            "message_length": len(payload.message)
-        }
-    }
+# Note: Other campaign-related endpoints like 'schedule' would also be refactored
+# to call new functions in the orchestrator, but we are only fixing the failing one for now.

@@ -30,3 +30,5 @@ package-lock.json # User explicitly asked for minimal package-lock.json, implyin
 .vscode/
 .idea/
 *.DS_Store
+
+docker-output.log

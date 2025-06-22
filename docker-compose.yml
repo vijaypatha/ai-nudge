@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build:
@@ -14,7 +12,9 @@ services:
       - ./backend/.env
     networks:
       - ai_nudge_net
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    # CORRECTED: Changed 'main:app' to 'api.main:app' to point to the correct
+    # FastAPI application instance inside the 'api' module.
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
     build:
@@ -26,11 +26,15 @@ services:
       - ./frontend:/app
       - /app/node_modules
       - /app/.next
+    # This command overrides the Dockerfile's `CMD ["npm", "start"]`
+    # to run the development server instead.
+    command: npm run dev
     depends_on:
       - backend
     networks:
       - ai_nudge_net
     environment:
+      # CORRECTED: Point the frontend to the correct internal container name and port.
       - NEXT_PUBLIC_API_URL=http://backend:8000
 
 networks:

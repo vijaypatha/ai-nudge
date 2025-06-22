@@ -1,19 +1,22 @@
-# backend/api/rest/properties.py
+# ---
+# File Path: backend/api/rest/properties.py
+# Purpose: Defines API endpoints for properties and triggers the Nudge Engine on events.
+# ---
 
-from fastapi import APIRouter, HTTPException, status # Import necessary FastAPI components
-from typing import List                            # For type hinting lists
-from uuid import UUID                              # For validating UUID (Universally Unique Identifier)
+from fastapi import APIRouter, HTTPException, status
+from typing import List
+from uuid import UUID
 
-# Import the Pydantic models for Property, PropertyCreate, and the new PriceUpdate
-# These models define the structure of data for properties coming in and out of the API.
-from backend.data.models.property import Property, PropertyCreate, PriceUpdate
-# Import the mock MLS integration service.
+from data.models.property import Property, PropertyCreate, PriceUpdate
+# NEW: Import the event model and the nudge engine
+from data.models.event import MarketEvent
+from agent_core.brain import nudge_engine
+from data import crm as crm_service
+
 # This service acts as a stand-in for an actual MLS database connection.
-from backend.integrations import mls as mls_service
+# I am assuming you have this file and it contains the 'simulate_price_drop' function.
+from integrations import mls as mls_service
 
-# Initialize an API router specifically for property-related endpoints.
-# - prefix="/properties": All routes defined in this router will start with /properties.
-# - tags=["Properties"]: Organizes these routes under a "Properties" section in the API documentation (e.g., Swagger UI).
 router = APIRouter(
     prefix="/properties",
     tags=["Properties"]
@@ -21,80 +24,73 @@ router = APIRouter(
 
 @router.post("/", response_model=Property, status_code=status.HTTP_201_CREATED)
 async def create_property(property_data: PropertyCreate):
-    """
-    Endpoint to create a new property listing.
-
-    This function receives data for a new property and adds it to our
-    simulated MLS system.
-    How it works for the robot: This is like the robot writing down details
-    of a brand new house it just heard about in its "House Listing Database."
-
-    - **property_data**: The data needed to create the property, validated by PropertyCreate model.
-    - **response_model=Property**: Specifies that the response will follow the Property model structure.
-    - **status_code=status.HTTP_201_CREATED**: Indicates that a new resource was successfully created.
-    """
-    # Use the mock MLS service to add the new listing.
+    """Creates a new property listing."""
+    # NOTE: The existing mls_service is assumed to handle the property creation.
+    # In a real system, we would need to provide the full implementation.
     new_prop = mls_service.add_new_listing(property_data)
-    # Return the newly created property object.
     return new_prop
 
 @router.get("/", response_model=List[Property])
 async def get_all_properties():
-    """
-    Endpoint to retrieve all active property listings.
-
-    This function fetches all available properties from our simulated MLS data.
-    How it works for the robot: This is like the robot opening its "House Listing Database"
-    and reading out loud all the houses it knows about right now.
-
-    - **response_model=List[Property]**: Specifies that the response will be a list of Property objects.
-    """
-    # Use the mock MLS service to get all active listings.
-    return mls_service.get_all_listings()
+    """Retrieves all active property listings."""
+    return crm_service.get_all_properties_mock() # Using our CRM mock for consistency
 
 @router.get("/{property_id}", response_model=Property)
 async def get_property_by_id(property_id: UUID):
-    """
-    Endpoint to retrieve a single property by its unique ID.
-
-    This function looks up a specific property using its unique identifier.
-    How it works for the robot: This is like asking the robot, "Tell me about THIS specific house!"
-    (pointing to it by its unique ID).
-
-    - **property_id**: The unique identifier (UUID) of the property to retrieve.
-    - **response_model=Property**: Specifies that the response will be a single Property object.
-    - **raises HTTPException**: If the property is not found, a 404 Not Found error is returned.
-    """
-    # Use the mock MLS service to find the property by its ID.
-    prop = mls_service.get_listing_by_id(property_id)
-    # If the property is found, return it.
+    """Retrieves a single property by its unique ID."""
+    prop = crm_service.get_property_by_id(property_id)
     if prop:
         return prop
-    # If not found, raise an HTTP 404 error with a detail message.
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Property not found")
 
 @router.post("/{property_id}/simulate-price-drop", response_model=Property)
 async def simulate_property_price_drop(property_id: UUID, price_update: PriceUpdate):
-    """
-    Endpoint to simulate a price drop for a specific property.
+    """Simulates a price drop and triggers the Nudge Engine."""
+    property_to_update = crm_service.get_property_by_id(property_id)
+    if not property_to_update:
+        raise HTTPException(status_code=404, detail="Property not found")
+    old_price = property_to_update.price
+    updated_prop = crm_service.update_property_price(property_id, price_update.new_price)
 
-    This endpoint is primarily for testing the price drop detection feature.
-    It updates the price of an existing property in the simulated data.
-    How it works for the robot: This is like telling the robot, "Hey, for THIS house, its new price is THIS much!"
-    The robot then updates its records. This update is what would later trigger an automatic "nudge."
-
-    - **property_id**: The unique identifier (UUID) of the property to update.
-    - **price_update**: A PriceUpdate model containing the new_price. This ensures the price
-      is correctly read from the request body.
-    - **response_model=Property**: Specifies that the response will be the updated Property object.
-    - **raises HTTPException**: If the property is not found or the price does not actually drop,
-      a 400 Bad Request error is returned.
-    """
-    # Use the mock MLS service to simulate the price change.
-    # We access the 'new_price' from the 'price_update' Pydantic object.
-    updated_prop = mls_service.simulate_price_drop(property_id, price_update.new_price)
-    # If the property was updated successfully (price actually dropped), return it.
     if updated_prop:
+        print(f"TRIGGER: Price drop detected for property {property_id}. Notifying Nudge Engine.")
+        realtor_user = crm_service.get_user_by_id(crm_service.mock_users_db[0].id)
+        market_area_city = updated_prop.address.split(',')[1].strip()
+
+        # CORRECTED: Use lowercase event_type
+        price_drop_event = MarketEvent(
+            event_type="price_drop",
+            market_area=market_area_city,
+            entity_type="PROPERTY",
+            entity_id=property_id,
+            payload={"old_price": old_price, "new_price": updated_prop.price}
+        )
+        if realtor_user:
+            await nudge_engine.process_market_event(event=price_drop_event, realtor=realtor_user)
         return updated_prop
-    # If the update failed (e.g., property not found, or new_price was not lower), raise an error.
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Could not simulate price drop or property not found.")
+    raise HTTPException(status_code=400, detail="Could not simulate price drop.")
+
+@router.post("/simulate-new-listing", response_model=Property, status_code=status.HTTP_201_CREATED)
+async def simulate_new_listing(property_data: PropertyCreate):
+    """Creates a new property and triggers the Nudge Engine for a NEW_LISTING event."""
+    from datetime import datetime, timezone
+    new_property_data = property_data.model_dump()
+    new_property_data["last_updated"] = datetime.now(timezone.utc).isoformat()
+    new_prop = Property(**new_property_data)
+    crm_service.save_property(new_prop)
+    print(f"TRIGGER: New listing detected for property {new_prop.address}. Notifying Nudge Engine.")
+
+    realtor_user = crm_service.get_user_by_id(crm_service.mock_users_db[0].id)
+    market_area_city = new_prop.address.split(',')[1].strip()
+
+    # CORRECTED: Use lowercase event_type
+    new_listing_event = MarketEvent(
+        event_type="new_listing",
+        market_area=market_area_city,
+        entity_type="PROPERTY",
+        entity_id=new_prop.id,
+        payload=new_prop.model_dump()
+    )
+    if realtor_user:
+        await nudge_engine.process_market_event(event=new_listing_event, realtor=realtor_user)
+    return new_prop

@@ -1,7 +1,7 @@
 # backend/agent_core/tools/communication.py
 
 from typing import List, Optional # For type hinting lists and optional values
-from backend.data.models.message import ScheduledMessage, ScheduledMessageCreate, MessageStatus # Import message models
+from data.models.message import ScheduledMessage, ScheduledMessageCreate, MessageStatus # Import message models
 from datetime import datetime, timezone # For accurate date/time handling (especially UTC)
 import uuid # For generating unique IDs
 

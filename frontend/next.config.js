@@ -1,12 +1,19 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
-  // Allows external image domains if needed, though <img> is used for placeholders
   images: {
+    dangerouslyAllowSVG: true, // <-- Add this line
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'via.placeholder.com', // Example placeholder domain
+        hostname: 'placehold.co',
+        port: '',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'via.placeholder.com',
+        port: '',
+        pathname: '/**',
       },
     ],
   },

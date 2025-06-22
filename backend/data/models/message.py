@@ -81,7 +81,6 @@ class SendMessageImmediate(BaseModel):
     client_id: uuid.UUID = Field(description="The ID of the client to send the message to.")
     content: str = Field(min_length=1, description="The text content of the message.")
 
-# --- ADD THIS CLASS ---
 class IncomingMessage(BaseModel):
     """
     Represents the data payload for a message received from a client.
@@ -89,3 +88,8 @@ class IncomingMessage(BaseModel):
     """
     client_id: uuid.UUID = Field(description="The ID of the client who sent the message.")
     content: str = Field(min_length=1, description="The text content of the incoming message.")
+
+class ScheduledMessageUpdate(BaseModel):
+    """Defines the fields that can be updated on a scheduled message."""
+    content: str
+    scheduled_at: datetime

@@ -1,64 +1,53 @@
+# frontend/Dockerfile
+
 # Use an official Node.js runtime as a parent image
 FROM node:20-alpine AS base
 
 # Set working directory
 WORKDIR /app
 
-# Install dependencies (this layer is cached)
+# Ensure a clean slate for dependencies
+# Remove existing node_modules and .next if they somehow persist, though WORKDIR should make this less critical
+RUN rm -rf node_modules .next
+
+# Copy package.json and package-lock.json first to leverage Docker caching
 COPY package.json ./
 COPY package-lock.json ./
-RUN npm install --omit=dev # Install only production dependencies first
+
+# Use npm ci for clean, reproducible installs in automated environments
+# npm ci ensures dependencies are installed exactly as per package-lock.json
+RUN npm ci
+
+# Explicitly install SWC variants if not already installed by npm ci correctly
+# This step might be redundant if npm ci works perfectly, but helps in tricky cases
+RUN npm install @next/swc-linux-x64@latest @next/swc-wasm@latest --save-dev || true
 
 # Copy the rest of the application code
 COPY . .
 
-# Build the Next.js application
-# RUN npm run build # This would typically be here, but for --output=standalone, it's different. See below.
+# Build the Next.js application for production
+# This uses the dependencies installed above
+RUN npm run build
 
 # --- Production Stage ---
 FROM node:20-alpine AS production
 
 WORKDIR /app
 
-# Copy environment variables, if any are needed at build time for Next.js
-# ENV NODE_ENV production # Already set by Next.js start
-
-# Copy built assets from the build stage
-# If using default `next build` (not standalone output):
-# COPY --from=base /app/.next ./.next
-# COPY --from=base /app/public ./public
-# COPY --from=base /app/package.json ./package.json
-# COPY --from=base /app/node_modules ./node_modules # if not bundling them
-
-# For Next.js 14+ with output: "standalone" in next.config.js (recommended for Docker)
-# The build command `npm run build` in the 'base' stage should have created a folder
-# typically at .next/standalone. We copy that.
-# Ensure next.config.js has `output: 'standalone'` for this to work best.
-# For now, assuming standard build without explicit standalone for simplicity in this step,
-# but will adjust if `next.config.js` is updated for `output: 'standalone'`.
-
+# Copy built assets from the base stage
 COPY --from=base /app/.next ./.next
 COPY --from=base /app/public ./public
 COPY --from=base /app/package.json ./package.json
-# If node_modules are not bundled by Next.js build (they usually are for server components, but client might need some)
-# We already ran npm install in base, so node_modules are there.
-# For a smaller image, you'd ensure only necessary node_modules are copied or re-installed.
-# However, with `npm install --omit=dev`, we already have only production deps.
-COPY --from=base /app/node_modules ./node_modules
 
+# Copy only production dependencies if needed by `npm start`.
+# npm ci in the base stage already ensures only prod deps are needed for build.
+# For runtime, next start bundles most. But if node_modules are still needed for start,
+# ensure to copy from base if they were installed with --omit=dev.
+# Since `npm ci` was used above, all deps are installed, so copy them.
+COPY --from=base /app/node_modules ./node_modules
 
 # Expose port 3000
 EXPOSE 3000
 
 # Command to run the Next.js application
 CMD ["npm", "start"]
-
-# --- Development Stage (Optional, if you want a dev Docker setup) ---
-# FROM node:20-alpine AS development
-# WORKDIR /app
-# COPY package.json ./
-# COPY package-lock.json ./
-# RUN npm install
-# COPY . .
-# EXPOSE 3000
-# CMD ["npm", "run", "dev"]

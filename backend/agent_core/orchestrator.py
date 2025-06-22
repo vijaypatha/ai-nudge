@@ -5,13 +5,18 @@ import uuid # For unique IDs
 
 # Import the specific AI agents this orchestrator will coordinate.
 # For now, we're importing the conversation agent.
-from backend.agent_core.agents import conversation as conversation_agent
+from agent_core.agents import conversation as conversation_agent
+
+from agent_core.agents import client_insights # <-- NEW IMPORT
+
 
 # Import tools (like the communication tool) that agents might need to interact with.
-from backend.agent_core.tools import communication as comm_tool
+from agent_core.tools import communication as comm_tool
 
 # Import data services to fetch client context
-from backend.data import crm as crm_service # Assuming crm.py will manage client data access
+from data import crm as crm_service # Assuming crm.py will manage client data access
+
+from data.models.campaign import CampaignBriefing, MatchedClient #
 
 # In a real system, you might have a more sophisticated way to get client context.
 # For now, we'll use a mock to simulate getting client tags.
@@ -80,3 +85,57 @@ async def handle_incoming_message(
         "ai_draft_response": ai_response_draft,
         "orchestration_status": "draft_generated"
     }
+
+# --- ADD THIS NEW FUNCTION ---
+async def orchestrate_send_message_now(client_id: uuid.UUID, content: str) -> bool:
+    """
+    Orchestrates the business logic for sending a message immediately.
+    This keeps the API layer clean and centralizes logic.
+    """
+    print(f"ORCHESTRATOR: Orchestrating immediate send for client {client_id}")
+    # Step 1: Validate client existence (optional, but good practice)
+    client = crm_service.get_client_by_id_mock(client_id)
+    if not client:
+        # In a real app, you'd raise a specific exception here
+        print(f"ORCHESTRATOR ERROR: Client {client_id} not found.")
+        return False
+    
+    # Step 2: Delegate to the communication tool
+    success = comm_tool.send_message_now(client_id, content)
+    return success
+
+async def handle_incoming_message(client_id: uuid.UUID, incoming_message_content: str) -> Dict[str, Any]:
+    """
+    Processes an incoming client message, generates a draft response,
+    AND analyzes the message for new intel.
+    """
+    print(f"ORCHESTRATOR: Handling incoming message from client {client_id}...")
+    client_context = _get_mock_client_context(client_id)
+
+    # --- Task 1: Generate a standard reply draft (existing logic) ---
+    ai_response_draft = await conversation_agent.generate_response(
+        client_id=client_id,
+        incoming_message_content=incoming_message_content,
+        context=client_context
+    )
+
+    # --- NEW Task 2: Analyze the message for new intel ---
+    found_intel = await client_insights.extract_intel_from_message(incoming_message_content)
+
+    if found_intel:
+        # If intel is found, create a new "intel_suggestion" campaign briefing
+        realtor = crm_service.mock_users_db[0]
+        client = crm_service.get_client_by_id_mock(client_id)
+
+        intel_briefing = CampaignBriefing(
+            user_id=realtor.id,
+            client_id=client_id, # Storing client_id for context
+            campaign_type="intel_suggestion",
+            headline=f"New Intel Suggestion for {client.full_name}",
+            original_draft=found_intel, # Use this field to store the suggested note
+            matched_audience=[], # Not applicable for this type
+            triggering_event_id=uuid.uuid4() # A new unique ID for this event
+        )
+        crm_service.save_campaign_briefing(intel_briefing)
+
+    return { "ai_draft_response": ai_response_draft } # Return the original response draft
