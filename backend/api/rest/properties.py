@@ -8,32 +8,28 @@ from typing import List
 from uuid import UUID
 
 from data.models.property import Property, PropertyCreate, PriceUpdate
-# NEW: Import the event model and the nudge engine
 from data.models.event import MarketEvent
 from agent_core.brain import nudge_engine
 from data import crm as crm_service
-
-# This service acts as a stand-in for an actual MLS database connection.
-# I am assuming you have this file and it contains the 'simulate_price_drop' function.
 from integrations import mls as mls_service
+
 
 router = APIRouter(
     prefix="/properties",
     tags=["Properties"]
 )
 
+# ... (rest of the file remains the same) ...
 @router.post("/", response_model=Property, status_code=status.HTTP_201_CREATED)
 async def create_property(property_data: PropertyCreate):
     """Creates a new property listing."""
-    # NOTE: The existing mls_service is assumed to handle the property creation.
-    # In a real system, we would need to provide the full implementation.
     new_prop = mls_service.add_new_listing(property_data)
     return new_prop
 
 @router.get("/", response_model=List[Property])
 async def get_all_properties():
     """Retrieves all active property listings."""
-    return crm_service.get_all_properties_mock() # Using our CRM mock for consistency
+    return crm_service.get_all_properties_mock()
 
 @router.get("/{property_id}", response_model=Property)
 async def get_property_by_id(property_id: UUID):
@@ -57,7 +53,6 @@ async def simulate_property_price_drop(property_id: UUID, price_update: PriceUpd
         realtor_user = crm_service.get_user_by_id(crm_service.mock_users_db[0].id)
         market_area_city = updated_prop.address.split(',')[1].strip()
 
-        # CORRECTED: Use lowercase event_type
         price_drop_event = MarketEvent(
             event_type="price_drop",
             market_area=market_area_city,
@@ -83,7 +78,6 @@ async def simulate_new_listing(property_data: PropertyCreate):
     realtor_user = crm_service.get_user_by_id(crm_service.mock_users_db[0].id)
     market_area_city = new_prop.address.split(',')[1].strip()
 
-    # CORRECTED: Use lowercase event_type
     new_listing_event = MarketEvent(
         event_type="new_listing",
         market_area=market_area_city,

@@ -7,7 +7,6 @@ import uuid
 
 # Import the real OpenAI service for generating AI responses.
 from integrations import openai as openai_service
-# Import the mock MLS/Zillow service to provide property data to the AI.
 from integrations import mls as mls_service
 
 

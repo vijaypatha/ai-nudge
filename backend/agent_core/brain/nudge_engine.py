@@ -1,6 +1,6 @@
 # ---
 # File Path: backend/agent_core/brain/nudge_engine.py
-# Purpose: The core engine for analyzing events and generating nudges.
+# Purpose: The core engine for analyzing events and generating campaign briefings.
 # ---
 from data.models.event import MarketEvent
 from data.models.campaign import CampaignBriefing, MatchedClient
@@ -11,7 +11,10 @@ from data import crm as crm_service
 from agent_core.agents import conversation as conversation_agent
 
 def _calculate_match_score(client: Client, property_item: Property) -> tuple[int, list[str]]:
-    # ... (This function remains unchanged)
+    """
+    Calculates a 'match score' between a client and a property based on preferences.
+    This determines how relevant a market event is to a specific client.
+    """
     score = 0
     reasons = []
     client_locations = client.preferences.get("locations", [])
@@ -37,7 +40,10 @@ def _calculate_match_score(client: Client, property_item: Property) -> tuple[int
     return score, reasons
 
 async def _generate_campaign_briefing(event: MarketEvent, realtor: User, property_item: Property, matched_audience: list[MatchedClient], prompt_template: str):
-    """A helper function to create and save a campaign briefing."""
+    """
+    A helper function to generate the AI message draft and save the complete
+    campaign briefing to the CRM.
+    """
     key_intel = {
         "address": property_item.address,
         "price": f"${property_item.price:,.0f}",
@@ -57,6 +63,7 @@ async def _generate_campaign_briefing(event: MarketEvent, realtor: User, propert
         new_briefing = CampaignBriefing(
             user_id=realtor.id,
             campaign_type=event.event_type,
+            status="new",
             headline=f"{event.event_type.replace('_', ' ').title()} on {property_item.address}",
             key_intel=key_intel,
             listing_url=property_item.listing_url,
@@ -67,7 +74,10 @@ async def _generate_campaign_briefing(event: MarketEvent, realtor: User, propert
         crm_service.save_campaign_briefing(new_briefing)
 
 async def process_event_for_audience(event: MarketEvent, realtor: User):
-    """Finds a matching audience for an event and generates a campaign."""
+    """
+    Finds a matching audience for a given market event and triggers the
+    campaign briefing generation.
+    """
     property_item = crm_service.get_property_by_id(event.entity_id)
     if not property_item: return
 
@@ -83,7 +93,6 @@ async def process_event_for_audience(event: MarketEvent, realtor: User):
         print(f"NUDGE ENGINE: No clients matched criteria for event {event.id}.")
         return
 
-    # Define prompts based on event type
     prompts = {
         "price_drop": "Draft a master SMS about a price drop on {property_address} to {price}. IMPORTANT: You MUST include this URL: {listing_url}",
         "new_listing": "Draft a master SMS about a new property on the market at {property_address} for {price}. Give them a first look. IMPORTANT: You MUST include this URL: {listing_url}"
@@ -94,7 +103,10 @@ async def process_event_for_audience(event: MarketEvent, realtor: User):
         await _generate_campaign_briefing(event, realtor, property_item, matched_audience, prompt_template)
 
 async def process_market_event(event: MarketEvent, realtor: User):
-    """Analyzes a market event and generates a Campaign Briefing."""
+    """
+    The main entry point for the Nudge Engine. It receives a market event,
+    validates it, and passes it to the correct processing function.
+    """
     print(f"NUDGE ENGINE: Processing event -> {event.event_type} for entity {event.entity_id}")
     if event.event_type in ["price_drop", "new_listing"]:
         await process_event_for_audience(event, realtor)
