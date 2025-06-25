@@ -3,8 +3,8 @@ import os
 import logging
 from typing import Optional
 
-from backend.integrations.mls.base import MlsApiInterface
-from backend.integrations.mls.flexmls_spark_api import FlexmlsSparkApi
+from .base import MlsApiInterface
+from .flexmls_spark_api import FlexmlsSparkApi
 
 logger = logging.getLogger(__name__)
 
