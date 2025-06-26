@@ -1,27 +1,38 @@
+# ---
+# File Path: backend/api/main.py
+# Purpose: Main entry point for the FastAPI application.
+# ---
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from fastapi.middleware.cors import CORSMiddleware
-import os
-from dotenv import load_dotenv
+from contextlib import asynccontextmanager
 
-# Load environment variables from .env file
-load_dotenv()
+# Import the new database initializer
+from backend.data.database import create_db_and_tables
 
 # Import routers
-from api.rest import campaigns, inbox
-# Placeholder for other potential routers
-# from api.webhooks import some_webhook_router
+from api.rest import clients, properties, inbox, nudges, admin_triggers,scheduled_messages, users
+# Import the seed function
+from data.seed import seed_database
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handles application startup and shutdown events."""
+    print("--- Application Startup ---")
+    create_db_and_tables() # Initialize the database connection first
+    seed_database() 
+    print("--- Startup Complete ---")
+    yield
+    print("--- Application Shutdown ---")
 
 app = FastAPI(
-    title="AI Nudge API",
+    title="AI Nudge Backend API",
+    description="The core API for the AI Nudge intelligent assistant.",
     version="0.1.0",
-    description="API for AI Nudge CRM",
+    lifespan=lifespan
 )
 
-# CORS (Cross-Origin Resource Sharing)
-origins = [
-    "http://localhost:3000",  # Frontend local development
-]
-
+origins = ["http://localhost:3000"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -30,24 +41,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routers
-# These will be created in subsequent steps, so this might show errors if run standalone now
-# For now, we are just setting up the structure.
-# Ensure these files exist before running the app.
-app.include_router(campaigns.router, prefix="/campaigns", tags=["Campaigns"])
-app.include_router(inbox.router, prefix="/inbox", tags=["Inbox"])
-# app.include_router(some_webhook_router.router, prefix="/webhooks", tags=["Webhooks"])
+app.include_router(users.router)
+app.include_router(clients.router)
+app.include_router(properties.router)
+app.include_router(inbox.router)
+app.include_router(nudges.router)
+app.include_router(admin_triggers.router)
+app.include_router(scheduled_messages.router)
 
 
-@app.get("/", tags=["Root"])
+@app.get("/")
 async def read_root():
-    return {"message": "Welcome to AI Nudge API"}
+    return {"message": "Welcome to AI Nudge Backend API!"}
 
-# To simulate OpenAI key presence for llm_client
-os.environ.setdefault("OPENAI_API_KEY", "mock_openai_key_if_not_set_in_env")
-
-if __name__ == "__main__":
-    import uvicorn
-    # This part is for local execution without Uvicorn CLI directly, not typically used in Docker with CMD
-    # uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-    pass # Docker CMD will run the app
+@app.get("/_debug/routes", response_model=list[dict])
+async def debug_list_routes():
+    routes_list = []
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            methods = list(route.methods) if route.methods else []
+            routes_list.append({
+                "path": route.path,
+                "name": route.name,
+                "methods": methods,
+                "endpoint": route.endpoint.__name__ if hasattr(route.endpoint, '__name__') else str(route.endpoint)
+            })
+    return routes_list

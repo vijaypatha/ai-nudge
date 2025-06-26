@@ -1,10 +1,13 @@
+# ---
 # FILE: backend/integrations/mls/factory.py
-import os
+# PURPOSE: Creates the correct MLS client using the new config pattern.
+# ---
 import logging
 from typing import Optional
 
 from .base import MlsApiInterface
 from .flexmls_spark_api import FlexmlsSparkApi
+from common.config import get_settings # <-- CHANGED: Import the get_settings function
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +16,9 @@ PROVIDER_MAP = {
 }
 
 def get_mls_client() -> Optional[MlsApiInterface]:
-    provider_name = os.getenv("MLS_PROVIDER")
+    settings = get_settings() # <-- CHANGED: Get settings object
+    provider_name = settings.MLS_PROVIDER # <-- CHANGED: Use settings object
+
     if not provider_name:
         logger.error("MLS_PROVIDER environment variable is not set. Cannot create MLS client.")
         return None

@@ -1,38 +1,29 @@
-# ---
-# File Path: backend/data/models/client.py
-# Purpose: Defines the data structure for a Client.
-# ---
-from pydantic import BaseModel, Field
-from typing import List, Dict, Any
+
+# client - Stores client information with email/phone indexes
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
+from sqlmodel import SQLModel, Field, Relationship, Column, JSON
 
-class Client(BaseModel):
-    """Represents a client of the business owner."""
-    id: UUID = Field(default_factory=uuid4)
+if TYPE_CHECKING:
+    from .message import ScheduledMessage
+
+class Client(SQLModel, table=True):
+    id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
+    full_name: str
+    email: str = Field(unique=True, index=True)
+    phone: Optional[str] = Field(default=None, index=True)
+    tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    preferences: Dict[str, Any] = Field(sa_column=Column(JSON))
+    last_interaction: Optional[str] = Field(default=None)
+    
+    scheduled_messages: List["ScheduledMessage"] = Relationship(back_populates="client")
+
+class ClientCreate(SQLModel):
     full_name: str
     email: str
-    phone: str | None = None
-    tags: List[str] = Field(default_factory=list)
-    
-    # This field holds the unstructured intel for our AI.
-    preferences: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Client-specific preferences and intel for AI matchmaking."
-    )
-    
-    last_interaction: str | None = None
-
-    class Config:
-        from_attributes = True
-
-class ClientCreate(BaseModel):
-    """Defines the data required to create a new client via the API."""
-    full_name: str
-    email: str
-    phone: str | None = None
+    phone: Optional[str] = None
     tags: List[str] = []
     preferences: Dict[str, Any] = {}
 
-class ClientUpdate(BaseModel):
-    """Defines the fields that can be updated on a client."""
+class ClientUpdate(SQLModel):
     preferences: Dict[str, Any]

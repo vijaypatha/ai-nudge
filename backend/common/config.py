@@ -1,47 +1,46 @@
-# backend/common/config.py
+# ---
+# File Path: backend/common/config.py
+# Purpose: Loads and manages all environment variables for the application using Pydantic.
+# ---
+from pydantic_settings import BaseSettings
+from functools import lru_cache
+from typing import Optional
 
-from dotenv import load_dotenv # To load .env file
-import os # To access environment variables
+class Settings(BaseSettings):
+    """
+    Manages application settings loaded from the .env file.
+    Provides type validation for all settings.
+    """
+    # OpenAI
+    OPENAI_API_KEY: str
 
-# --- Load Environment Variables ---
-# This must be called at the very beginning to load variables from .env into os.environ.
-load_dotenv()
+    # Twilio
+    TWILIO_ACCOUNT_SID: str
+    TWILIO_AUTH_TOKEN: str
+    TWILIO_PHONE_NUMBER: str
+    TWILIO_DEFAULT_MESSAGING_SERVICE_SID: str
+    # CORRECTED: Made this field optional as it's not in your .env
+    TWILIO_SUPPORT_MESSAGING_SERVICE_SID: Optional[str] = None
 
-# --- Configuration Settings ---
-# Access environment variables using os.getenv().
-# Provide empty strings as defaults if a variable might be optional or for robust startup.
+    # Database
+    DATABASE_URL: str
 
-# OpenAI API Key (for AI brain power)
-OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379/0"
 
-# Twilio Credentials (for SMS sending)
-TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
-TWILIO_PHONE_NUMBER: str = os.getenv("TWILIO_PHONE_NUMBER", "")
-TWILIO_DEFAULT_MESSAGING_SERVICE_SID: str = os.getenv("TWILIO_DEFAULT_MESSAGING_SERVICE_SID", "")
-TWILIO_SUPPORT_MESSAGING_SERVICE_SID: str = os.getenv("TWILIO_SUPPORT_MESSAGING_SERVICE_SID", "")
+    # Application
+    FRONTEND_APP_URL: str = "http://localhost:3000"
+    SECRET_KEY: str
 
-# Database URL (for persistent data storage)
-DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./test.db") # Default to sqlite for local dev if not set
+    # CORRECTED: Added missing MLS fields from your .env
+    MLS_PROVIDER: str
+    SPARK_API_DEMO_TOKEN: str
 
-# Redis URL (for caching, task queues, etc.)
-REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    class Config:
+        env_file = ".env"
+        env_file_encoding = 'utf-8'
 
-# Frontend Application URL (useful for CORS or redirects)
-FRONTEND_APP_URL: str = os.getenv("FRONTEND_APP_URL", "http://localhost:3000")
-
-# Secret Key (for security purposes like JWTs or session management)
-SECRET_KEY: str = os.getenv("SECRET_KEY", "supersecretdefaultkeythatshouldbechangedinprod")
-
-# --- Basic Validation / Warnings ---
-# Print warnings if crucial environment variables are missing.
-if not OPENAI_API_KEY:
-    print("WARNING: OpenAI API Key not loaded. AI functionality will be limited.")
-if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER]):
-    print("WARNING: Twilio credentials not fully loaded. Messaging functionality may be limited.")
-if not DATABASE_URL:
-    print("WARNING: DATABASE_URL not set. Using default SQLite database.")
-if not REDIS_URL:
-    print("WARNING: REDIS_URL not set. Using default local Redis.")
-if not SECRET_KEY:
-    print("WARNING: SECRET_KEY not set. Using a default secret key (INSECURE FOR PRODUCTION).")
+@lru_cache()
+def get_settings():
+    """Returns a cached instance of the Settings for performance."""
+    return Settings()

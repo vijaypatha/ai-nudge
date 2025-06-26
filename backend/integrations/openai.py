@@ -1,8 +1,13 @@
-# backend/integrations/openai.py
-
-import httpx # Import the httpx library
+# ---
+# File Path: backend/integrations/openai.py
+# Purpose: Manages interactions with the OpenAI API using the new config pattern.
+# ---
+import httpx
 from openai import OpenAI, APIStatusError, AuthenticationError
-from common.config import OPENAI_API_KEY
+from common.config import get_settings # <-- CHANGED: Import the get_settings function
+
+# --- Get the settings object once ---
+settings = get_settings()
 
 # Initialize the OpenAI client variable.
 _openai_client = None
@@ -14,17 +19,15 @@ def get_openai_client() -> OpenAI:
     """
     global _openai_client
     if _openai_client is None:
-        if not OPENAI_API_KEY:
+        # <-- CHANGED: Access the API key from the settings object
+        if not settings.OPENAI_API_KEY:
             raise ValueError("OpenAI API Key is missing from environment variables.")
         
-        # CORRECTED: Explicitly create an httpx.Client to pass to the OpenAI client.
-        # This gives us full control and avoids issues where environment variables (like proxy settings)
-        # can cause unexpected arguments to be passed during default client creation.
         http_client = httpx.Client()
         
         _openai_client = OpenAI(
-            api_key=OPENAI_API_KEY,
-            http_client=http_client # Pass the explicitly created client
+            api_key=settings.OPENAI_API_KEY, # <-- CHANGED: Use settings object
+            http_client=http_client
         )
         print("OPENAI INTEGRATION: OpenAI client initialized successfully.")
     return _openai_client

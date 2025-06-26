@@ -1,24 +1,21 @@
-# FILE: backend/integrations/twilio_outgoing.py
-# PURPOSE: Handles all direct communication with the Twilio API for sending messages.
-
-import os
+# ---
+# File Path: backend/integrations/twilio_outgoing.py
+# Purpose: Handles Twilio messaging using the new config pattern.
+# ---
 import logging
 from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
-
-# --- (FIX) Use absolute import for shared utilities ---
-from common.config import (
-    TWILIO_ACCOUNT_SID,
-    TWILIO_AUTH_TOKEN,
-    TWILIO_PHONE_NUMBER
-)
+from common.config import get_settings # <-- CHANGED: Import the get_settings function
 
 logger = logging.getLogger(__name__)
 
+# --- Get the settings object once ---
+settings = get_settings()
+
 # --- Initialize the Twilio Client ---
-# We check if the credentials exist before creating the client.
-if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
-    twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+if settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN:
+    # <-- CHANGED: Use settings object for credentials
+    twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
     logger.info("Twilio client initialized successfully.")
 else:
     twilio_client = None
@@ -27,15 +24,9 @@ else:
 def send_sms(to_number: str, body: str) -> bool:
     """
     Sends an SMS message using the Twilio API.
-
-    Args:
-        to_number (str): The recipient's phone number in E.164 format.
-        body (str): The text content of the message.
-
-    Returns:
-        bool: True if the message was sent successfully, False otherwise.
     """
-    if not twilio_client or not TWILIO_PHONE_NUMBER:
+    # <-- CHANGED: Use settings object for phone number
+    if not twilio_client or not settings.TWILIO_PHONE_NUMBER:
         logger.error("Cannot send SMS: Twilio client or phone number is not configured.")
         return False
 
@@ -43,7 +34,7 @@ def send_sms(to_number: str, body: str) -> bool:
         logger.info(f"Sending SMS to {to_number} via Twilio...")
         message = twilio_client.messages.create(
             to=to_number,
-            from_=TWILIO_PHONE_NUMBER,
+            from_=settings.TWILIO_PHONE_NUMBER, # <-- CHANGED: Use settings object
             body=body
         )
         logger.info(f"SMS sent successfully. Message SID: {message.sid}")

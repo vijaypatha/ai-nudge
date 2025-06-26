@@ -13,6 +13,17 @@ import {
   Sparkles, Search, Send, Calendar, Gift, Star, X, Edit2, Info
 } from "lucide-react";
 
+// --- ADDED: User type definition for the mock user data ---
+interface User {
+  id: string;
+  full_name: string;
+  email: string;
+  market_focus: string[];
+  strategy: {
+    nudge_format: string;
+  };
+}
+
 const InfoCard = ({ title, children, className, onEdit }: { title: string, children: React.ReactNode, className?: string, onEdit?: () => void }) => (
   <div className={clsx("bg-white/5 border border-white/10 rounded-xl relative", className)}>
     <div className="flex justify-between items-center px-4 pt-4 pb-2">
@@ -162,10 +173,43 @@ const RelationshipCampaignCard = ({ messages, onReplan, onUpdateMessage }: { mes
   );
 };
 
+// --- ADDED: New component to display current user information ---
+const CurrentUserCard = ({ user }: { user: User | null }) => {
+  if (!user) return null;
+  
+  return (
+    <InfoCard title="Current Agent">
+      <div className="flex flex-col items-center text-center">
+        <Avatar name={user.full_name} className="w-16 h-16 text-2xl mb-3" />
+        <h3 className="text-lg font-bold text-brand-text-main">{user.full_name}</h3>
+        <p className="text-sm text-brand-text-muted mb-4">{user.email}</p>
+        <div className="w-full space-y-2">
+          <div className="text-left">
+            <p className="text-xs text-brand-text-muted mb-1">Market Focus:</p>
+            <div className="flex flex-wrap gap-1">
+              {user.market_focus.map(market => (
+                <span key={market} className="bg-brand-accent/20 text-brand-accent text-xs font-semibold px-2 py-1 rounded-full">
+                  {market}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="text-left">
+            <p className="text-xs text-brand-text-muted mb-1">Strategy:</p>
+            <p className="text-sm text-brand-text-main capitalize">{user.strategy.nudge_format}</p>
+          </div>
+        </div>
+      </div>
+    </InfoCard>
+  );
+};
+
 export default function DashboardPage() {
   const { conversations, setConversations, clients, setClients, loading, setLoading } = useAppContext();
   const [properties, setProperties] = useState<Property[]>([]);
   const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
+  // --- ADDED: State to store the current user data from the mock database ---
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [isSending, setIsSending] = useState(false);
@@ -177,13 +221,34 @@ export default function DashboardPage() {
     if (clients.length > 0) { setLoading(false); return; }
     const fetchData = async () => {
       try {
-        const [clientsRes, propertiesRes] = await Promise.all([fetch('http://localhost:8001/clients'), fetch('http://localhost:8001/properties')]);
+        // --- UPDATED: Added users API call to the existing fetch operations ---
+        const [clientsRes, propertiesRes, usersRes] = await Promise.all([
+          fetch('http://localhost:8001/clients'),
+          fetch('http://localhost:8001/properties'),
+          fetch('http://localhost:8001/users') // NEW: Fetch users from the backend
+        ]);
+        
         if (!clientsRes.ok) throw new Error(`Failed to fetch clients: ${clientsRes.statusText}`);
         const clientsData: Client[] = await clientsRes.json();
         setClients(clientsData);
+        
         if (!propertiesRes.ok) throw new Error(`Failed to fetch properties: ${propertiesRes.statusText}`);
         const propertiesData: Property[] = await propertiesRes.json();
         setProperties(propertiesData);
+        
+        // --- ADDED: Handle users API response and set the current user (first user from mock data) ---
+        if (!usersRes.ok) {
+          console.warn(`Failed to fetch users: ${usersRes.statusText}`);
+          // Don't throw error for users - it's not critical for the app to function
+        } else {
+          const usersData: User[] = await usersRes.json();
+          console.log('Fetched users:', usersData); // Debug log to see the mock user data
+          // Set the first user as the current user (since we have mock data with one user: Jane Doe)
+          if (usersData.length > 0) {
+            setCurrentUser(usersData[0]);
+          }
+        }
+        
         const generatedConversations = clientsData.map((client, index) => ({
           id: `conv-${client.id}`, client_id: client.id, client_name: client.full_name,
           last_message: "Initial contact in history.",
@@ -192,7 +257,11 @@ export default function DashboardPage() {
           messages: [{ id: `msg-init-${client.id}`, sender: 'agent' as const, content: `Initial contact with ${client.full_name}.`, timestamp: new Date(Date.now() - (index * 1000 * 3600 * 2)).toISOString() }],
         }));
         setConversations(generatedConversations);
-      } catch (err: any) { setError(err.message || "An unknown error occurred"); } finally { setLoading(false); }
+      } catch (err: any) { 
+        setError(err.message || "An unknown error occurred"); 
+      } finally { 
+        setLoading(false); 
+      }
     };
     fetchData();
   }, [clients.length, setClients, setConversations, setLoading]);
@@ -345,6 +414,9 @@ export default function DashboardPage() {
       <aside className="bg-white/5 border-l border-white/10 p-6 flex flex-col gap-6 overflow-y-auto">
         {selectedConversation ? (
           <>
+            {/* --- ADDED: Display current user information at the top of the sidebar --- */}
+            <CurrentUserCard user={currentUser} />
+            
             <InfoCard title="Client Details">
               <div className="flex flex-col items-center text-center">
                 <Avatar name={selectedConversation.client_name} className="w-16 h-16 text-2xl mb-3" />
@@ -386,7 +458,17 @@ export default function DashboardPage() {
               </ul>
             </InfoCard>
           </>
-        ) : (<div className="flex flex-col items-center justify-center h-full text-center text-brand-text-muted"> <Users className="w-16 h-16 mb-4" /> <p className="text-lg font-medium">No Client Selected</p> <p className="text-sm">Client context will appear here.</p> </div>)}
+        ) : (
+          <>
+            {/* --- ADDED: Show current user even when no conversation is selected --- */}
+            <CurrentUserCard user={currentUser} />
+            <div className="flex flex-col items-center justify-center h-full text-center text-brand-text-muted"> 
+              <Users className="w-16 h-16 mb-4" /> 
+              <p className="text-lg font-medium">No Client Selected</p> 
+              <p className="text-sm">Client context will appear here.</p> 
+            </div>
+          </>
+        )}
       </aside>
     </div>
   );

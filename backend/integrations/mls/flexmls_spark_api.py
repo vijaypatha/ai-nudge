@@ -1,7 +1,7 @@
+# ---
 # FILE PATH: backend/integrations/mls/flexmls_spark_api.py
-# PURPOSE: (FINAL, SIMPLIFIED) Uses a single, proven API call to fetch sorted data.
-
-import os
+# PURPOSE: Connects to Flexmls using the new config pattern.
+# ---
 import requests
 import logging
 from datetime import datetime, timedelta, timezone
@@ -9,27 +9,26 @@ from typing import List, Dict, Any, Optional
 from dateutil import parser 
 
 from .base import MlsApiInterface
+from common.config import get_settings # <-- CHANGED: Import the get_settings function
 
 logger = logging.getLogger(__name__)
 
 class FlexmlsSparkApi(MlsApiInterface):
     """
-    (FINAL) Connects to the Flexmls Spark API.
-    This implementation uses a single, proven API call to fetch a sorted list of
-    recent listings, which already include all necessary data. It then performs
-    final filtering in Python for maximum reliability.
+    Connects to the Flexmls Spark API using the centralized settings.
     """
     def __init__(self):
-        self.access_token = os.getenv("SPARK_API_DEMO_TOKEN")
+        settings = get_settings() # <-- CHANGED: Get settings object
+        self.access_token = settings.SPARK_API_DEMO_TOKEN # <-- CHANGED: Use settings object
         if not self.access_token:
-            raise ValueError("SPARK_API_DEMO_TOKEN must be set in the environment.")
+            raise ValueError("SPARK_API_DEMO_TOKEN must be set.")
         
         self.api_base_url = "https://api.sparkapi.com/v1"
         self.headers = {
             "Authorization": f"Bearer {self.access_token}",
             "Accept-Encoding": "gzip, deflate"
         }
-
+    # ... rest of the file is unchanged ...
     def authenticate(self) -> bool:
         """Verifies that the access token is present."""
         if self.access_token:
@@ -41,7 +40,6 @@ class FlexmlsSparkApi(MlsApiInterface):
     def _get_listings(self) -> Optional[List[Dict[str, Any]]]:
         """
         Makes a single, proven API call to get a sorted list of recent listings.
-        The `StandardFields` are included by default in this request.
         """
         params = {
             "_orderby": "-ModificationTimestamp",
