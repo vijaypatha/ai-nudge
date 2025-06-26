@@ -1,27 +1,21 @@
 # backend/api/rest/users.py
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter
 from sqlmodel import Session, select
 from typing import List
 from data.models.user import User
-from data.database import get_session
+from data.database import engine
 
-# Create the router with /users prefix
+# Create the router
 router = APIRouter(
     prefix="/users",
     tags=["Users"]
-)  # ADD THIS CLOSING PARENTHESIS
+)
 
 @router.get("", response_model=List[User])
-def get_all_users(session: Session = Depends(get_session)):
+@router.get("/", response_model=List[User])
+def get_all_users():
     """Get all users from the database"""
-    statement = select(User)
-    users = session.exec(statement).all()
-    return users
-
-@router.get("/{user_id}", response_model=User)
-def get_user_by_id(user_id: str, session: Session = Depends(get_session)):
-    """Get a specific user by ID"""
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+    with Session(engine) as session:
+        statement = select(User)
+        users = session.exec(statement).all()
+        return users
