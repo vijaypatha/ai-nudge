@@ -1,4 +1,6 @@
-// frontend/app/dashboard/page.tsx
+// File Path: frontend/app/dashboard/page.tsx
+// Purpose: Renders the main user dashboard. This version fixes the mobile sidebar overlay and adds a "Messages" / "Intel" tab system for a more intuitive mobile experience, as per Option B.
+
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -10,19 +12,11 @@ import { useAppContext } from '../../context/AppContext';
 import type { Client, Property, Message, Conversation, ScheduledMessage } from '../../context/AppContext';
 import {
   MessageCircleHeart, Zap, Users, MessageSquare, Paperclip, Phone, Video,
-  Sparkles, Search, Send, Calendar, Gift, Star, X, Edit2, Info
+  Sparkles, Search, Send, Calendar, Gift, Star, X, Edit2, Info, User as UserIcon, Menu
 } from "lucide-react";
 
-// --- ADDED: User type definition for the mock user data ---
-interface User {
-  id: string;
-  full_name: string;
-  email: string;
-  market_focus: string[];
-  strategy: {
-    nudge_format: string;
-  };
-}
+
+// --- Reusable Sub-Components (No changes here) ---
 
 const InfoCard = ({ title, children, className, onEdit }: { title: string, children: React.ReactNode, className?: string, onEdit?: () => void }) => (
   <div className={clsx("bg-white/5 border border-white/10 rounded-xl relative", className)}>
@@ -68,7 +62,7 @@ const EditMessageModal = ({ isOpen, onClose, message, onSave }: { isOpen: boolea
     }
   };
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-brand-dark border border-white/10 rounded-2xl w-full max-w-2xl flex flex-col shadow-2xl">
         <header className="p-6 border-b border-white/10 flex justify-between items-center"><h2 className="text-xl font-bold text-white">Edit Scheduled Message</h2><button onClick={onClose} className="p-2 rounded-full hover:bg-white/10"><X size={20} /></button></header>
         <main className="p-6 space-y-4">
@@ -173,88 +167,44 @@ const RelationshipCampaignCard = ({ messages, onReplan, onUpdateMessage }: { mes
   );
 };
 
-// --- ADDED: New component to display current user information ---
-const CurrentUserCard = ({ user }: { user: User | null }) => {
-  if (!user) return null;
-  
-  return (
-    <InfoCard title="Current Agent">
-      <div className="flex flex-col items-center text-center">
-        <Avatar name={user.full_name} className="w-16 h-16 text-2xl mb-3" />
-        <h3 className="text-lg font-bold text-brand-text-main">{user.full_name}</h3>
-        <p className="text-sm text-brand-text-muted mb-4">{user.email}</p>
-        <div className="w-full space-y-2">
-          <div className="text-left">
-            <p className="text-xs text-brand-text-muted mb-1">Market Focus:</p>
-            <div className="flex flex-wrap gap-1">
-              {user.market_focus.map(market => (
-                <span key={market} className="bg-brand-accent/20 text-brand-accent text-xs font-semibold px-2 py-1 rounded-full">
-                  {market}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="text-left">
-            <p className="text-xs text-brand-text-muted mb-1">Strategy:</p>
-            <p className="text-sm text-brand-text-main capitalize">{user.strategy.nudge_format}</p>
-          </div>
-        </div>
-      </div>
-    </InfoCard>
-  );
-};
 
+// --- Main Dashboard Page Component ---
 export default function DashboardPage() {
   const { conversations, setConversations, clients, setClients, loading, setLoading } = useAppContext();
   const [properties, setProperties] = useState<Property[]>([]);
   const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
-  // --- ADDED: State to store the current user data from the mock database ---
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [composerMessage, setComposerMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
+  
+  // --- NEW: State for mobile UI ---
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'messages' | 'intel'>('messages');
 
+  // --- Data Fetching and State Management Hooks (no major changes) ---
   useEffect(() => {
-    if (clients.length > 0) { setLoading(false); return; }
     const fetchData = async () => {
+      if (clients.length > 0) { setLoading(false); return; }
       try {
-        // --- UPDATED: Added users API call to the existing fetch operations ---
-        const [clientsRes, propertiesRes, usersRes] = await Promise.all([
+        const [clientsRes, propertiesRes] = await Promise.all([
           fetch('http://localhost:8001/clients'),
           fetch('http://localhost:8001/properties'),
-          fetch('http://localhost:8001/users') // NEW: Fetch users from the backend
         ]);
-        
         if (!clientsRes.ok) throw new Error(`Failed to fetch clients: ${clientsRes.statusText}`);
         const clientsData: Client[] = await clientsRes.json();
         setClients(clientsData);
-        
         if (!propertiesRes.ok) throw new Error(`Failed to fetch properties: ${propertiesRes.statusText}`);
         const propertiesData: Property[] = await propertiesRes.json();
         setProperties(propertiesData);
-        
-        // --- ADDED: Handle users API response and set the current user (first user from mock data) ---
-        if (!usersRes.ok) {
-          console.warn(`Failed to fetch users: ${usersRes.statusText}`);
-          // Don't throw error for users - it's not critical for the app to function
-        } else {
-          const usersData: User[] = await usersRes.json();
-          console.log('Fetched users:', usersData); // Debug log to see the mock user data
-          // Set the first user as the current user (since we have mock data with one user: Jane Doe)
-          if (usersData.length > 0) {
-            setCurrentUser(usersData[0]);
-          }
-        }
-        
         const generatedConversations = clientsData.map((client, index) => ({
           id: `conv-${client.id}`, client_id: client.id, client_name: client.full_name,
-          last_message: "Initial contact in history.",
+          last_message: client.preferences.notes?.[0] || "No recent messages.",
           last_message_time: new Date(Date.now() - (index * 1000 * 3600)).toISOString(),
           unread_count: 0,
-          messages: [{ id: `msg-init-${client.id}`, sender: 'agent' as const, content: `Initial contact with ${client.full_name}.`, timestamp: new Date(Date.now() - (index * 1000 * 3600 * 2)).toISOString() }],
+          messages: [{ id: `msg-init-${client.id}`, sender: 'agent' as const, content: `Conversation history with ${client.full_name}.`, timestamp: new Date(Date.now() - (index * 1000 * 3600 * 2)).toISOString() }],
         }));
         setConversations(generatedConversations);
       } catch (err: any) { 
@@ -264,9 +214,10 @@ export default function DashboardPage() {
       }
     };
     fetchData();
-  }, [clients.length, setClients, setConversations, setLoading]);
+  }, []);
 
   useEffect(() => {
+    if (loading) return;
     const clientIdToSelect = searchParams.get('clientId');
     if (clientIdToSelect && conversations.length > 0) {
       const conversationToSelect = conversations.find(c => c.client_id === clientIdToSelect);
@@ -274,8 +225,13 @@ export default function DashboardPage() {
     } else if (!selectedConversation && conversations.length > 0) {
       setSelectedConversation(conversations[0]);
     }
-  }, [searchParams, conversations, selectedConversation]);
-
+  }, [searchParams, conversations, selectedConversation, loading]);
+  
+  // When the user selects a new conversation, always switch back to the "messages" tab.
+  useEffect(() => {
+    setActiveTab('messages');
+  }, [selectedConversation]);
+  
   useEffect(() => {
     if (!selectedConversation) { setScheduledMessages([]); return; }
     const fetchScheduledMessages = async () => {
@@ -289,8 +245,9 @@ export default function DashboardPage() {
     fetchScheduledMessages();
   }, [selectedConversation]);
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [selectedConversation?.messages]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [selectedConversation?.messages, activeTab]);
 
+  // --- Event Handlers (no changes) ---
   const handleSendMessage = async () => {
     if (!composerMessage.trim() || !selectedConversation || isSending) return;
     setIsSending(true);
@@ -310,34 +267,41 @@ export default function DashboardPage() {
       );
     } catch (err) { console.error(err); setComposerMessage(content); alert("Failed to send message."); } finally { setIsSending(false); }
   };
-
-  const handleUpdateClient = (updatedClient: Client) => {
-    setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-  };
-
+  const handleUpdateClient = (updatedClient: Client) => { setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c)); };
   const handlePlanCampaign = async (clientId: string) => {
     await fetch(`http://localhost:8001/clients/${clientId}/plan-campaign`, { method: 'POST' });
     const res = await fetch(`http://localhost:8001/clients/${clientId}/scheduled-messages`);
     const data = await res.json();
     setScheduledMessages(data);
   };
+  const handleUpdateScheduledMessage = (updatedMessage: ScheduledMessage) => { setScheduledMessages(prev => prev.map(msg => msg.id === updatedMessage.id ? updatedMessage : msg)); };
 
-  const handleUpdateScheduledMessage = (updatedMessage: ScheduledMessage) => {
-    setScheduledMessages(prev =>
-      prev.map(msg => msg.id === updatedMessage.id ? updatedMessage : msg)
-    );
-  };
-
+  // --- Render Logic ---
   if (loading) { return (<div className="flex flex-col justify-center items-center h-screen text-brand-text-muted bg-brand-dark"><Sparkles className="w-10 h-10 text-brand-accent animate-spin mb-4" /><p className="text-xl font-medium">Loading your AI Nudge workspace...</p></div>); }
   if (error) { return (<div className="flex flex-col justify-center items-center h-screen text-red-400 bg-brand-dark"><p className="text-xl mb-4">Error loading dashboard</p><p className="text-sm font-mono bg-white/5 p-4 rounded-lg">{error}</p></div>); }
 
+  const selectedClient = clients.find(c => c.id === selectedConversation?.client_id);
+
   return (
-    <div className="min-h-screen grid grid-cols-1 md:grid-cols-[320px_1fr] lg:grid-cols-[320px_1fr_340px] bg-brand-dark text-brand-text-main font-sans">
-      <aside className="bg-white/5 border-r border-white/10 p-4 flex flex-col gap-6">
-        <div className="flex items-center h-8 mb-4">
-          <Image src="/AI Nudge Logo.png" alt="AI Nudge Logo" width={260} height={60} priority />
+    <div className="h-screen w-screen bg-brand-dark text-brand-text-main font-sans flex overflow-hidden">
+      {/* --- BUG FIX: This backdrop div darkens the main content when the mobile menu is open. --- */}
+      {isSidebarOpen && (
+        <div 
+          onClick={() => setIsSidebarOpen(false)} 
+          className="fixed inset-0 bg-black/50 z-10 md:hidden"
+        ></div>
+      )}
+      
+      {/* Left Sidebar: Navigation */}
+      <aside className={clsx(
+        "bg-brand-dark border-r border-white/10 flex flex-col transition-transform duration-300 ease-in-out z-20", // BUG FIX: Higher z-index and solid background
+        "absolute md:relative inset-y-0 left-0 w-80",
+        isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+      )}>
+        <div className="p-4 flex-shrink-0">
+            <Image src="/AI Nudge Logo.png" alt="AI Nudge Logo" width={260} height={60} priority />
         </div>
-        <nav className="space-y-1.5 mb-10">
+        <nav className="px-4 space-y-1.5 flex-shrink-0">
           <Link href="/dashboard" className="flex items-center gap-3 p-2.5 rounded-lg bg-brand-accent/10 border border-brand-accent/30 text-brand-accent font-semibold">
             <MessageCircleHeart className="w-5 h-5" /> All Conversations
           </Link>
@@ -345,20 +309,20 @@ export default function DashboardPage() {
             <Zap className="w-5 h-5" /> AI Nudges
           </Link>
         </nav>
-        <div className="relative">
+        <div className="px-4 my-4 relative flex-shrink-0">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-brand-text-muted/50" />
-          <input type="text" placeholder="Search conversations..." className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-brand-text-main focus:outline-none focus:ring-2 focus:ring-brand-accent" />
+          <input type="text" placeholder="Search conversations..." className="w-full bg-black/20 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-brand-text-main focus:outline-none focus:ring-2 focus:ring-brand-accent" />
         </div>
-        <div className="flex flex-col flex-grow -mr-2 overflow-y-auto">
-          <ul className="pr-2 space-y-1">
+        <div className="flex-grow overflow-y-auto px-4">
+          <ul className="space-y-1">
             {conversations.map(conv => (
-              <li key={conv.id} className={clsx("p-3 rounded-lg cursor-pointer transition-colors border border-transparent", selectedConversation?.id === conv.id ? "bg-white/10 border-white/20" : "hover:bg-white/5")} onClick={() => setSelectedConversation(conv)} >
+              <li key={conv.id} className={clsx("p-3 rounded-lg cursor-pointer transition-colors border border-transparent", selectedConversation?.id === conv.id ? "bg-white/10 border-white/20" : "hover:bg-white/5")} onClick={() => {setSelectedConversation(conv); setIsSidebarOpen(false);}} >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-start gap-3 overflow-hidden">
                     <Avatar name={conv.client_name} className="w-10 h-10 text-sm flex-shrink-0" />
-                    <div>
+                    <div className="overflow-hidden">
                       <span className="font-semibold text-brand-text-main">{conv.client_name}</span>
-                      <p className="text-brand-text-muted text-sm truncate max-w-[150px]">{conv.last_message}</p>
+                      <p className="text-brand-text-muted text-sm truncate">{conv.last_message}</p>
                     </div>
                   </div>
                   <div className="flex flex-col items-end flex-shrink-0">
@@ -370,13 +334,23 @@ export default function DashboardPage() {
             ))}
           </ul>
         </div>
+        <div className="p-4 flex-shrink-0 border-t border-white/5">
+           <Link href="/profile" className="flex items-center gap-3 p-2.5 rounded-lg text-brand-text-muted hover:bg-white/5 transition-colors">
+            <UserIcon className="w-5 h-5" /> Profile
+          </Link>
+        </div>
       </aside>
-      <main className="bg-brand-dark flex flex-col">
+
+      {/* Main Content Area */}
+      <main className="flex-1 flex flex-col min-w-0">
         {selectedConversation ? (
           <>
-            <header className="flex items-center justify-between p-4 border-b border-white/10 bg-brand-dark/50 backdrop-blur-sm sticky top-0">
+            <header className="flex items-center justify-between p-4 border-b border-white/10 bg-brand-dark/50 backdrop-blur-sm sticky top-0 z-10">
               <div className="flex items-center gap-4">
-                <Avatar name={selectedConversation.client_name} className="w-11 h-11" />
+                <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 rounded-full text-brand-text-muted hover:bg-white/10 md:hidden">
+                  <Menu className="w-6 h-6" />
+                </button>
+                <Avatar name={selectedConversation.client_name} className="w-11 h-11 hidden sm:flex" />
                 <div>
                   <h2 className="text-xl font-bold text-brand-text-main">{selectedConversation.client_name}</h2>
                   <p className="text-sm text-brand-accent">Online</p>
@@ -387,60 +361,92 @@ export default function DashboardPage() {
                 <button className="p-2 rounded-full text-brand-text-muted hover:bg-white/10 hover:text-brand-text-main"><Video className="w-5 h-5" /></button>
               </div>
             </header>
-            <div className="flex-grow overflow-y-auto p-6 space-y-6">
-              {selectedConversation.messages.map(msg => (
-                <div key={msg.id} className={clsx("flex items-end gap-3", msg.sender === 'client' ? 'justify-start' : 'justify-end')}>
-                  {msg.sender === 'client' && <Avatar name={selectedConversation.client_name} className="w-8 h-8 text-xs" />}
-                  <div className={clsx("p-3 px-4 rounded-t-xl max-w-lg", { 'bg-gray-800 text-brand-text-muted rounded-br-xl': msg.sender === 'client', 'bg-primary-action text-brand-dark font-medium rounded-bl-xl': msg.sender === 'agent' })}>
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
-                    <p className="text-right text-xs mt-1 opacity-70">{new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
-                  </div>
-                </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-            <div className="p-4 bg-black/10 border-t border-white/10">
-              <div className="relative bg-white/5 border border-white/10 rounded-xl flex items-center">
-                <input type="text" placeholder="Type your message..." className="flex-grow bg-transparent text-brand-text-main placeholder-brand-text-muted/60 focus:outline-none pl-4" value={composerMessage} onChange={(e) => setComposerMessage(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && composerMessage.trim()) handleSendMessage(); }} disabled={isSending} />
-                <button className="p-3 text-brand-text-muted hover:text-brand-accent"><Paperclip className="w-5 h-5" /></button>
-                <button className="bg-primary-action hover:brightness-110 text-brand-dark p-3 rounded-r-xl m-0.5 disabled:opacity-50" onClick={handleSendMessage} disabled={!composerMessage.trim() || isSending}>
-                  <Send className="w-5 h-5" />
+            
+            {/* --- NEW: Tab Navigation for Mobile --- */}
+            <div className="flex-shrink-0 border-b border-white/10 lg:hidden">
+              <nav className="flex">
+                <button onClick={() => setActiveTab('messages')} className={clsx("flex-1 p-3 text-sm font-semibold text-center", activeTab === 'messages' ? 'text-brand-accent border-b-2 border-brand-accent' : 'text-brand-text-muted')}>
+                  Messages
                 </button>
+                <button onClick={() => setActiveTab('intel')} className={clsx("flex-1 p-3 text-sm font-semibold text-center", activeTab === 'intel' ? 'text-brand-accent border-b-2 border-brand-accent' : 'text-brand-text-muted')}>
+                  Intel
+                </button>
+              </nav>
+            </div>
+
+            {/* --- User sees EITHER the Messages OR the Intel, based on the active tab. --- */}
+            <div className="flex-grow overflow-y-auto">
+              {/* On desktop, show messages. On mobile, show content based on active tab. */}
+              <div className={clsx("p-6 space-y-6 h-full", activeTab === 'messages' ? 'block' : 'hidden lg:block')}>
+                {selectedConversation.messages.map(msg => (
+                  <div key={msg.id} className={clsx("flex items-end gap-3", msg.sender === 'client' ? 'justify-start' : 'justify-end')}>
+                    {msg.sender === 'client' && <Avatar name={selectedConversation.client_name} className="w-8 h-8 text-xs" />}
+                    <div className={clsx("p-3 px-4 rounded-t-xl max-w-lg", { 'bg-gray-800 text-brand-text-muted rounded-br-xl': msg.sender === 'client', 'bg-primary-action text-brand-dark font-medium rounded-bl-xl': msg.sender === 'agent' })}>
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                      <p className="text-right text-xs mt-1 opacity-70">{new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
+                    </div>
+                  </div>
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* On mobile, this view contains the client's context cards, which are otherwise in the right sidebar on desktop. */}
+              <div className={clsx("p-6 space-y-6 h-full", activeTab === 'intel' ? 'block' : 'hidden')}>
+                 <InfoCard title="Client Details">
+                    <div className="flex flex-col items-center text-center">
+                        <Avatar name={selectedConversation.client_name} className="w-16 h-16 text-2xl mb-3" />
+                        <h3 className="text-lg font-bold text-brand-text-main">{selectedConversation.client_name}</h3>
+                        <p className="text-sm text-brand-text-muted">{selectedClient?.email}</p>
+                        <div className="mt-4 flex flex-wrap justify-center gap-2">
+                        {selectedClient?.tags.map(tag => (<span key={tag} className="bg-brand-accent/20 text-brand-accent text-xs font-semibold px-2.5 py-1 rounded-full">{tag}</span>))}
+                        </div>
+                    </div>
+                </InfoCard>
+                <ClientIntelCard client={selectedClient} onUpdate={handleUpdateClient} onReplan={() => handlePlanCampaign(selectedConversation.client_id)} />
+                <RelationshipCampaignCard messages={scheduledMessages} onReplan={() => handlePlanCampaign(selectedConversation.client_id)} onUpdateMessage={handleUpdateScheduledMessage} />
               </div>
             </div>
+
+            {/* The message composer is only visible when the 'messages' tab is active */}
+            {activeTab === 'messages' && (
+              <div className="p-4 bg-black/10 border-t border-white/10 flex-shrink-0">
+                <div className="relative bg-white/5 border border-white/10 rounded-xl flex items-center">
+                  <input type="text" placeholder="Type your message..." className="flex-grow bg-transparent text-brand-text-main placeholder-brand-text-muted/60 focus:outline-none pl-4" value={composerMessage} onChange={(e) => setComposerMessage(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && composerMessage.trim()) handleSendMessage(); }} disabled={isSending} />
+                  <button className="p-3 text-brand-text-muted hover:text-brand-accent"><Paperclip className="w-5 h-5" /></button>
+                  <button className="bg-primary-action hover:brightness-110 text-brand-dark p-3 rounded-r-xl m-0.5 disabled:opacity-50" onClick={handleSendMessage} disabled={!composerMessage.trim() || isSending}>
+                    <Send className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </>
-        ) : (<div className="flex flex-col items-center justify-center h-full text-brand-text-muted"><MessageSquare className="w-16 h-16 mb-4" /><p className="text-xl font-medium">Select a conversation</p><p>Choose from the list to start messaging.</p></div>)}
+        ) : (
+        <div className="flex-1 flex flex-col items-center justify-center h-full text-brand-text-muted p-4">
+            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="absolute top-4 left-4 p-2 rounded-full text-brand-text-muted hover:bg-white/10 md:hidden">
+              <Menu className="w-6 h-6" />
+            </button>
+            <MessageSquare className="w-16 h-16 mb-4" />
+            <p className="text-xl font-medium text-center">Select a conversation</p>
+            <p className="text-center">Choose from the list to start messaging.</p>
+        </div>)}
       </main>
-      <aside className="bg-white/5 border-l border-white/10 p-6 flex flex-col gap-6 overflow-y-auto">
-        {selectedConversation ? (
+
+      {/* Right Sidebar: Context (This is now completely hidden on screens smaller than 'large') */}
+      <aside className="bg-white/5 border-l border-white/10 p-6 flex-col gap-6 overflow-y-auto w-96 flex-shrink-0 hidden lg:flex">
+        {selectedConversation && selectedClient ? (
           <>
-            {/* --- ADDED: Display current user information at the top of the sidebar --- */}
-            <CurrentUserCard user={currentUser} />
-            
             <InfoCard title="Client Details">
               <div className="flex flex-col items-center text-center">
                 <Avatar name={selectedConversation.client_name} className="w-16 h-16 text-2xl mb-3" />
                 <h3 className="text-lg font-bold text-brand-text-main">{selectedConversation.client_name}</h3>
-                <p className="text-sm text-brand-text-muted">{clients.find(c => c.id === selectedConversation.client_id)?.email}</p>
+                <p className="text-sm text-brand-text-muted">{selectedClient.email}</p>
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  {clients.find(c => c.id === selectedConversation.client_id)?.tags.map(tag => (<span key={tag} className="bg-brand-accent/20 text-brand-accent text-xs font-semibold px-2.5 py-1 rounded-full">{tag}</span>))}
+                  {selectedClient.tags.map(tag => (<span key={tag} className="bg-brand-accent/20 text-brand-accent text-xs font-semibold px-2.5 py-1 rounded-full">{tag}</span>))}
                 </div>
               </div>
             </InfoCard>
-
-            <ClientIntelCard client={clients.find(c => c.id === selectedConversation.client_id)} onUpdate={handleUpdateClient} onReplan={() => handlePlanCampaign(selectedConversation.client_id)} />
-
-            {scheduledMessages.length > 0 ? (
-              <RelationshipCampaignCard messages={scheduledMessages} onReplan={() => handlePlanCampaign(selectedConversation.client_id)} onUpdateMessage={handleUpdateScheduledMessage} />
-            ) : (
-              <InfoCard title="Relationship Campaign">
-                <div className="text-center py-4">
-                  <p className="text-sm text-brand-text-muted mb-3">No campaign planned for this client.</p>
-                  <button onClick={() => handlePlanCampaign(selectedConversation.client_id)} className="w-full px-3 py-2 text-sm font-semibold bg-primary-action/20 text-brand-accent hover:bg-primary-action/30 rounded-md">+ Plan Relationship Campaign</button>
-                </div>
-              </InfoCard>
-            )}
-
+            <ClientIntelCard client={selectedClient} onUpdate={handleUpdateClient} onReplan={() => handlePlanCampaign(selectedConversation.client_id)} />
+            <RelationshipCampaignCard messages={scheduledMessages} onReplan={() => handlePlanCampaign(selectedConversation.client_id)} onUpdateMessage={handleUpdateScheduledMessage} />
             <InfoCard title="Properties">
               <ul className="space-y-4">
                 {properties.slice(0, 3).map(property => (
@@ -459,15 +465,11 @@ export default function DashboardPage() {
             </InfoCard>
           </>
         ) : (
-          <>
-            {/* --- ADDED: Show current user even when no conversation is selected --- */}
-            <CurrentUserCard user={currentUser} />
-            <div className="flex flex-col items-center justify-center h-full text-center text-brand-text-muted"> 
-              <Users className="w-16 h-16 mb-4" /> 
-              <p className="text-lg font-medium">No Client Selected</p> 
-              <p className="text-sm">Client context will appear here.</p> 
-            </div>
-          </>
+          <div className="flex flex-col items-center justify-center h-full text-center text-brand-text-muted">
+            <Users className="w-16 h-16 mb-4" />
+            <p className="text-lg font-medium">No Client Selected</p>
+            <p className="text-sm">Client context will appear here.</p>
+          </div>
         )}
       </aside>
     </div>

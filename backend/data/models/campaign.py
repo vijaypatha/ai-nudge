@@ -32,3 +32,11 @@ class CampaignBriefing(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
     user: Optional["User"] = Relationship(back_populates="campaigns")
+
+class CampaignUpdate(SQLModel):
+    """
+    Defines the schema for updating a campaign. Uses SQLModel for consistency
+    with the rest of our data models.
+    """
+    edited_draft: Optional[str] = None
+    status: Optional[str] = None

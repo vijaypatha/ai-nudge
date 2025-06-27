@@ -4,10 +4,13 @@
 # ---
 
 from fastapi import APIRouter, HTTPException, status
+from typing import Optional
 from uuid import UUID
 
 from data.models.message import SendMessageImmediate
-from agent_core import orchestrator # Import the orchestrator
+from data.models.campaign import CampaignBriefing, CampaignUpdate # This is the key import
+from agent_core import orchestrator
+from data import crm as crm_service
 
 router = APIRouter(
     prefix="/campaigns",
@@ -32,5 +35,25 @@ async def send_message_now(message_data: SendMessageImmediate):
         # The orchestrator handles logging details; the API returns a generic error.
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to send message.")
 
-# Note: Other campaign-related endpoints like 'schedule' would also be refactored
-# to call new functions in the orchestrator, but we are only fixing the failing one for now.
+
+
+@router.put("/{campaign_id}", response_model=CampaignBriefing)
+async def update_campaign_briefing(campaign_id: UUID, update_data: CampaignUpdate):
+    """
+    (API Endpoint) Updates a specific campaign briefing. This is used to save an
+    edited draft or change its status (e.g., to 'approved' or 'dismissed').
+    """
+    briefing_to_update = crm_service.get_campaign_briefing_by_id(campaign_id)
+    
+    if not briefing_to_update:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign briefing not found.")
+
+    if update_data.edited_draft is not None:
+        briefing_to_update.edited_draft = update_data.edited_draft
+        print(f"CAMPAIGN API: Updated draft for campaign {campaign_id}")
+
+    if update_data.status is not None:
+        briefing_to_update.status = update_data.status
+        print(f"CAMPAIGN API: Updated status to '{update_data.status}' for campaign {campaign_id}")
+    
+    return briefing_to_update

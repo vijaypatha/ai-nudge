@@ -1,7 +1,5 @@
-# ---
 # File Path: backend/data/crm.py
-# Purpose: Centralized in-memory mock database service.
-# ---
+# Purpose: Acts as a centralized in-memory mock database service. This version includes a specific function to clear only demo data, leaving real user data untouched.
 
 from typing import Optional, List, Dict, Tuple, Any
 import uuid
@@ -24,7 +22,9 @@ mock_scheduled_messages_db: List[ScheduledMessage] = []
 # --- Data Management Functions ---
 
 def clear_all_data():
-    """Clears all mock data, called by the seed script on startup."""
+    """
+    (Helper Function) Clears all mock data lists. Called by the seeder on startup to ensure a clean slate.
+    """
     mock_users_db.clear()
     mock_clients_db.clear()
     mock_properties_db.clear()
@@ -32,27 +32,60 @@ def clear_all_data():
     mock_campaigns_db.clear()
     mock_scheduled_messages_db.clear()
 
-# ... (User, Client, Property, and Linking functions remain the same) ...
+def clear_demo_data_if_present():
+    """
+    (Core Cleanup Logic) Finds clients marked as demo data, records their IDs, and then removes them and their associated scheduled messages. This is the trigger for the "first-action-clears-data" strategy.
+    """
+    # Find all clients with the demo flag
+    demo_client_ids = [
+        client.id for client in mock_clients_db
+        if client.preferences.get("source") == "demo"
+    ]
+
+    # If no demo clients are found, exit immediately
+    if not demo_client_ids:
+        return
+
+    print(f"CRM_CLEANUP: Found {len(demo_client_ids)} demo clients to remove.")
+
+    # Filter out demo clients from the main list
+    globals()['mock_clients_db'] = [
+        client for client in mock_clients_db if client.id not in demo_client_ids
+    ]
+
+    # Filter out scheduled messages linked to those demo clients
+    globals()['mock_scheduled_messages_db'] = [
+        msg for msg in mock_scheduled_messages_db if msg.client_id not in demo_client_ids
+    ]
+    print("CRM_CLEANUP: Demo data cleared successfully.")
+
+
 def save_user(user: User):
+    """Saves a user to the mock database."""
     mock_users_db.append(user)
+
 def get_user_by_id(user_id: uuid.UUID) -> Optional[User]:
+    """Retrieves a user by their ID."""
     for user in mock_users_db:
         if user.id == user_id: return user
     return None
 
-## Client Functions 
 def save_client(client: Client):
+    """Saves a client to the mock database."""
     mock_clients_db.append(client)
 
 def get_client_by_id_mock(client_id: uuid.UUID) -> Optional[Client]:
+    """Retrieves a client by their ID."""
     for client in mock_clients_db:
         if client.id == client_id: return client
     return None
 
 def get_all_clients_mock() -> List[Client]:
+    """Retrieves all clients."""
     return mock_clients_db
 
 def add_client_mock(client: Client):
+    """Adds a client to the mock database."""
     save_client(client)
 
 def update_client_preferences(client_id: uuid.UUID, preferences: Dict[str, Any]) -> Optional[Client]:
@@ -64,34 +97,6 @@ def update_client_preferences(client_id: uuid.UUID, preferences: Dict[str, Any])
         return client
     return None
 
-## Properity Functions
-def save_property(property_item: Property):
-    mock_properties_db.append(property_item)
-def get_property_by_id(property_id: uuid.UUID) -> Optional[Property]:
-    for prop in mock_properties_db:
-        if prop.id == property_id:
-            return prop
-    return None
-def get_all_properties_mock() -> List[Property]:
-    return mock_properties_db
-def link_client_to_property(client_id: uuid.UUID, property_id: uuid.UUID):
-    link = (client_id, property_id)
-    if link not in mock_client_property_links:
-        mock_client_property_links.append(link)
-def get_clients_linked_to_property(property_id: uuid.UUID) -> List[uuid.UUID]:
-    return [client_id for client_id, prop_id in mock_client_property_links if prop_id == property_id]
-
-# --- Campaign Briefing Functions ---
-def save_campaign_briefing(briefing: CampaignBriefing):
-    """Saves a newly generated campaign briefing to the mock database."""
-    mock_campaigns_db.append(briefing)
-    print(f"NUDGE ENGINE: Saved new Campaign Briefing -> {briefing.headline}")
-
-def get_new_campaign_briefings_for_user(user_id: uuid.UUID) -> List[CampaignBriefing]:
-    """Retrieves all 'new' campaign briefings for a specific user."""
-    return [briefing for briefing in mock_campaigns_db if briefing.user_id == user_id and briefing.status == "new"]
-
-# --- Property Functions ---
 def save_property(property_item: Property):
     """Saves a property record to the mock database."""
     mock_properties_db.append(property_item)
@@ -106,8 +111,33 @@ def get_property_by_id(property_id: uuid.UUID) -> Optional[Property]:
 def get_all_properties_mock() -> List[Property]:
     """Retrieves all properties."""
     return mock_properties_db
+
+def link_client_to_property(client_id: uuid.UUID, property_id: uuid.UUID):
+    """Links a client and property."""
+    link = (client_id, property_id)
+    if link not in mock_client_property_links:
+        mock_client_property_links.append(link)
+
+def get_clients_linked_to_property(property_id: uuid.UUID) -> List[uuid.UUID]:
+    """Retrieves clients linked to a property."""
+    return [client_id for client_id, prop_id in mock_client_property_links if prop_id == property_id]
+
+def save_campaign_briefing(briefing: CampaignBriefing):
+    """Saves a newly generated campaign briefing to the mock database."""
+    mock_campaigns_db.append(briefing)
+    print(f"NUDGE ENGINE: Saved new Campaign Briefing -> {briefing.headline}")
+
+def get_new_campaign_briefings_for_user(user_id: uuid.UUID) -> List[CampaignBriefing]:
+    """Retrieves all 'new' campaign briefings for a specific user."""
+    return [briefing for briefing in mock_campaigns_db if briefing.user_id == user_id and briefing.status == "new"]
+
+def get_campaign_briefing_by_id(campaign_id: uuid.UUID) -> Optional[CampaignBriefing]:
+    """Retrieves a single campaign briefing by its unique ID."""
+    for briefing in mock_campaigns_db:
+        if briefing.id == campaign_id:
+            return briefing
+    return None
     
-# NEW: A dedicated function to handle updating a property's price.
 def update_property_price(property_id: uuid.UUID, new_price: float) -> Optional[Property]:
     """Finds a property, updates its price, and returns the updated object."""
     prop = get_property_by_id(property_id)
@@ -116,7 +146,6 @@ def update_property_price(property_id: uuid.UUID, new_price: float) -> Optional[
         return prop
     return None
 
-# --- Scheduled Message & Campaign Functions ---
 def save_scheduled_message(message: ScheduledMessage):
     """Saves a new scheduled message to the mock database."""
     mock_scheduled_messages_db.append(message)
