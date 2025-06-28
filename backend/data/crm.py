@@ -128,8 +128,14 @@ def save_campaign_briefing(briefing: CampaignBriefing):
     print(f"NUDGE ENGINE: Saved new Campaign Briefing -> {briefing.headline}")
 
 def get_new_campaign_briefings_for_user(user_id: uuid.UUID) -> List[CampaignBriefing]:
-    """Retrieves all 'new' campaign briefings for a specific user."""
-    return [briefing for briefing in mock_campaigns_db if briefing.user_id == user_id and briefing.status == "new"]
+    """
+    Retrieves all actionable campaign briefings for a user.
+    UPDATED: Now includes both 'new' (high-confidence) and 'insight' (low-confidence) briefings.
+    """
+    return [
+        briefing for briefing in mock_campaigns_db 
+        if briefing.user_id == user_id and briefing.status in ["new", "insight"]
+    ]
 
 def get_campaign_briefing_by_id(campaign_id: uuid.UUID) -> Optional[CampaignBriefing]:
     """Retrieves a single campaign briefing by its unique ID."""
