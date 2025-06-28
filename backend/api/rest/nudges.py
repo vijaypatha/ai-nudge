@@ -1,32 +1,37 @@
 # File Path: backend/api/rest/nudges.py
-# Purpose: Defines the API endpoint for fetching ALL actionable campaign briefings (both 'new' and 'insight'). The frontend will handle the grouping logic.
+# CORRECTED VERSION: Remove references to mock_users_db
 
 from fastapi import APIRouter, HTTPException
 from typing import List
-from uuid import UUID
-
-from data.models.campaign import CampaignBriefing
 from data import crm as crm_service
+from data.models.campaign import CampaignBriefing
 
-router = APIRouter(
-    prefix="/nudges",
-    tags=["Nudges"]
-)
+router = APIRouter()
 
-@router.get("/", response_model=List[CampaignBriefing])
+@router.get("/", response_model=List[dict])
 async def get_all_actionable_nudges():
     """
-    Retrieves all actionable briefings for the current user.
-    This includes high-confidence 'new' nudges and low-confidence 'insights'.
+    Get all actionable nudges for the current user.
+    CORRECTED: Removed check for mock_users_db since we now use persistent database.
     """
-    if not crm_service.mock_users_db:
-        raise HTTPException(status_code=404, detail="No users found in the system.")
-    
-    current_user_id = crm_service.mock_users_db[0].id
-    
-    # Get all actionable briefings from the CRM service
-    actionable_briefings = crm_service.get_new_campaign_briefings_for_user(user_id=current_user_id)
-    
-    print(f"API: Found {len(actionable_briefings)} total actionable briefings.")
-    
-    return actionable_briefings
+    try:
+        # Get all campaigns from the database
+        campaigns = crm_service.get_all_campaigns()
+        
+        # Convert to nudge format for the frontend
+        nudges = []
+        for campaign in campaigns:
+            if campaign.status == "new":  # Only show actionable nudges
+                nudges.append({
+                    "id": str(campaign.id),
+                    "type": campaign.campaign_type,
+                    "headline": campaign.headline,
+                    "key_intel": campaign.key_intel,
+                    "matched_audience": campaign.matched_audience,
+                    "status": campaign.status
+                })
+        
+        return nudges
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch nudges: {str(e)}")

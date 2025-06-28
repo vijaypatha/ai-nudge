@@ -1,136 +1,76 @@
 # File Path: backend/api/rest/clients.py
-# Purpose: Defines API endpoints for managing clients. This version implements the "first-action-clears-data" logic by calling the CRM cleanup service before creating new clients.
+# Purpose: Defines API endpoints for managing clients.
+# This version is UPDATED to call the new database-aware crm service functions.
 
-from fastapi import APIRouter, HTTPException, status, File, UploadFile, BackgroundTasks
-from typing import List, Dict, Any
+from fastapi import APIRouter, HTTPException, status
+from typing import List, Optional
 from uuid import UUID
-import csv
-import io
+from pydantic import BaseModel
 
-from data.models.client import Client, ClientCreate, ClientUpdate
+from data.models.client import Client, ClientCreate, ClientUpdate, ClientTagUpdate
 from data.models.message import ScheduledMessage
 from data import crm as crm_service
-from agent_core.brain import relationship_planner
+from agent_core import audience_builder
 
+router = APIRouter(prefix="/clients", tags=["Clients"])
 
-router = APIRouter(
-    prefix="/clients",
-    tags=["Clients"]
-)
+class ClientSearchQuery(BaseModel):
+    natural_language_query: Optional[str] = None
+    tags: Optional[List[str]] = None
 
-async def _process_csv_data(csv_data: str):
-    """
-    (Helper Function) Parses CSV data and creates clients in the background. It now triggers the demo data cleanup.
-    """
-    # Clear any existing demo data before importing the user's real data.
-    crm_service.clear_demo_data_if_present()
+@router.post("/search", response_model=List[Client])
+async def search_clients(query: ClientSearchQuery):
+    all_clients = crm_service.get_all_clients()
+    audience_builder.build_or_rebuild_client_index(all_clients)
+    
+    matched_ids = set()
+    filter_applied = False
 
-    realtor = crm_service.mock_users_db[0]
-    csv_file = io.StringIO(csv_data)
-    reader = csv.DictReader(csv_file)
+    if query.natural_language_query:
+        nl_ids = audience_builder.find_clients_by_semantic_query(query.natural_language_query)
+        matched_ids.update(nl_ids)
+        filter_applied = True
 
-    for row in reader:
-        # Assumes CSV has columns 'full_name', 'email', 'phone', 'tags', 'intel'
-        client_intel = row.get("intel", "")
-        # Simple parsing for unstructured intel: split by semicolon
-        notes = [note.strip() for note in client_intel.split(';') if note.strip()]
+    if query.tags:
+        query_tags_lower = {t.lower() for t in query.tags}
+        tag_ids = {c.id for c in all_clients if c.tags and any(ct.lower() in query_tags_lower for ct in c.tags)}
+        if filter_applied:
+            matched_ids.intersection_update(tag_ids)
+        else:
+            matched_ids.update(tag_ids)
+        filter_applied = True
+    
+    if not filter_applied:
+        return all_clients
 
-        new_client_data = ClientCreate(
-            full_name=row.get("full_name", ""),
-            email=row.get("email", ""),
-            phone=row.get("phone"),
-            tags=[tag.strip() for tag in row.get("tags", "").split(',')],
-            preferences={"notes": notes}
-        )
-        # Create the full Client model before saving
-        client_to_save = Client(**new_client_data.model_dump())
-        crm_service.save_client(client_to_save)
-        print(f"CSV_IMPORT: Saved client -> {client_to_save.full_name}")
-        
-        await relationship_planner.plan_relationship_campaign(client_to_save, realtor)
+    return [client for client in all_clients if client.id in matched_ids]
 
-
-@router.post("/import-csv", status_code=status.HTTP_202_ACCEPTED)
-async def import_clients_from_csv(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
-    """
-    (API Endpoint) Accepts a CSV file and processes it in the background. This is a primary trigger for clearing demo data.
-    """
-    if file.content_type != 'text/csv':
-        raise HTTPException(status_code=400, detail="Invalid file type. Please upload a CSV.")
-
-    csv_content = await file.read()
-
-    # Run the CSV processing in the background to avoid long request times
-    background_tasks.add_task(_process_csv_data, csv_content.decode('utf-8'))
-
-    return {"message": "Client import process started. Clients will be available shortly."}
-
-
-@router.post("", response_model=Client, status_code=status.HTTP_201_CREATED)
-async def create_client(client_data: ClientCreate):
-    """
-    (API Endpoint) Creates a single new client. This is a primary trigger for clearing demo data.
-    """
-    # Clear any existing demo data before creating the user's first real client.
-    crm_service.clear_demo_data_if_present()
-
-    new_client = Client(**client_data.model_dump())
-    crm_service.save_client(new_client)
-
-    # Trigger the relationship planner for the new client.
-    if crm_service.mock_users_db:
-        realtor = crm_service.mock_users_db[0]
-        await relationship_planner.plan_relationship_campaign(new_client, realtor)
-
-    return new_client
+@router.put("/{client_id}/tags", response_model=Client)
+async def update_client_tags_endpoint(client_id: UUID, tag_data: ClientTagUpdate):
+    updated_client = crm_service.update_client_tags(client_id, tag_data.tags)
+    if not updated_client:
+        raise HTTPException(status_code=404, detail="Client not found.")
+    return updated_client
 
 @router.get("", response_model=List[Client])
-async def get_all_clients():
-    """(API Endpoint) Retrieves a list of all clients."""
-    return crm_service.get_all_clients_mock()
+async def get_all_clients_endpoint():
+    return crm_service.get_all_clients()
 
 @router.get("/{client_id}", response_model=Client)
-async def get_client_by_id(client_id: UUID):
-    """(API Endpoint) Retrieves a single client by their unique ID."""
-    client = crm_service.get_client_by_id_mock(client_id)
+async def get_client_by_id_endpoint(client_id: UUID):
+    client = crm_service.get_client_by_id(client_id)
     if client:
         return client
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
 
 @router.get("/{client_id}/scheduled-messages", response_model=List[ScheduledMessage])
 async def get_client_scheduled_messages(client_id: UUID):
-    """
-    (API Endpoint) Retrieves all future scheduled messages for a specific client.
-    """
-    client = crm_service.get_client_by_id_mock(client_id)
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-
     messages = crm_service.get_scheduled_messages_for_client(client_id)
     return messages
 
 @router.put("/{client_id}", response_model=Client)
 async def update_client_details(client_id: UUID, client_data: ClientUpdate):
-    """(API Endpoint) Updates a client's preferences (intel)."""
-    updated_client = crm_service.update_client_preferences(
-        client_id=client_id,
-        preferences=client_data.preferences
-    )
+    updated_client = crm_service.update_client_preferences(client_id=client_id, preferences=client_data.preferences)
     if not updated_client:
         raise HTTPException(status_code=404, detail="Client not found.")
     return updated_client
-
-@router.post("/{client_id}/plan-campaign", status_code=status.HTTP_202_ACCEPTED)
-async def plan_client_campaign(client_id: UUID):
-    """
-    (API Endpoint) Triggers the Relationship Planner for a specific client.
-    """
-    client = crm_service.get_client_by_id_mock(client_id)
-    realtor = crm_service.mock_users_db[0] if crm_service.mock_users_db else None
-
-    if not client or not realtor:
-        raise HTTPException(status_code=404, detail="Client or Realtor not found.")
-
-    crm_service.delete_scheduled_messages_for_client(client_id)
-    await relationship_planner.plan_relationship_campaign(client, realtor)
-    return {"message": f"New relationship campaign has been planned for {client.full_name}."}

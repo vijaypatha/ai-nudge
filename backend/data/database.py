@@ -1,30 +1,44 @@
 # ---
 # File Path: backend/data/database.py
-# Purpose: Manages database connection and creates tables based on SQLModels.
+# Purpose: Manages database connection and session creation.
+# This version is UPDATED to delete the old database on startup for a clean test environment.
 # ---
+import os
 from sqlmodel import create_engine, SQLModel, Session
 from common.config import get_settings
 
-# CORRECTED: Explicitly import all Table models to ensure they are registered.
-# This avoids the circular dependency issue from the previous __init__.py.
-from data.models.user import User
-from data.models.client import Client
-from data.models.property import Property
-from data.models.message import ScheduledMessage
-from data.models.campaign import CampaignBriefing
-from data.models.event import MarketEvent
-
+# Correctly import all table models to ensure they are registered with SQLModel metadata.
+from .models.user import User
+from .models.client import Client
+from .models.property import Property
+from .models.message import ScheduledMessage
+from .models.campaign import CampaignBriefing
+from .models.event import MarketEvent
 
 settings = get_settings()
 DATABASE_URL = settings.DATABASE_URL
+# Define the path for the SQLite database file.
+DB_FILE_PATH = "ai_nudge.db"
 
-engine = create_engine(DATABASE_URL, echo=True)
+# Create the SQLAlchemy engine.
+engine = create_engine(DATABASE_URL, echo=False) # Set echo=False to clean up logs
 
 def create_db_and_tables():
-    print("DATABASE: Initializing database and creating tables...")
+    """
+    Initializes the database. It first deletes the old DB file to ensure a clean state,
+    then creates all new tables based on the registered SQLModels.
+    """
+    print("DATABASE: Initializing database...")
+    # Delete the database file if it exists to ensure a fresh start
+    if os.path.exists(DB_FILE_PATH):
+        os.remove(DB_FILE_PATH)
+        print(f"DATABASE: Removed old database file '{DB_FILE_PATH}'.")
+
+    # Create all tables
     SQLModel.metadata.create_all(engine)
     print("DATABASE: Tables created successfully.")
 
 def get_session():
+    """Dependency provider for getting a database session."""
     with Session(engine) as session:
         yield session

@@ -1,5 +1,5 @@
-
-# client - Stores client information with email/phone indexes
+# File Path: backend/data/models/client.py
+# Purpose: Stores client information. This version adds a dedicated model for updating tags.
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
 from sqlmodel import SQLModel, Field, Relationship, Column, JSON
@@ -27,3 +27,9 @@ class ClientCreate(SQLModel):
 
 class ClientUpdate(SQLModel):
     preferences: Dict[str, Any]
+
+class ClientTagUpdate(SQLModel):
+    """
+    (New Data Model) Defines the schema for updating only the tags for a client.
+    """
+    tags: List[str]
