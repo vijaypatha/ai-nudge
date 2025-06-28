@@ -9,7 +9,7 @@ from fastapi.routing import APIRoute
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from api.rest import clients, properties, inbox, nudges, admin_triggers, scheduled_messages, users
+from api.rest import clients, properties, inbox, nudges, admin_triggers, scheduled_messages, users, campaigns
 # Import the functions to create and seed the database
 from data.database import create_db_and_tables
 from data.seed import seed_database
@@ -47,6 +47,7 @@ app.add_middleware(
 
 # Include all the API routers
 app.include_router(clients.router)
+app.include_router(campaigns.router)
 app.include_router(properties.router)
 app.include_router(inbox.router)
 app.include_router(nudges.router)

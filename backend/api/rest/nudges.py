@@ -1,18 +1,18 @@
 # File Path: backend/api/rest/nudges.py
-# CORRECTED VERSION: Remove references to mock_users_db
+# CORRECTED VERSION: Added missing prefix
 
 from fastapi import APIRouter, HTTPException
 from typing import List
 from data import crm as crm_service
 from data.models.campaign import CampaignBriefing
 
-router = APIRouter()
+# FIXED: Add prefix to router definition
+router = APIRouter(prefix="/nudges")
 
 @router.get("/", response_model=List[dict])
 async def get_all_actionable_nudges():
     """
     Get all actionable nudges for the current user.
-    CORRECTED: Removed check for mock_users_db since we now use persistent database.
     """
     try:
         # Get all campaigns from the database

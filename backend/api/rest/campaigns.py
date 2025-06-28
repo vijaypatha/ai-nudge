@@ -1,6 +1,5 @@
 # File Path: backend/api/rest/campaigns.py
-# Purpose: Defines API endpoints for outbound communications.
-# CORRECTED VERSION: Fixed syntax errors and improved formatting
+# CORRECTED VERSION: Added missing prefix
 
 from fastapi import APIRouter, HTTPException, status
 from typing import Optional
@@ -10,20 +9,16 @@ from data.models.campaign import CampaignBriefing, CampaignUpdate
 from agent_core import orchestrator
 from data import crm as crm_service
 
-router = APIRouter(
-    prefix="/campaigns",
-    tags=["Campaigns"]
-)
+# FIXED: Add prefix to router definition
+router = APIRouter(prefix="/campaigns")
 
 @router.post("/messages/send-now", status_code=status.HTTP_200_OK)
 async def send_message_now(message_data: SendMessageImmediate):
-    """
-    Sends a message immediately by calling the central orchestrator.
-    """
+    """Sends a message immediately by calling the central orchestrator."""
     success = await orchestrator.orchestrate_send_message_now(
         client_id=message_data.client_id,
         content=message_data.content
-    )  # FIXED: Added missing closing parenthesis
+    )
     
     if success:
         return {"message": "Message sent successfully!", "client_id": message_data.client_id}
@@ -33,10 +28,24 @@ async def send_message_now(message_data: SendMessageImmediate):
 @router.put("/{campaign_id}", response_model=CampaignBriefing)
 async def update_campaign_briefing(campaign_id: UUID, update_data: CampaignUpdate):
     """Update a campaign briefing by ID."""
-    updated_briefing = crm_service.update_campaign_briefing(campaign_id, update_data)
-    if not updated_briefing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign briefing not found.")
-    return updated_briefing
+    print(f"CAMPAIGNS: Received update request for campaign {campaign_id}")
+    print(f"CAMPAIGNS: Update data: {update_data}")
+    
+    try:
+        updated_briefing = crm_service.update_campaign_briefing(campaign_id, update_data)
+        if not updated_briefing:
+            print(f"CAMPAIGNS: Campaign {campaign_id} not found")
+            raise HTTPException(status_code=404, detail="Campaign briefing not found.")
+        
+        print(f"CAMPAIGNS: Successfully updated campaign {campaign_id}")
+        return updated_briefing
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"CAMPAIGNS: Error updating campaign {campaign_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update campaign: {str(e)}")
+
 
 @router.get("/", response_model=list[CampaignBriefing])
 async def get_all_campaigns():

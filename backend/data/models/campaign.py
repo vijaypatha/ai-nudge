@@ -41,10 +41,10 @@ class CampaignBriefing(SQLModel, table=True):
     user: Optional["User"] = Relationship(back_populates="campaigns")
 
 class CampaignUpdate(SQLModel):
-    """
-    (API Data Model) Defines the schema for updating a campaign.
-    """
-    edited_draft: Optional[str] = None
+    """Model for updating campaign briefings."""
+    campaign_type: Optional[str] = None
+    headline: Optional[str] = None
+    key_intel: Optional[Dict[str, Any]] = None
+    original_draft: Optional[str] = None
+    matched_audience: Optional[List[Dict[str, Any]]] = None
     status: Optional[str] = None
-    # This uses the Pydantic model for clean API validation.
-    matched_audience: Optional[List[MatchedClient]] = None

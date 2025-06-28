@@ -99,19 +99,39 @@ def get_campaign_briefing_by_id(campaign_id: uuid.UUID) -> Optional[CampaignBrie
         return session.get(CampaignBriefing, campaign_id)
 
 def update_campaign_briefing(campaign_id: uuid.UUID, update_data: CampaignUpdate) -> Optional[CampaignBriefing]:
+    """Update a campaign briefing by ID."""
     with Session(engine) as session:
-        briefing = session.get(CampaignBriefing, campaign_id)
-        if not briefing:
+        try:
+            # Get the existing campaign
+            briefing = session.get(CampaignBriefing, campaign_id)
+            if not briefing:
+                print(f"CRM: Campaign {campaign_id} not found in database")
+                return None
+            
+            print(f"CRM: Found campaign {campaign_id}, updating...")
+            
+            # Get the update data as a dictionary, excluding unset fields
+            update_dict = update_data.model_dump(exclude_unset=True)
+            print(f"CRM: Update data: {update_dict}")
+            
+            # Update the fields
+            for key, value in update_dict.items():
+                if hasattr(briefing, key):
+                    setattr(briefing, key, value)
+                    print(f"CRM: Updated {key} = {value}")
+            
+            # Commit the changes
+            session.add(briefing)
+            session.commit()
+            session.refresh(briefing)
+            
+            print(f"CRM: Successfully updated campaign {campaign_id}")
+            return briefing
+            
+        except Exception as e:
+            print(f"CRM: Error updating campaign {campaign_id}: {str(e)}")
+            session.rollback()
             return None
-        
-        update_dict = update_data.model_dump(exclude_unset=True)
-        for key, value in update_dict.items():
-            setattr(briefing, key, value)
-        
-        session.add(briefing)
-        session.commit()
-        session.refresh(briefing)
-        return briefing
 
 # --- Scheduled Message Functions ---
 def get_scheduled_messages_for_client(client_id: uuid.UUID) -> List[ScheduledMessage]:
