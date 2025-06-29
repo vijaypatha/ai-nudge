@@ -1,31 +1,32 @@
-# backend/agent_core/agents/conversation.py
-
-# Purpose: This service is the "conversation agent." It is responsible for generating intelligent, human-like draft responses.
-from typing import Dict, Any
+# ---
+# File Path: backend/agent_core/agents/conversation.py
+# Purpose: This agent is responsible for all message generation.
+# This version is UPDATED to include a new function for drafting outbound campaign messages.
+# ---
+from typing import Dict, Any, List
 import uuid
 
-# --- FINAL FIX: Use correct import paths relative to the backend root ---
+from data.models.user import User
+from data.models.property import Property
+from data.models.campaign import MatchedClient
 from integrations import openai as openai_service
 from data import crm as crm_service
-# --- END FINAL FIX ---
 
-
+# --- Function for INBOUND Messages (Existing) ---
 async def generate_response(
     client_id: uuid.UUID,
     incoming_message_content: str,
     context: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    Generates a draft response for an incoming client message using OpenAI.
-    Incorporates client context and property data for smarter responses.
+    Generates a draft response for an incoming client message using an LLM.
     """
-    print(f"CONVERSATION AGENT: Generating response for client {client_id} using OpenAI...")
+    print(f"CONVERSATION AGENT (INBOUND): Generating response for client {client_id}...")
     
     client_name = context.get('client_name', 'client')
     client_tags = ", ".join(context.get('client_tags', []))
     
-    # Fetch property context from the internal CRM service.
-    all_properties = crm_service.get_all_properties_mock()
+    all_properties = crm_service.get_all_properties()
 
     property_context_str = ""
     if all_properties:
@@ -36,36 +37,70 @@ async def generate_response(
                 f"Status: {prop.status}, Type: {prop.property_type}\n"
             )
 
-    # Construct the prompt for OpenAI
     messages = [
         {"role": "system", "content": (
             "You are an AI Nudge assistant for a real estate agent. Your goal is to provide concise, "
             "helpful, and professional draft responses to client inquiries. "
             "Maintain a helpful, slightly proactive, and personalized tone. "
-            "Suggest concrete next steps like sending listings or scheduling a showing when appropriate. "
             f"The client's name is {client_name}. Their tags include: {client_tags}."
             f"{property_context_str}"
         )},
         {"role": "user", "content": incoming_message_content}
     ]
     
-    # Call the real OpenAI LLM
     ai_draft_content = await openai_service.generate_text_completion(
         prompt_messages=messages,
         model="gpt-4o-mini"
     )
     
     if ai_draft_content:
-        print(f"CONVERSATION AGENT: Received OpenAI response: {ai_draft_content[:50]}...")
-        return {
-            "ai_draft": ai_draft_content,
-            "confidence": 0.95,
-            "suggested_action": "send_draft"
-        }
+        return {"ai_draft": ai_draft_content, "confidence": 0.95, "suggested_action": "send_draft"}
     else:
-        print("CONVERSATION AGENT: OpenAI failed to generate response. Falling back to generic.")
-        return {
-            "ai_draft": "I'm sorry, I couldn't generate a smart response right now. Please try again later.",
-            "confidence": 0.1,
-            "suggested_action": "review_manually"
-        }
+        return {"ai_draft": "I'm sorry, I couldn't generate a smart response right now.", "confidence": 0.1, "suggested_action": "review_manually"}
+
+# --- Function for OUTBOUND Campaigns (New) ---
+async def draft_outbound_campaign_message(
+    realtor: User,
+    property_item: Property,
+    event_type: str,
+    matched_audience: List[MatchedClient]
+) -> str:
+    """
+    Uses an LLM to draft a personalized outbound message for a marketing campaign.
+    """
+    print(f"CONVERSATION AGENT (OUTBOUND): Drafting message for event '{event_type}'...")
+
+    representative_client = matched_audience[0] if matched_audience else None
+    
+    prompt = f"""
+    You are an expert real estate agent's assistant, 'AI Nudge'. Your task is to draft a compelling and slightly informal master SMS message.
+
+    Realtor's Name: {realtor.full_name}
+    Context: A '{event_type}' event occurred for the property at {property_item.address}.
+    
+    Instructions:
+    1.  Draft a master SMS message for a list of clients. Use the placeholder `[Client Name]` for personalization.
+    2.  The tone should be helpful and insightful, not pushy.
+    3.  You MUST include the property's listing URL at the end if it exists.
+    4.  The message must be concise and ready for SMS.
+
+    Property URL: {property_item.listing_url or "N/A"}
+    Draft the SMS message now:
+    """
+
+    # For this implementation, we will simulate the LLM call to avoid API dependencies.
+    # To enable real AI drafts, uncomment the line below and ensure the service is configured.
+    # ai_draft = await openai_service.generate_text_completion(prompt_messages=[{"role": "user", "content": prompt}], model="gpt-4o-mini")
+
+    # --- SIMULATED LLM RESPONSE ---
+    ai_draft = (
+        f"Hi [Client Name], a quick heads-up! The price just dropped on a fantastic "
+        f"{property_item.bedrooms}-bed property at {property_item.address}. "
+        f"Given your interest in the area, I thought you'd want to be the first to know."
+    )
+    if property_item.listing_url:
+        ai_draft += f" More details here: {property_item.listing_url}"
+    # --- END SIMULATION ---
+
+    print("CONVERSATION AGENT (OUTBOUND): Message draft completed.")
+    return ai_draft

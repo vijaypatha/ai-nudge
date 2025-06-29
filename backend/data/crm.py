@@ -190,3 +190,15 @@ def delete_scheduled_message(message_id: uuid.UUID) -> bool:
             session.commit()
             return True
         return False
+
+def save_campaign_briefing(briefing: CampaignBriefing) -> CampaignBriefing:
+    """Save a new CampaignBriefing to the database."""
+    from .database import engine
+    from sqlmodel import Session
+
+    with Session(engine) as session:
+        session.add(briefing)
+        session.commit()
+        session.refresh(briefing)
+        return briefing
+

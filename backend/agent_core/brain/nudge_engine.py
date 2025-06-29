@@ -1,6 +1,8 @@
 # File Path: backend/agent_core/brain/nudge_engine.py
-# Purpose: The core engine for analyzing events. This version is updated to create a low-confidence "Insight" when no matching clients are found for a market event, ensuring no opportunity is wasted.
+# Purpose: The core engine for analyzing events and creating campaigns.
+# This version is UPDATED to ensure all UUIDs in JSON fields are strings.
 
+import uuid
 from data.models.event import MarketEvent
 from data.models.campaign import CampaignBriefing, MatchedClient
 from data.models.user import User
@@ -16,7 +18,7 @@ def _calculate_match_score(client: Client, property_item: Property) -> tuple[int
     score = 0
     reasons = []
     client_locations = client.preferences.get("locations", [])
-    budget_max = client.preferences.get("budget_max", float("inf"))
+    budget_max = client.preferences.get("budget_max", float('inf'))
     min_bedrooms = client.preferences.get("min_bedrooms", 0)
 
     if property_item.address and any(loc.lower() in property_item.address.lower() for loc in client_locations):
@@ -37,45 +39,59 @@ def _calculate_match_score(client: Client, property_item: Property) -> tuple[int
 
     return score, reasons
 
-async def _generate_campaign_briefing(event: MarketEvent, realtor: User, property_item: Property, matched_audience: list[MatchedClient], prompt_template: str):
+def _matched_client_to_dict(m: MatchedClient):
+    # Ensure UUIDs are strings for JSON serialization
+    d = m.model_dump()
+    if 'client_id' in d and isinstance(d['client_id'], uuid.UUID):
+        d['client_id'] = str(d['client_id'])
+    return d
+
+async def _create_campaign_from_event(event: MarketEvent, realtor: User, property_item: Property, matched_audience: list[MatchedClient]):
     """
-    Generates the AI message draft and saves the complete high-confidence campaign briefing.
+    Generates the AI message draft via the Conversation Agent and saves the complete campaign briefing.
     """
     key_intel = {
         "address": property_item.address,
-        "price": property_item.price, # Use raw number for calculations
+        "price": f"${property_item.price:,.0f}",
     }
     if event.event_type == "price_drop":
-        key_intel["price_change"] = event.payload.get('old_price', 0) - event.payload.get('new_price', 0)
+        price_change = event.payload.get('old_price', 0) - event.payload.get('new_price', 0)
+        key_intel["price_change"] = f"${price_change:,.0f}"
 
-    prompt = prompt_template.format(property_address=property_item.address, price=f"${property_item.price:,.0f}", listing_url=property_item.listing_url)
+    # Ensure no UUIDs in key_intel (if you ever add one, convert to str)
 
-    # For now, we are not making a real LLM call to save time and cost.
-    # In a real scenario, this would be: await conversation_agent.generate_response(...)
-    ai_draft = f"Hi [Client Name], good news! The price on {property_item.address} was just reduced. Thought you might be interested. Let me know if you'd like to see it. {property_item.listing_url}"
-    
+    ai_draft = await conversation_agent.draft_outbound_campaign_message(
+        realtor=realtor,
+        property_item=property_item,
+        event_type=event.event_type,
+        matched_audience=matched_audience
+    )
+
+    # Convert all UUIDs in matched_audience to strings
+    matched_audience_json = [_matched_client_to_dict(m) for m in matched_audience]
+
+    # Ensure triggering_event_id is a string if used in a JSON column (but it's probably a UUID column, so safe)
     new_briefing = CampaignBriefing(
         user_id=realtor.id,
         campaign_type=event.event_type,
-        status="new", # 'new' status indicates a high-confidence, ready-to-send nudge
+        status="new",
         headline=f"Price Drop: {property_item.address}",
         key_intel=key_intel,
         listing_url=property_item.listing_url,
         original_draft=ai_draft,
-        matched_audience=matched_audience,
-        triggering_event_id=event.id
+        matched_audience=matched_audience_json,
+        triggering_event_id=event.id if event.id else uuid.uuid4()
     )
     crm_service.save_campaign_briefing(new_briefing)
 
 async def process_event_for_audience(event: MarketEvent, realtor: User):
     """
-    Finds a matching audience for an event. If matches are found, it generates a
-    high-confidence Nudge. If not, it generates a low-confidence Insight.
+    Finds a matching audience for an event, then creates a Nudge or an Insight.
     """
     property_item = crm_service.get_property_by_id(event.entity_id)
     if not property_item: return
 
-    all_clients = crm_service.get_all_clients_mock()
+    all_clients = crm_service.get_all_clients()
     matched_audience = []
     for client in all_clients:
         match_score, reasons = _calculate_match_score(client, property_item)
@@ -83,41 +99,28 @@ async def process_event_for_audience(event: MarketEvent, realtor: User):
         if match_score >= NUDGE_THRESHOLD:
             matched_audience.append(MatchedClient(client_id=client.id, client_name=client.full_name, match_score=match_score, match_reason=", ".join(reasons)))
 
-    # --- THIS IS THE CORE LOGIC CHANGE ---
     if not matched_audience:
-        # If no clients are a good match, create a low-confidence "Insight" card instead of doing nothing.
         print(f"NUDGE ENGINE: No matching clients, creating an Insight for event {event.id}.")
-        
-        key_intel = {
-            "address": property_item.address,
-            "price": property_item.price,
-        }
+        key_intel = {"address": property_item.address, "price": f"${property_item.price:,.0f}"}
         if event.event_type == "price_drop":
-            key_intel["price_change"] = event.payload.get('old_price', 0) - event.payload.get('new_price', 0)
+             price_change = event.payload.get('old_price', 0) - event.payload.get('new_price', 0)
+             key_intel["price_change"] = f"${price_change:,.0f}"
 
         insight_briefing = CampaignBriefing(
             user_id=realtor.id,
             campaign_type=event.event_type,
-            status="insight", # This special status tells the frontend to render the low-confidence card
+            status="insight",
             headline=f"Market Insight: Price Drop on {property_item.address}",
             key_intel=key_intel,
             listing_url=property_item.listing_url,
-            original_draft="", # No message needed
-            matched_audience=[], # Audience is empty
-            triggering_event_id=event.id
+            original_draft="",
+            matched_audience=[],
+            triggering_event_id=event.id if event.id else uuid.uuid4()
         )
         crm_service.save_campaign_briefing(insight_briefing)
-        return # End execution here for this path
+        return
 
-    # If we DO have a matched audience, proceed with generating the high-confidence nudge.
-    prompts = {
-        "price_drop": "Draft a master SMS about a price drop on {property_address} to {price}. IMPORTANT: You MUST include this URL: {listing_url}",
-        "new_listing": "Draft a master SMS about a new property on the market at {property_address} for {price}. Give them a first look. IMPORTANT: You MUST include this URL: {listing_url}"
-    }
-
-    prompt_template = prompts.get(event.event_type)
-    if prompt_template:
-        await _generate_campaign_briefing(event, realtor, property_item, matched_audience, prompt_template)
+    await _create_campaign_from_event(event, realtor, property_item, matched_audience)
 
 async def process_market_event(event: MarketEvent, realtor: User):
     """
