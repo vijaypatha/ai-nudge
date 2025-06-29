@@ -165,7 +165,7 @@ export const ManageAudienceModal = ({
 
   // --- Render ---
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-brand-dark/90 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-brand-dark-blue border border-white/10 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <header className="p-6 border-b border-white/10 flex justify-between items-center flex-shrink-0">
           <h2 className="text-2xl font-bold text-brand-text-main">Manage Audience</h2>
@@ -175,7 +175,7 @@ export const ManageAudienceModal = ({
         <div className="p-6 space-y-4 flex-shrink-0">
           <div className="relative">
             <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-text-muted" />
-            <input type="text" placeholder="Search by name or natural language..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-black/20 border border-white/20 rounded-lg p-3 pl-10 text-brand-text-main focus:outline-none focus:ring-2 focus:ring-brand-accent"/>
+            <input type="text" placeholder="AI Nudge Magic Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-black/20 border border-white/20 rounded-lg p-3 pl-10 text-brand-text-main focus:outline-none focus:ring-2 focus:ring-brand-accent"/>
           </div>
           <div className="flex flex-wrap gap-2">
             {uniqueTags.map((tag) => ( <button key={tag} onClick={() => handleTagClick(tag)} className={clsx('px-3 py-1.5 text-sm font-semibold rounded-full border transition-colors', activeTags.has(tag) ? 'bg-brand-accent text-brand-dark border-brand-accent' : 'bg-white/5 border-white/10 text-brand-text-muted hover:border-white/30')}> {tag} </button> ))}
@@ -185,7 +185,7 @@ export const ManageAudienceModal = ({
         <div className="px-6 pb-2 flex-grow overflow-y-auto">
           <div className="border border-white/10 rounded-lg">
             <div className="p-3 border-b border-white/10 sticky top-0 bg-brand-dark-blue/80 backdrop-blur-sm">
-                <label className="flex items-center gap-3 text-sm font-semibold cursor-pointer">
+                <label className="flex items-center gap-3 text-sm font-semibold cursor-pointer text-white">
                     <input type="checkbox" className="h-4 w-4 rounded bg-white/10 border-white/20 text-brand-accent focus:ring-brand-accent focus:ring-offset-brand-dark-blue" checked={isAllFilteredSelected} onChange={handleSelectAllFiltered}/>
                     Select All ({selectedClientIds.size} selected)
                 </label>
