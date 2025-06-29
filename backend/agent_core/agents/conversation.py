@@ -1,7 +1,6 @@
 # ---
 # File Path: backend/agent_core/agents/conversation.py
-# Purpose: This agent is responsible for all message generation.
-# This version is UPDATED to include a new function for drafting outbound campaign messages.
+# Purpose: This version is UPDATED to make a live LLM call for outbound messages.
 # ---
 from typing import Dict, Any, List
 import uuid
@@ -58,7 +57,7 @@ async def generate_response(
     else:
         return {"ai_draft": "I'm sorry, I couldn't generate a smart response right now.", "confidence": 0.1, "suggested_action": "review_manually"}
 
-# --- Function for OUTBOUND Campaigns (New) ---
+# --- Function for OUTBOUND Campaigns (UPDATED) ---
 async def draft_outbound_campaign_message(
     realtor: User,
     property_item: Property,
@@ -66,9 +65,9 @@ async def draft_outbound_campaign_message(
     matched_audience: List[MatchedClient]
 ) -> str:
     """
-    Uses an LLM to draft a personalized outbound message for a marketing campaign.
+    Uses a live LLM to draft a personalized outbound message for a marketing campaign.
     """
-    print(f"CONVERSATION AGENT (OUTBOUND): Drafting message for event '{event_type}'...")
+    print(f"CONVERSATION AGENT (OUTBOUND): Drafting message for event '{event_type}' via live LLM call...")
 
     representative_client = matched_audience[0] if matched_audience else None
     
@@ -88,19 +87,17 @@ async def draft_outbound_campaign_message(
     Draft the SMS message now:
     """
 
-    # For this implementation, we will simulate the LLM call to avoid API dependencies.
-    # To enable real AI drafts, uncomment the line below and ensure the service is configured.
-    # ai_draft = await openai_service.generate_text_completion(prompt_messages=[{"role": "user", "content": prompt}], model="gpt-4o-mini")
-
-    # --- SIMULATED LLM RESPONSE ---
-    ai_draft = (
-        f"Hi [Client Name], a quick heads-up! The price just dropped on a fantastic "
-        f"{property_item.bedrooms}-bed property at {property_item.address}. "
-        f"Given your interest in the area, I thought you'd want to be the first to know."
+    # --- LIVE LLM CALL ---
+    # This now calls the actual OpenAI integration to generate a unique draft.
+    ai_draft = await openai_service.generate_text_completion(
+        prompt_messages=[{"role": "user", "content": prompt}],
+        model="gpt-4o-mini"
     )
-    if property_item.listing_url:
-        ai_draft += f" More details here: {property_item.listing_url}"
-    # --- END SIMULATION ---
+
+    if not ai_draft:
+        # Fallback message if the API call fails
+        print("CONVERSATION AGENT (OUTBOUND): LLM failed, using fallback message.")
+        ai_draft = f"Hi [Client Name], there's an update regarding {property_item.address}. Please contact me for more details."
 
     print("CONVERSATION AGENT (OUTBOUND): Message draft completed.")
     return ai_draft

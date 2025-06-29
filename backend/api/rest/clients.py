@@ -21,29 +21,29 @@ class ClientSearchQuery(BaseModel):
 @router.post("/search", response_model=List[Client])
 async def search_clients(query: ClientSearchQuery):
     all_clients = crm_service.get_all_clients()
-    audience_builder.build_or_rebuild_client_index(all_clients)
-    
-    matched_ids = set()
-    filter_applied = False
+    # REMOVED: The call to build_or_rebuild_client_index is no longer needed here.
+    # The index is now built once on application startup.
 
+    final_results = set()
     if query.natural_language_query:
-        nl_ids = audience_builder.find_clients_by_semantic_query(query.natural_language_query)
-        matched_ids.update(nl_ids)
-        filter_applied = True
+        matched_ids = await audience_builder.find_clients_by_semantic_query(query.natural_language_query)
+        final_results.update(matched_ids)
 
     if query.tags:
         query_tags_lower = {t.lower() for t in query.tags}
         tag_ids = {c.id for c in all_clients if c.tags and any(ct.lower() in query_tags_lower for ct in c.tags)}
-        if filter_applied:
-            matched_ids.intersection_update(tag_ids)
+        
+        if query.natural_language_query:
+            # If both searches ran, find clients that match both (intersection)
+            final_results.intersection_update(tag_ids)
         else:
-            matched_ids.update(tag_ids)
-        filter_applied = True
-    
-    if not filter_applied:
+            final_results.update(tag_ids)
+
+    if not query.natural_language_query and not query.tags:
         return all_clients
 
-    return [client for client in all_clients if client.id in matched_ids]
+    return [client for client in all_clients if client.id in final_results]
+
 
 @router.put("/{client_id}/tags", response_model=Client)
 async def update_client_tags_endpoint(client_id: UUID, tag_data: ClientTagUpdate):

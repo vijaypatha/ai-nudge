@@ -1,13 +1,15 @@
 # File Path: backend/api/rest/campaigns.py
 # CORRECTED VERSION: Added missing prefix
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, BackgroundTasks
 from typing import Optional
 from uuid import UUID
 from data.models.message import SendMessageImmediate
 from data.models.campaign import CampaignBriefing, CampaignUpdate
 from agent_core import orchestrator
 from data import crm as crm_service
+from workflow import outbound as outbound_workflow
+
 
 # FIXED: Add prefix to router definition
 router = APIRouter(prefix="/campaigns")
@@ -62,3 +64,14 @@ async def get_campaign_by_id(campaign_id: UUID):
     if not campaign:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found.")
     return campaign
+
+@router.post("/{campaign_id}/send", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_send_campaign(campaign_id: UUID, background_tasks: BackgroundTasks):
+    """
+    Triggers the sending of a campaign to its audience in the background.
+    """
+    print(f"CAMPAIGN API: Received request to send campaign {campaign_id}")
+    # Run the potentially long-running send operation in the background
+    # so the API can respond to the UI immediately.
+    background_tasks.add_task(outbound_workflow.send_campaign_to_audience, campaign_id)
+    return {"message": "Campaign sending process started."}

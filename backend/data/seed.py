@@ -1,5 +1,3 @@
-# File Path: backend/data/seed.py
-
 import uuid
 import asyncio
 from datetime import datetime, timezone
@@ -11,6 +9,7 @@ from .models.message import ScheduledMessage
 from .models.property import Property
 from .models.user import User
 from .models.event import MarketEvent
+from .models.campaign import CampaignBriefing
 
 from agent_core.brain import nudge_engine
 
@@ -22,6 +21,15 @@ CLIENT_ID_SAM = uuid.UUID("d2f3e4a5-6b7a-8c9d-0e1f-2a3b4c5d6e7f")
 CLIENT_ID_BEN = uuid.UUID("e3f4a5b6-7a8b-9c0d-1e2f-3a4b5c6d7e8f")
 EVENT_ID_PRICE_DROP = uuid.UUID("9e5a7d6c-5b4a-4b6e-8b0f-a8c6f1d78f7a")
 
+def clear_demo_data():
+    with Session(engine) as session:
+        # Delete in order to avoid FK constraint errors
+        session.query(CampaignBriefing).delete()
+        session.query(Property).delete()
+        session.query(Client).delete()
+        session.query(User).delete()
+        session.commit()
+
 async def seed_database():
     """
     Populates the database by creating base records and then simulating a
@@ -29,6 +37,9 @@ async def seed_database():
     are performed in a single session.
     """
     print("SEEDER: Preparing to seed the database...")
+
+    # Clear all demo data before seeding
+    clear_demo_data()
 
     with Session(engine) as session:
         # --- Step 1: Create all data objects ---
@@ -73,7 +84,7 @@ async def seed_database():
             phone="+16505555678",
             tags=["First-Time Buyer"],
             preferences={
-                "notes": ["Really wants a large yard for her dog."],
+                "notes": ["Really wants a large yard for her dog. Loves Yoga"],
                 "source": "demo",
                 "min_bedrooms": 3
             }

@@ -1,6 +1,7 @@
 # ---
 # File Path: backend/common/config.py
 # Purpose: Loads and manages all environment variables for the application using Pydantic.
+# This version is UPDATED to include the new GOOGLE_API_KEY setting.
 # ---
 from pydantic_settings import BaseSettings
 from functools import lru_cache
@@ -14,12 +15,15 @@ class Settings(BaseSettings):
     # OpenAI
     OPENAI_API_KEY: str
 
+    # --- NEW: Google AI Settings ---
+    # This field is required for the new semantic search functionality.
+    GOOGLE_API_KEY: str
+
     # Twilio
     TWILIO_ACCOUNT_SID: str
     TWILIO_AUTH_TOKEN: str
     TWILIO_PHONE_NUMBER: str
     TWILIO_DEFAULT_MESSAGING_SERVICE_SID: str
-    # CORRECTED: Made this field optional as it's not in your .env
     TWILIO_SUPPORT_MESSAGING_SERVICE_SID: Optional[str] = None
 
     # Database
@@ -32,7 +36,7 @@ class Settings(BaseSettings):
     FRONTEND_APP_URL: str = "http://localhost:3000"
     SECRET_KEY: str
 
-    # CORRECTED: Added missing MLS fields from your .env
+    # MLS
     MLS_PROVIDER: str
     SPARK_API_DEMO_TOKEN: str
 

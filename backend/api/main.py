@@ -1,5 +1,6 @@
 # ---
 # File Path: backend/api/main.py
+# Purpose: This version is UPDATED to initialize the Audience Builder search index on startup.
 # ---
 
 from fastapi import FastAPI
@@ -10,12 +11,18 @@ from contextlib import asynccontextmanager
 from api.rest import clients, properties, inbox, nudges, admin_triggers, scheduled_messages, users, campaigns
 from data.database import create_db_and_tables
 from data.seed import seed_database
+from agent_core import audience_builder # Import the audience builder
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Handles application startup events.
+    """
     print("--- Application Startup ---")
     create_db_and_tables()
     await seed_database()
+    # NEW: Initialize the semantic search index once on startup.
+    await audience_builder.initialize_client_index()
     print("--- Startup Complete ---")
     yield
     print("--- Application Shutdown ---")
@@ -35,6 +42,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],)
 
+# Include all the API routers
 app.include_router(clients.router)
 app.include_router(campaigns.router)
 app.include_router(properties.router)
@@ -46,4 +54,5 @@ app.include_router(users.router)
 
 @app.get("/")
 async def read_root():
+    """A simple root endpoint to confirm the API is running."""
     return {"message": "Welcome to AI Nudge Backend API!"}
