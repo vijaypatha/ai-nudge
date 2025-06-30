@@ -52,6 +52,25 @@ app.include_router(admin_triggers.router)
 app.include_router(scheduled_messages.router)
 app.include_router(users.router)
 
+# --- Add this temporary endpoint for testing ---
+from agent_core.brain import nudge_engine
+import asyncio
+
+@app.post("/_debug/trigger-recency-nudge", tags=["Debug"])
+async def trigger_recency_nudge_endpoint():
+    """
+    A temporary debugging endpoint to manually trigger the recency nudge generation.
+    """
+    print("DEBUG ENDPOINT: Manually triggering recency nudge generation...")
+    try:
+        # We must run the async function from our synchronous endpoint
+        await nudge_engine.generate_recency_nudges()
+        return {"message": "Recency nudge generation triggered successfully."}
+    except Exception as e:
+        print(f"DEBUG ENDPOINT ERROR: {e}")
+        return {"message": f"An error occurred: {e}"}
+# --- End of temporary endpoint code ---
+
 @app.get("/")
 async def read_root():
     """A simple root endpoint to confirm the API is running."""

@@ -63,3 +63,16 @@ def send_scheduled_message_task(message_id: str):
     logger.info(f"CELERY TASK: Pretending to send scheduled message -> {message_id}")
     # TODO: Add logic to fetch the message by ID and send it via the communication tool.
     pass
+
+@celery_app.task
+def check_for_recency_nudges_task():
+    """
+    A background task that periodically runs the recency check in the Nudge Engine.
+    """
+    print("CELERY TASK: Kicking off daily check for recency nudges...")
+    try:
+        # We need to run our async function from the synchronous Celery task.
+        asyncio.run(nudge_engine.generate_recency_nudges())
+        print("CELERY TASK: Recency nudge check completed successfully.")
+    except Exception as e:
+        print(f"CELERY TASK ERROR: Recency nudge check failed: {e}")

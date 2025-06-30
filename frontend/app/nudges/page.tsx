@@ -1,7 +1,8 @@
 // ---
 // File Path: frontend/app/nudges/page.tsx
-// This version contains the FINAL and DEFINITIVE FIX for the UI state synchronization bug,
-// using a more specific dependency in the useEffect hook to guarantee the draft is displayed.
+// FINAL, DEFINITIVE FIX: State for message drafts is "lifted up" to the parent
+// NudgesPage component. The AiSuggestionCard is now a controlled component, which
+// eliminates the state synchronization bug completely.
 // ---
 
 'use client'; 
@@ -17,7 +18,7 @@ import { MessageCircleHeart, Zap, User as UserIcon, Sparkles, Menu, BrainCircuit
 
 // --- Type Definitions ---
 interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reason: string; }
-interface CampaignBriefing { id: string; headline: string; original_draft: string; matched_audience: any[]; status: 'new' | 'insight' | 'approved' | 'dismissed' | 'sent'; key_intel: { [key: string]: string | number }; edited_draft: string | null; }
+interface CampaignBriefing { id: string; campaign_type: string; headline: string; original_draft: string; matched_audience: any[]; status: 'new' | 'insight' | 'approved' | 'dismissed' | 'sent'; key_intel: { [key: string]: string | number }; edited_draft: string | null; }
 
 // --- Reusable Components ---
 const Avatar = ({ name, className }: { name: string; className?: string }) => {
@@ -26,28 +27,32 @@ const Avatar = ({ name, className }: { name: string; className?: string }) => {
 };
 
 // --- Nudge Card Components ---
-const AiSuggestionCard = ({ briefing, onUpdate, onManageAudience }: { briefing: CampaignBriefing; onUpdate: (updatedBriefing: CampaignBriefing) => void; onManageAudience: () => void; }) => {
+// CORRECTED: This component is now fully controlled by its parent. It receives the
+// draft text and the function to update it as props. It no longer has internal state for the draft.
+const AiSuggestionCard = ({ 
+  briefing, 
+  onUpdate, 
+  onManageAudience,
+  draft,
+  setDraft
+}: { 
+  briefing: CampaignBriefing; 
+  onUpdate: (updatedBriefing: CampaignBriefing) => void; 
+  onManageAudience: () => void;
+  draft: string;
+  setDraft: (newDraft: string) => void;
+}) => {
   const [isComposerVisible, setIsComposerVisible] = useState(false);
-  const [draft, setDraft] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAudienceExpanded, setIsAudienceExpanded] = useState(false);
-
-  // --- DEFINITIVE BUG FIX ---
-  // This useEffect hook now explicitly depends on the briefing's ID and draft content.
-  // This guarantees it will run and update the state when the initial data loads.
-  useEffect(() => {
-    if (briefing) {
-        setDraft(briefing.edited_draft || briefing.original_draft || '');
-    }
-  }, [briefing.id, briefing.original_draft, briefing.edited_draft]); // More specific dependencies
-  // --- END BUG FIX ---
-
+  
   const topClient = briefing.matched_audience[0];
   const otherClients = briefing.matched_audience.slice(1);
 
   const handleSend = async () => {
     setIsSubmitting(true);
     try {
+      // Step 1: Save the final draft and mark the campaign as 'approved'.
       const updateRes = await fetch(`http://localhost:8001/campaigns/${briefing.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -57,6 +62,7 @@ const AiSuggestionCard = ({ briefing, onUpdate, onManageAudience }: { briefing: 
       const updatedData = await updateRes.json();
       onUpdate(updatedData);
 
+      // Step 2: Trigger the background task to send the messages.
       const sendRes = await fetch(`http://localhost:8001/campaigns/${briefing.id}/send`, { method: 'POST' });
       if (!sendRes.ok) throw new Error('Failed to start the sending process.');
 
@@ -125,32 +131,6 @@ const AiSuggestionCard = ({ briefing, onUpdate, onManageAudience }: { briefing: 
   );
 };
 
-const AiInsightCard = ({ briefing, onBuildAudience }: { briefing: CampaignBriefing, onBuildAudience: () => void; }) => {
-  return (
-    <div className="bg-black/20 border border-white/10 rounded-xl p-4 flex flex-col sm:flex-row items-center gap-4">
-      <div className="flex-shrink-0"> <Lightbulb size={20} className="text-amber-400" /> </div>
-      <div className="flex-grow text-center sm:text-left"> <h3 className="font-semibold text-base text-brand-text-main">{briefing.headline}</h3> <p className="text-sm text-brand-text-muted"> We didn't find a strong match for this, but you might know someone. </p> </div>
-      <div className="flex-shrink-0 flex items-center gap-2"> <button className="p-2.5 bg-white/10 rounded-md hover:bg-white/20 text-sm font-semibold">Dismiss</button> <button onClick={onBuildAudience} className="p-2.5 bg-primary-action text-brand-dark rounded-md text-sm font-semibold"> Build Audience </button> </div>
-    </div>
-  );
-};
-
-const InsightGroupCard = ({ insights, onBuildAudience }: { insights: CampaignBriefing[], onBuildAudience: (briefing: CampaignBriefing) => void; }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  return (
-    <div className="bg-white/5 border-2 border-dashed border-white/10 rounded-xl overflow-hidden">
-      <header className="p-4 flex justify-between items-center cursor-pointer hover:bg-white/5" onClick={() => setIsExpanded(!isExpanded)}>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-8 h-8 bg-black/20 rounded-lg"> <BrainCircuit size={18} className="text-brand-text-muted" /> </div>
-          <div> <h3 className="font-bold text-lg text-brand-text-main">Market Insights</h3> <p className="text-sm text-brand-text-muted"> {insights.length} unmatched opportunities. Add contacts and intel to get matches. </p> </div>
-        </div>
-        <ChevronDown size={20} className={clsx('transition-transform', isExpanded && 'rotate-180')} />
-      </header>
-      {isExpanded && (<div className="p-4 border-t border-white/10 space-y-4">{insights.map((briefing) => (<AiInsightCard key={briefing.id} briefing={briefing} onBuildAudience={() => onBuildAudience(briefing)} />))}</div>)}
-    </div>
-  );
-};
-
 const InstantNudgeCreator = () => {
   const { clients } = useAppContext();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -178,14 +158,26 @@ const InstantNudgeCreator = () => {
   );
 };
 
+
+// Note: The AiInsightCard and InsightGroupCard components are unchanged and omitted for brevity.
+const AiInsightCard = ({ briefing, onBuildAudience }: { briefing: CampaignBriefing, onBuildAudience: () => void; }) => { return ( <div className="bg-black/20 border border-white/10 rounded-xl p-4 flex flex-col sm:flex-row items-center gap-4"> <div className="flex-shrink-0"> <Lightbulb size={20} className="text-amber-400" /> </div> <div className="flex-grow text-center sm:text-left"> <h3 className="font-semibold text-base text-brand-text-main">{briefing.headline}</h3> <p className="text-sm text-brand-text-muted"> We didn't find a strong match for this, but you might know someone. </p> </div> <div className="flex-shrink-0 flex items-center gap-2"> <button className="p-2.5 bg-white/10 rounded-md hover:bg-white/20 text-sm font-semibold">Dismiss</button> <button onClick={onBuildAudience} className="p-2.5 bg-primary-action text-brand-dark rounded-md text-sm font-semibold"> Build Audience </button> </div> </div> ); };
+const InsightGroupCard = ({ insights, onBuildAudience }: { insights: CampaignBriefing[], onBuildAudience: (briefing: CampaignBriefing) => void; }) => { const [isExpanded, setIsExpanded] = useState(false); return ( <div className="bg-white/5 border-2 border-dashed border-white/10 rounded-xl overflow-hidden"> <header className="p-4 flex justify-between items-center cursor-pointer hover:bg-white/5" onClick={() => setIsExpanded(!isExpanded)}> <div className="flex items-center gap-3"> <div className="flex items-center justify-center w-8 h-8 bg-black/20 rounded-lg"> <BrainCircuit size={18} className="text-brand-text-muted" /> </div> <div> <h3 className="font-bold text-lg text-brand-text-main">Market Insights</h3> <p className="text-sm text-brand-text-muted"> {insights.length} unmatched opportunities. Add contacts and intel to get matches. </p> </div> </div> <ChevronDown size={20} className={clsx('transition-transform', isExpanded && 'rotate-180')} /> </header> {isExpanded && (<div className="p-4 border-t border-white/10 space-y-4">{insights.map((briefing) => (<AiInsightCard key={briefing.id} briefing={briefing} onBuildAudience={() => onBuildAudience(briefing)} />))}</div>)} </div> ); };
+
+
 export default function NudgesPage() {
   const { clients } = useAppContext();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'ai_suggestions' | 'instant_nudge'>('ai_suggestions');
   const [briefings, setBriefings] = useState<CampaignBriefing[]>([]);
   const [loading, setLoading] = useState(true);
+  
   const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<CampaignBriefing | null>(null);
+
+  // --- DEFINITIVE FIX: State is "lifted up" to the parent page ---
+  // This one state object holds the draft text for ALL campaign cards.
+  // The key is the campaign ID, and the value is the draft text.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   const fetchBriefings = async () => {
     setLoading(true);
@@ -207,6 +199,10 @@ export default function NudgesPage() {
     setBriefings((prevBriefings) =>
       prevBriefings.map((b) => (b.id === updatedBriefing.id ? updatedBriefing : b))
     );
+    // Also update the draft state if the briefing contains a new edited draft
+    if (updatedBriefing.edited_draft) {
+      setDrafts(prev => ({ ...prev, [updatedBriefing.id]: updatedBriefing.edited_draft! }));
+    }
   };
 
   const handleOpenAudienceModal = (briefing: CampaignBriefing) => {
@@ -222,13 +218,7 @@ export default function NudgesPage() {
           match_score: 100,
           match_reason: 'Manually Added'
       }));
-
-      const res = await fetch(`http://localhost:8001/campaigns/${editingCampaign.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ matched_audience: newMatchedAudience }),
-      });
-
+      const res = await fetch(`http://localhost:8001/campaigns/${editingCampaign.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matched_audience: newMatchedAudience }), });
       if (!res.ok) { throw new Error('Failed to update audience on the server.'); }
       const updatedCampaign: CampaignBriefing = await res.json();
       handleCampaignUpdate(updatedCampaign);
@@ -273,7 +263,17 @@ export default function NudgesPage() {
                     <p className="mt-1 text-sm text-brand-text-muted"> The AI is watching the market. New opportunities will appear here. </p>
                   </div>
                 )}
-                {highConfidenceNudges.map((briefing) => ( <AiSuggestionCard key={briefing.id} briefing={briefing} onUpdate={handleCampaignUpdate} onManageAudience={() => handleOpenAudienceModal(briefing)} /> ))}
+                {highConfidenceNudges.map((briefing) => ( 
+                  <AiSuggestionCard 
+                    key={briefing.id} 
+                    briefing={briefing} 
+                    onUpdate={handleCampaignUpdate} 
+                    onManageAudience={() => handleOpenAudienceModal(briefing)}
+                    // Pass the specific draft and setter function for this card
+                    draft={drafts[briefing.id] ?? (briefing.edited_draft || briefing.original_draft || '')}
+                    setDraft={(newDraft) => setDrafts(prev => ({ ...prev, [briefing.id]: newDraft }))}
+                  />
+                ))}
                 {lowConfidenceInsights.length > 0 && <InsightGroupCard insights={lowConfidenceInsights} onBuildAudience={handleOpenAudienceModal} />}
               </div>
             )}
