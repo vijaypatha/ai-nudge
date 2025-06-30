@@ -120,6 +120,60 @@ async def draft_outbound_campaign_message(
         Property URL: {property_item.listing_url or "N/A"}
         Draft the SMS message now:
         """
+    elif event_type == "expired_listing" and property_item:
+        # NOTE: This prompt is written to the AGENT, not the homeowner.
+        prompt = f"""
+        You are an expert real estate agent's assistant. Your task is to draft a short, direct, and professional outreach message for your agent, {realtor.full_name}, to send to a homeowner whose listing just expired.
+
+        Context: The property at {property_item.address} was listed with another agent and has now expired without selling. This is a prime opportunity to win a new client.
+
+        Instructions:
+        1.  The message should be from the agent's perspective.
+        2.  Acknowledge the listing expired and express empathy for what is often a frustrating process.
+        3.  Briefly introduce yourself and suggest you have a different, effective marketing strategy.
+        4.  End with a clear, low-pressure call to action, like "Would you be open to a brief, 15-minute chat about a new approach?"
+        5.  Keep it professional and concise.
+        
+        Draft the outreach message now:
+        """
+    
+    elif event_type == "coming_soon" and property_item:
+        prompt = f"""
+        You are an expert real estate agent's assistant. Your task is to draft an exciting, exclusive-access SMS message for clients.
+
+        Realtor's Name: {realtor.full_name}
+        Context: The property at {property_item.address} is not on the public market yet but will be soon ("Coming Soon").
+
+        Instructions:
+        1.  Draft a master SMS message. Use `[Client Name]` for personalization.
+        2.  The tone should be exciting and create a sense of exclusivity and advantage.
+        3.  Emphasize that they are getting a "first look" before anyone else.
+        4.  Include the property address and price. End with a question like "Want to be the first to see it?"
+        5.  Keep it short and high-impact.
+        
+        Draft the SMS message now:
+        """
+        
+    elif event_type == "withdrawn_listing" and property_item:
+        # NOTE: This prompt is written to the AGENT for a gentle, long-term follow-up.
+        prompt = f"""
+        You are an expert real estate agent's assistant. Draft a very gentle, professional message for your agent, {realtor.full_name}, to send to a homeowner who has just withdrawn their property from the market.
+
+        Context: The property at {property_item.address} was recently withdrawn. The homeowner may be tired of the process but could re-list in the future. The goal is to be helpful, not pushy.
+
+        Instructions:
+        1.  The message should be from the agent's perspective.
+        2.  Acknowledge you saw the property was withdrawn.
+        3.  The tone must be low-pressure. The main goal is to introduce yourself as a future resource.
+        4.  Offer a simple "If you decide to explore your options again in the future, I'd be happy to provide a different perspective."
+        5.  Do NOT ask for a meeting now. This is a soft touch for future business.
+        
+        Draft the outreach message now:
+        """
+        
+    elif property_item: # Fallback for other market events
+        prompt = f"You are an expert real estate agent's assistant... Draft a compelling SMS about a '{event_type}' event for {property_item.address}... Realtor: {realtor.full_name}... Include URL: {property_item.listing_url}"
+
 
     if not prompt:
         return "Could not generate a message draft for this event type."

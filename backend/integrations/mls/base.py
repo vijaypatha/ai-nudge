@@ -79,3 +79,18 @@ class MlsApiInterface(ABC):
             Optional[List[Dict[str, Any]]]: A list of back-on-market listing data, or None.
         """
         pass
+
+    @abstractmethod
+    def fetch_expired_listings(self, minutes_ago: int) -> Optional[List[Dict[str, Any]]]:
+        """Specifically fetches listings whose listing agreement has expired."""
+        pass
+    
+    @abstractmethod
+    def fetch_coming_soon_listings(self, minutes_ago: int) -> Optional[List[Dict[str, Any]]]:
+        """Specifically fetches listings marked as 'Coming Soon'."""
+        pass
+
+    @abstractmethod
+    def fetch_withdrawn_listings(self, minutes_ago: int) -> Optional[List[Dict[str, Any]]]:
+        """Specifically fetches listings that have been withdrawn from the market."""
+        pass

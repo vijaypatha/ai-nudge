@@ -145,3 +145,20 @@ class FlexmlsResoApi(MlsApiInterface):
             status_filter="Active", 
             previous_status_filter="Pending"
         )
+    def fetch_expired_listings(self, minutes_ago: int) -> Optional[List[Dict[str, Any]]]:
+        """Fetches listings with a status of 'Expired' from RESO API."""
+        all_recent_listings = self._get_listings()
+        if all_recent_listings is None: return None
+        return self._filter_results(all_recent_listings, minutes_ago, status_filter="Expired")
+
+    def fetch_coming_soon_listings(self, minutes_ago: int) -> Optional[List[Dict[str, Any]]]:
+        """Fetches listings with a status of 'Coming Soon' from RESO API."""
+        all_recent_listings = self._get_listings()
+        if all_recent_listings is None: return None
+        return self._filter_results(all_recent_listings, minutes_ago, status_filter="Coming Soon")
+    
+    def fetch_withdrawn_listings(self, minutes_ago: int) -> Optional[List[Dict[str, Any]]]:
+        """Fetches listings with a status of 'Withdrawn' from RESO API."""
+        all_recent_listings = self._get_listings()
+        if all_recent_listings is None: return None
+        return self._filter_results(all_recent_listings, minutes_ago, status_filter="Withdrawn")
