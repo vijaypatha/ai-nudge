@@ -1,23 +1,30 @@
 # ---
 # FILE: backend/integrations/mls/factory.py
 # PURPOSE: Creates the correct MLS client using the new config pattern.
+# --- UPDATED to support the new RESO API provider ---
 # ---
 import logging
 from typing import Optional
 
 from .base import MlsApiInterface
 from .flexmls_spark_api import FlexmlsSparkApi
-from common.config import get_settings # <-- CHANGED: Import the get_settings function
+from .flexmls_reso_api import FlexmlsResoApi # <-- NEW: Import the RESO client
+from common.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# --- NEW: Add the 'flexmls_reso' provider to the map ---
 PROVIDER_MAP = {
     "flexmls_spark": FlexmlsSparkApi,
+    "flexmls_reso": FlexmlsResoApi,
 }
 
 def get_mls_client() -> Optional[MlsApiInterface]:
-    settings = get_settings() # <-- CHANGED: Get settings object
-    provider_name = settings.MLS_PROVIDER # <-- CHANGED: Use settings object
+    """
+    Creates an MLS client based on the MLS_PROVIDER environment variable.
+    """
+    settings = get_settings()
+    provider_name = settings.MLS_PROVIDER
 
     if not provider_name:
         logger.error("MLS_PROVIDER environment variable is not set. Cannot create MLS client.")

@@ -1,6 +1,6 @@
 # ---
 # File Path: backend/agent_core/brain/nudge_engine.py
-# --- UPDATED ---
+# --- UPDATED to fix data model error ---
 
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -49,8 +49,9 @@ async def _create_campaign_from_event(event: MarketEvent, realtor: User, propert
         headline = f"New Listing: {property_item.address}"
     elif event.event_type == "sold_listing":
         headline = f"Just Sold Nearby: {property_item.address}"
-        # For 'sold', the 'price' is the 'sold price'
-        key_intel = {"Sold Price": f"${property_item.price:,.0f}", "Neighborhood": property_item.neighborhood or "N/A"}
+        # --- FIX: Removed reference to non-existent 'neighborhood' attribute ---
+        # The 'address' provides enough location context.
+        key_intel = {"Sold Price": f"${property_item.price:,.0f}", "Address": property_item.address}
     elif event.event_type == "back_on_market":
         headline = f"Back on Market: {property_item.address}"
         key_intel = {"Asking Price": f"${property_item.price:,.0f}", "Status": "Available Again"}
@@ -111,8 +112,11 @@ async def generate_recency_nudges():
     print("NUDGE ENGINE: Checking for clients needing a follow-up...")
     RECENCY_THRESHOLD_DAYS = 90
     
+    # Using a hardcoded ID for the default user, which is a stable pattern in the system.
     realtor = crm_service.get_user_by_id(uuid.UUID("a8c6f1d7-8f7a-4b6e-8b0f-9e5a7d6c5b4a"))
-    if not realtor: return
+    if not realtor: 
+        print("NUDGE ENGINE: Could not find default realtor to generate nudges for.")
+        return
 
     all_clients = crm_service.get_all_clients()
     at_risk_clients = []
@@ -163,6 +167,5 @@ async def process_market_event(event: MarketEvent, realtor: User):
     The main entry point for the Nudge Engine.
     """
     print(f"NUDGE ENGINE: Processing event -> {event.event_type} for entity {event.entity_id}")
-    # --- UPDATED: Added new event types to the processing list ---
     if event.event_type in ["price_drop", "new_listing", "sold_listing", "back_on_market"]:
         await process_event_for_audience(event, realtor)

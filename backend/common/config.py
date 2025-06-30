@@ -1,7 +1,7 @@
 # ---
 # File Path: backend/common/config.py
 # Purpose: Loads and manages all environment variables for the application using Pydantic.
-# This version is UPDATED to include the new GOOGLE_API_KEY setting.
+# --- UPDATED to include new RESO API settings ---
 # ---
 from pydantic_settings import BaseSettings
 from functools import lru_cache
@@ -15,8 +15,7 @@ class Settings(BaseSettings):
     # OpenAI
     OPENAI_API_KEY: str
 
-    # --- NEW: Google AI Settings ---
-    # This field is required for the new semantic search functionality.
+    # Google AI Settings
     GOOGLE_API_KEY: str
 
     # Twilio
@@ -36,9 +35,16 @@ class Settings(BaseSettings):
     FRONTEND_APP_URL: str = "http://localhost:3000"
     SECRET_KEY: str
 
-    # MLS
-    MLS_PROVIDER: str
+    # MLS Providers
+    MLS_PROVIDER: str # e.g., "flexmls_spark" or "flexmls_reso"
+    
+    # --- Demo Spark API Credentials ---
     SPARK_API_DEMO_TOKEN: str
+    
+    # --- NEW: Live RESO API Credentials ---
+    # These will be used when you are ready to "go live".
+    RESO_API_BASE_URL: str
+    RESO_API_TOKEN: str
 
     class Config:
         env_file = ".env"
@@ -48,3 +54,4 @@ class Settings(BaseSettings):
 def get_settings():
     """Returns a cached instance of the Settings for performance."""
     return Settings()
+
