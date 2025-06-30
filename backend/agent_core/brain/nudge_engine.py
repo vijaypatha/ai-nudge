@@ -1,7 +1,6 @@
 # ---
 # File Path: backend/agent_core/brain/nudge_engine.py
-# This is the FINAL, DEFINITIVE fix for all JSON serialization errors.
-# ---
+# --- UPDATED ---
 
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -15,6 +14,7 @@ from agent_core.agents import conversation as conversation_agent
 
 
 def _calculate_match_score(client: Client, property_item: Property) -> tuple[int, list[str]]:
+    """Calculates a match score between a client and a property."""
     score = 0
     reasons = []
     client_locations = client.preferences.get("locations", [])
@@ -35,12 +35,25 @@ def _calculate_match_score(client: Client, property_item: Property) -> tuple[int
 
 async def _create_campaign_from_event(event: MarketEvent, realtor: User, property_item: Property, matched_audience: list[MatchedClient]):
     """
-    Generates the AI message draft and saves the complete campaign briefing.
+    Generates the AI message draft and saves the complete campaign briefing for any event type.
     """
     key_intel = {"address": property_item.address, "price": f"${property_item.price:,.0f}"}
+    headline = f"New Activity: {property_item.address}"
+
+    # --- UPDATED: Custom logic for different event types ---
     if event.event_type == "price_drop":
         price_change = event.payload.get('old_price', 0) - event.payload.get('new_price', 0)
         key_intel["price_change"] = f"${price_change:,.0f}"
+        headline = f"Price Drop: {property_item.address}"
+    elif event.event_type == "new_listing":
+        headline = f"New Listing: {property_item.address}"
+    elif event.event_type == "sold_listing":
+        headline = f"Just Sold Nearby: {property_item.address}"
+        # For 'sold', the 'price' is the 'sold price'
+        key_intel = {"Sold Price": f"${property_item.price:,.0f}", "Neighborhood": property_item.neighborhood or "N/A"}
+    elif event.event_type == "back_on_market":
+        headline = f"Back on Market: {property_item.address}"
+        key_intel = {"Asking Price": f"${property_item.price:,.0f}", "Status": "Available Again"}
 
     ai_draft = await conversation_agent.draft_outbound_campaign_message(
         realtor=realtor,
@@ -49,7 +62,6 @@ async def _create_campaign_from_event(event: MarketEvent, realtor: User, propert
         matched_audience=matched_audience
     )
     
-    # Use Pydantic's .model_dump() to create a JSON-serializable list of dictionaries.
     audience_for_db = [m.model_dump(mode='json') for m in matched_audience]
     
     new_briefing = CampaignBriefing(
@@ -57,7 +69,7 @@ async def _create_campaign_from_event(event: MarketEvent, realtor: User, propert
         user_id=realtor.id,
         campaign_type=event.event_type,
         status="new",
-        headline=f"Price Drop: {property_item.address}",
+        headline=headline,
         key_intel=key_intel,
         listing_url=property_item.listing_url,
         original_draft=ai_draft,
@@ -69,7 +81,7 @@ async def _create_campaign_from_event(event: MarketEvent, realtor: User, propert
 
 async def process_event_for_audience(event: MarketEvent, realtor: User):
     """
-    Finds a matching audience for an event, then creates a Nudge.
+    Finds a matching audience for a market event, then creates a Nudge.
     """
     property_item = crm_service.get_property_by_id(event.entity_id)
     if not property_item:
@@ -131,8 +143,6 @@ async def generate_recency_nudges():
         matched_audience=matched_audience_for_agent
     )
 
-    # --- DEFINITIVE FIX ---
-    # Use Pydantic's .model_dump() here as well to ensure data is serializable.
     audience_for_db = [m.model_dump(mode='json') for m in matched_audience_for_agent]
 
     recency_briefing = CampaignBriefing(
@@ -153,5 +163,6 @@ async def process_market_event(event: MarketEvent, realtor: User):
     The main entry point for the Nudge Engine.
     """
     print(f"NUDGE ENGINE: Processing event -> {event.event_type} for entity {event.entity_id}")
-    if event.event_type in ["price_drop", "new_listing"]:
+    # --- UPDATED: Added new event types to the processing list ---
+    if event.event_type in ["price_drop", "new_listing", "sold_listing", "back_on_market"]:
         await process_event_for_audience(event, realtor)

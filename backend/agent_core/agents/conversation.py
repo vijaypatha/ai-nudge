@@ -1,6 +1,6 @@
 # ---
-# File Path: backend/agent_core/agents/conversation.py
-# This version is UPDATED to handle the new 'recency_nudge' event type.
+# File Path: backend/agent_core/agents/conversation.py 
+# --- UPDATED to handle new 'sold_listing' and 'back_on_market' event types. "THE MOUTH"
 # ---
 from typing import Dict, Any, List
 import uuid
@@ -11,7 +11,7 @@ from data.models.campaign import MatchedClient
 from integrations import openai as openai_service
 from data import crm as crm_service
 
-# --- Function for INBOUND Messages (Existing) ---
+# --- Function for INBOUND Messages (Unchanged) ---
 async def generate_response(
     client_id: uuid.UUID,
     incoming_message_content: str,
@@ -46,7 +46,7 @@ async def draft_outbound_campaign_message(
     realtor: User,
     event_type: str,
     matched_audience: List[MatchedClient],
-    property_item: Property | None = None, # Property is now optional
+    property_item: Property | None = None,
 ) -> str:
     """
     Uses a live LLM to draft a personalized outbound message for different campaign types.
@@ -54,7 +54,7 @@ async def draft_outbound_campaign_message(
     print(f"CONVERSATION AGENT (OUTBOUND): Drafting message for event '{event_type}' via live LLM call...")
 
     prompt = ""
-    # --- NEW LOGIC for Recency Nudge ---
+    # --- Logic for Recency Nudge ---
     if event_type == "recency_nudge":
         prompt = f"""
         You are an expert real estate agent's assistant, 'AI Nudge'. Your task is to draft a friendly, casual, and short "checking in" SMS message.
@@ -68,7 +68,42 @@ async def draft_outbound_campaign_message(
         
         Draft the SMS message now:
         """
-    # --- Existing Logic for Market Events ---
+    # --- NEW: Logic for "Just Sold" Nudge ---
+    elif event_type == "sold_listing" and property_item:
+        prompt = f"""
+        You are an expert real estate agent's assistant, 'AI Nudge'. Your task is to draft a compelling, value-driven SMS message about a nearby property that just sold.
+        This is for clients who might be thinking of selling their own homes.
+
+        Realtor's Name: {realtor.full_name}
+        Context: The property at {property_item.address} just sold for ${property_item.price:,.0f}.
+
+        Instructions:
+        1.  Draft a master SMS message. Use `[Client Name]` for personalization.
+        2.  The tone should be insightful and create urgency/opportunity.
+        3.  Start a conversation by asking if they've considered what this news means for their own home's value.
+        4.  Keep it concise for SMS. Do NOT include a listing URL.
+        
+        Draft the SMS message now:
+        """
+    # --- NEW: Logic for "Back on Market" Nudge ---
+    elif event_type == "back_on_market" and property_item:
+        prompt = f"""
+        You are an expert real estate agent's assistant, 'AI Nudge'. Your task is to draft a helpful, urgent SMS message about a property that's unexpectedly available again.
+        This is for clients who previously showed interest in similar homes.
+
+        Realtor's Name: {realtor.full_name}
+        Context: The property at {property_item.address} was pending sale, but just came back on the market.
+
+        Instructions:
+        1.  Draft a master SMS message. Use `[Client Name]` for personalization.
+        2.  The tone should be helpful and create a sense of a second chance.
+        3.  MUST include the property's listing URL at the end.
+        4.  Keep it concise and clear.
+
+        Property URL: {property_item.listing_url or "N/A"}
+        Draft the SMS message now:
+        """
+    # --- Existing Logic for other Market Events ---
     elif property_item:
         prompt = f"""
         You are an expert real estate agent's assistant, 'AI Nudge'. Your task is to draft a compelling and slightly informal master SMS message.
@@ -96,7 +131,7 @@ async def draft_outbound_campaign_message(
 
     if not ai_draft:
         print(f"CONVERSATION AGENT (OUTBOUND): LLM failed, using fallback message for event {event_type}.")
-        ai_draft = f"Hi [Client Name], just wanted to check in and see how you're doing!"
+        ai_draft = f"Hi [Client Name], just wanted to share a quick update with you!"
 
     print("CONVERSATION AGENT (OUTBOUND): Message draft completed.")
     return ai_draft

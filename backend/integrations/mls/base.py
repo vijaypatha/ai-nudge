@@ -1,5 +1,6 @@
 # FILE: backend/integrations/mls/base.py
 # PURPOSE: Defines the "universal remote control" layout for all MLS integrations.
+# --- UPDATED ---
 
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
@@ -49,5 +50,32 @@ class MlsApiInterface(ABC):
             Optional[List[Dict[str, Any]]]: A list of listing data dictionaries
                                              for properties with price changes,
                                              or None if the fetch fails.
+        """
+        pass
+
+    # --- NEW ABSTRACT METHODS ---
+    @abstractmethod
+    def fetch_sold_listings(self, minutes_ago: int) -> Optional[List[Dict[str, Any]]]:
+        """
+        Specifically fetches listings that have recently sold (closed).
+        
+        Args:
+            minutes_ago (int): The number of minutes to look back for changes.
+
+        Returns:
+            Optional[List[Dict[str, Any]]]: A list of sold listing data, or None.
+        """
+        pass
+
+    @abstractmethod
+    def fetch_back_on_market_listings(self, minutes_ago: int) -> Optional[List[Dict[str, Any]]]:
+        """
+        Specifically fetches listings that have returned to active status from a non-active status.
+        
+        Args:
+            minutes_ago (int): The number of minutes to look back for changes.
+            
+        Returns:
+            Optional[List[Dict[str, Any]]]: A list of back-on-market listing data, or None.
         """
         pass
