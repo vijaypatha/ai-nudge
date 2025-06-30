@@ -130,6 +130,46 @@ services:
       # Uses 'backend' as hostname (Docker service name) and port 8000
       - NEXT_PUBLIC_API_URL=http://backend:8000
 
+  # --- NEW SERVICE: Celery Worker ---
+  # This service runs the background tasks defined in celery_tasks.py
+  celery-worker:
+    build:
+      context: ./backend
+    # This worker also needs access to all the application code
+    volumes:
+      - ./backend:/app
+    env_file:
+      - ./backend/.env
+    # The command to start a celery worker process
+    command: celery -A celery_worker.celery_app worker --loglevel=info
+    networks:
+      - ai_nudge_net
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  # --- NEW SERVICE: Celery Beat Scheduler ---
+  # This service is the "alarm clock" that triggers scheduled tasks
+  celery-beat:
+    build:
+      context: ./backend
+    # This scheduler also needs access to all the application code
+    volumes:
+      - ./backend:/app
+    env_file:
+      - ./backend/.env
+    # The command to start the celery beat scheduler
+    command: celery -A celery_worker.celery_app beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    networks:
+      - ai_nudge_net
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
 # Network Configuration
 # Creates a custom bridge network for all services to communicate
 networks:
@@ -145,3 +185,4 @@ volumes:
   postgres_data:
     # Local driver stores data on the Docker host
     driver: local
+
