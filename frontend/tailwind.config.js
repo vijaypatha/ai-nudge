@@ -28,6 +28,21 @@ module.exports = {
         "gradient-conic":
           "conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))",
       },
+      // --- ADD THIS ---
+      animation: {
+        'aurora': 'aurora 60s linear infinite',
+      },
+      keyframes: {
+        aurora: {
+          from: {
+            backgroundPosition: '0% 50%',
+          },
+          to: {
+            backgroundPosition: '200% 50%',
+          },
+        },
+      },
+      // --- END ADD ---
     },
   },
   plugins: [],
