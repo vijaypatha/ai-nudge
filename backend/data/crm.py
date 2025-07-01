@@ -18,6 +18,24 @@ def get_user_by_id(user_id: uuid.UUID) -> Optional[User]:
     """Retrieves a user by their unique ID."""
     with Session(engine) as session:
         return session.get(User, user_id)
+    
+# --- NEW: Function to update a user's details ---
+def update_user(user_id: uuid.UUID, update_data: User) -> Optional[User]:
+    """Updates a user's record in the database."""
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return None
+        
+        # Using model_dump to get a dictionary of the fields to update
+        update_dict = update_data.model_dump(exclude_unset=True)
+        for key, value in update_dict.items():
+            setattr(user, key, value)
+            
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        return user
 
 # --- Client Functions ---
 def get_client_by_id(client_id: uuid.UUID) -> Optional[Client]:
