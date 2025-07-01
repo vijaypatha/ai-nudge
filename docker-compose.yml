@@ -1,188 +1,123 @@
 # Docker Compose configuration for AI Nudge application
-# This file defines all services needed to run the full-stack application
+# --- FINAL FIX for Celery startup order ---
 
 services:
   # PostgreSQL Database Service
-  # This container runs the PostgreSQL database that stores all application data
   db:
-    # Use PostgreSQL 15 with Alpine Linux (smaller image size)
     image: postgres:15-alpine
-    
-    # Always restart the container if it stops unexpectedly
     restart: always
-    
-    # Environment variables to configure PostgreSQL
     environment:
-      # Name of the database to create on startup
       POSTGRES_DB: realestate_db
-      # Username for database access
       POSTGRES_USER: postgres
-      # Password for database access (should match backend configuration)
       POSTGRES_PASSWORD: password123
-    
-    # Port mapping: host_port:container_port
-    # Maps port 5432 on your host machine to port 5432 in the container
     ports:
       - "5432:5432"
-    
-    # Volume mapping for data persistence
-    # This ensures database data survives container restarts
     volumes:
-      # Maps named volume 'postgres_data' to PostgreSQL's data directory
       - postgres_data:/var/lib/postgresql/data
-    
-    # Connect to the custom network for inter-service communication
     networks:
       - ai_nudge_net
-    
-    # Health check to ensure PostgreSQL is ready before other services start
     healthcheck:
-      # Command to test if PostgreSQL is accepting connections
       test: ["CMD-SHELL", "pg_isready -U postgres"]
-      # How often to run the health check
       interval: 5s
-      # How long to wait for health check to complete
       timeout: 5s
-      # How many times to retry before marking as unhealthy
       retries: 5
+      
+  # Redis Service for Celery
+  redis:
+    image: redis:7-alpine
+    networks:
+      - ai_nudge_net
 
-  # Backend API Service (FastAPI + SQLModel)
-  # This container runs the Python FastAPI application
+  # Backend API Service (FastAPI)
   backend:
-    # Build the backend image from the Dockerfile in ./backend directory
     build:
-      # Path to the directory containing the Dockerfile
       context: ./backend
-      # Name of the Dockerfile to use
       dockerfile: Dockerfile
-    
-    # Port mapping: host_port:container_port
-    # Maps port 8001 on your host to port 8000 in the container
     ports:
       - "8001:8000"
-    
-    # Volume mappings for development
     volumes:
-      # Mount the entire backend directory for live code reloading
       - ./backend:/app
-      # Mount the .env file specifically to ensure environment variables are available
-      - ./backend/.env:/app/.env
-    
-    # Load environment variables from the .env file
     env_file:
       - ./backend/.env
-    
-    # Connect to the custom network for inter-service communication
     networks:
       - ai_nudge_net
-    
-    # Service dependencies - backend waits for database to be healthy
     depends_on:
       db:
-        # Wait for the database health check to pass before starting backend
         condition: service_healthy
-    
-    # Override the default command to run FastAPI with auto-reload for development
-    # --host 0.0.0.0: Accept connections from any IP (needed for Docker networking)
-    # --port 8000: Run on port 8000 inside the container
-    # --reload: Automatically restart when code changes (development only)
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+      redis:
+        condition: service_started
 
-  # Frontend Service (Next.js React Application)
-  # This container runs the React/Next.js frontend application
+  # Frontend Service (Next.js)
   frontend:
-    # Build the frontend image from the Dockerfile in ./frontend directory
     build:
-      # Path to the directory containing the Dockerfile
       context: ./frontend
-      # Name of the Dockerfile to use
       dockerfile: Dockerfile
-    
-    # Port mapping: host_port:container_port
-    # Maps port 3000 on your host to port 3000 in the container
     ports:
       - "3000:3000"
-    
-    # Volume mappings for development
     volumes:
-      # Mount the entire frontend directory for live code reloading
       - ./frontend:/app
-      # Anonymous volume to prevent node_modules from being overwritten
       - /app/node_modules
-      # Anonymous volume to preserve Next.js build cache
       - /app/.next
-    
-    # Override the default command to run Next.js in development mode
-    # This enables hot reloading and development features
     command: npm run dev
-    
-    # Service dependencies - frontend waits for backend to be ready
     depends_on:
       - backend
-    
-    # Connect to the custom network for inter-service communication
     networks:
       - ai_nudge_net
-    
-    # Environment variables for the frontend
     environment:
-      # API URL that the frontend uses to communicate with the backend
-      # Uses 'backend' as hostname (Docker service name) and port 8000
       - NEXT_PUBLIC_API_URL=http://backend:8000
 
-  # --- NEW SERVICE: Celery Worker ---
-  # This service runs the background tasks defined in celery_tasks.py
+  # Celery Worker Service
   celery-worker:
     build:
       context: ./backend
-    # This worker also needs access to all the application code
     volumes:
       - ./backend:/app
     env_file:
       - ./backend/.env
-    # The command to start a celery worker process
+    environment:
+      - PYTHONPATH=/app
     command: celery -A celery_worker.celery_app worker --loglevel=info
     networks:
       - ai_nudge_net
+    # --- FIX: Added depends_on for Redis ---
+    # This ensures the worker does not start until Redis is ready.
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
       backend:
         condition: service_started
 
-  # --- NEW SERVICE: Celery Beat Scheduler ---
-  # This service is the "alarm clock" that triggers scheduled tasks
+  # Celery Beat Scheduler Service
   celery-beat:
     build:
       context: ./backend
-    # This scheduler also needs access to all the application code
     volumes:
       - ./backend:/app
     env_file:
       - ./backend/.env
-    # The command to start the celery beat scheduler
-    command: celery -A celery_worker.celery_app beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    environment:
+      - PYTHONPATH=/app
+    command: celery -A celery_worker.celery_app beat --loglevel=info
     networks:
       - ai_nudge_net
+    # --- FIX: Added depends_on for Redis ---
+    # This ensures the scheduler does not start until Redis is ready.
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
       backend:
         condition: service_started
 
 # Network Configuration
-# Creates a custom bridge network for all services to communicate
 networks:
   ai_nudge_net:
-    # Bridge driver allows containers to communicate with each other
     driver: bridge
 
 # Volume Configuration
-# Defines named volumes for data persistence
 volumes:
-  # Named volume for PostgreSQL data persistence
-  # This volume survives container restarts and removals
   postgres_data:
-    # Local driver stores data on the Docker host
     driver: local
-

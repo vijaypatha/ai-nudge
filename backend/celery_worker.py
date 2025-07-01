@@ -5,30 +5,29 @@ from celery import Celery
 from celery.schedules import crontab
 
 # Define the Redis URL for our message broker.
-# For production, this should come from an environment variable.
-REDIS_URL = "redis://localhost:6379/0"
+REDIS_URL = "redis://redis:6379/0" # Use the service name 'redis' from docker-compose
 
 # Create the Celery app instance.
-# The first argument is the name of the current module.
-# The 'backend' argument specifies where Celery should look for task modules.
 celery_app = Celery(
     "worker",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["backend.celery_tasks"] # Point Celery to our tasks file
+    # --- FIX: Corrected the include path ---
+    # From within the /app directory, the path is just 'celery_tasks'.
+    include=["celery_tasks"] 
 )
 
 # --- Celery Beat Schedules (The "Company Clock") ---
-# This is where we define all our recurring tasks.
 celery_app.conf.beat_schedule = {
-    # The name of the schedule entry
     'check-mls-every-15-minutes': {
-        # The path to the task function to run
-        'task': 'backend.celery_tasks.check_mls_for_events_task',
-        # The schedule: run every 15 minutes
+        # --- FIX: Corrected the task path ---
+        'task': 'celery_tasks.check_mls_for_events_task',
         'schedule': crontab(minute='*/15'),
     },
-    # We can add more scheduled tasks here in the future.
+    'check-for-recency-nudges-daily': {
+        'task': 'celery_tasks.check_for_recency_nudges_task',
+        'schedule': crontab(hour=9, minute=0), # Run once a day at 9 AM
+    }
 }
 
 celery_app.conf.timezone = 'UTC'

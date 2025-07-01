@@ -1,8 +1,8 @@
 #property - Stores property listings with status/address indexes
 
-
 from typing import Optional, List
 from uuid import UUID, uuid4
+from datetime import datetime, timezone # Import datetime and timezone
 from sqlmodel import SQLModel, Field, Column, JSON
 
 # --- Table Model ---
@@ -18,7 +18,11 @@ class Property(SQLModel, table=True):
     listing_url: Optional[str] = Field(default=None)
     image_urls: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     status: str = Field(default="active", index=True)
-    last_updated: str
+    
+    # --- FIX: Add a default_factory to prevent NotNullViolation ---
+    # This ensures the 'last_updated' field always has a value when a new
+    # property is created, making the model more robust.
+    last_updated: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 # --- API Schemas ---
 class PropertyCreate(SQLModel):

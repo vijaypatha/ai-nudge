@@ -1,23 +1,17 @@
 # FILE: backend/celery_tasks.py
 # PURPOSE: Defines the background tasks that our Celery worker will run.
+# --- CORRECTED to call the correct nudge engine functions ---
 
 import asyncio
 import logging
-
-# Use absolute imports to prevent any pathing issues.
-# from backend.celery_worker import celery_app
-# from backend.integrations.mls.factory import get_mls_client
-# from backend.agent_core.brain import nudge_engine
-# from backend.data import crm as crm_service
+import uuid
 
 from celery_worker import celery_app
-from integrations.mls.factory import get_mls_client
 from agent_core.brain import nudge_engine
 from data import crm as crm_service
 
 logger = logging.getLogger(__name__)
 
-# This decorator registers the function as a Celery task.
 @celery_app.task
 def check_mls_for_events_task():
     """
@@ -25,34 +19,44 @@ def check_mls_for_events_task():
     This is the "alarm" that triggers our "Perceive -> Reason" loop.
     """
     logger.info("CELERY TASK: Starting MLS event check...")
-    mls_client = get_mls_client()
-    if not mls_client:
-        logger.error("CELERY TASK FAILED: Could not create MLS client.")
-        return
-
-    # Discover events from the last 15 minutes.
-    market_events = mls_client.discover_events(minutes_ago=15)
     
-    if not market_events:
-        logger.info("CELERY TASK: No new market events found.")
-        return
+    # --- FIX: Use the main orchestrator function from nudge_engine ---
+    # This function already handles getting the MLS client and fetching all event types.
+    try:
+        # Get the default user to run the scan for.
+        realtor_id = uuid.UUID("a8c6f1d7-8f7a-4b6e-8b0f-9e5a7d6c5b4a")
+        realtor = crm_service.get_user_by_id(realtor_id)
+        if not realtor:
+            logger.error("CELERY TASK FAILED: Could not find a default realtor user.")
+            return
 
-    logger.info(f"CELERY TASK: Found {len(market_events)} new market events. Processing...")
-    
-    # For now, assume a single default user for the background task.
-    # In the future, this would handle tasks for multiple users.
-    realtor = crm_service.get_user_by_id(crm_service.mock_users_db[0].id)
-    if not realtor:
-        logger.error("CELERY TASK FAILED: Could not find a default realtor user to process events for.")
-        return
+        # Run the async function from our synchronous Celery task.
+        # This single function call replaces the old, incorrect logic.
+        asyncio.run(nudge_engine.scan_for_all_market_events(realtor, minutes_ago=15))
+        logger.info("CELERY TASK: MLS event check completed successfully.")
+    except Exception as e:
+        logger.error(f"CELERY TASK ERROR: MLS event check failed: {e}")
 
-    for event in market_events:
-        # Since nudge_engine.process_market_event is an async function,
-        # we run it within an asyncio event loop.
-        asyncio.run(nudge_engine.process_market_event(event, realtor))
-    
-    logger.info("CELERY TASK: Finished processing market events.")
 
+@celery_app.task
+def check_for_recency_nudges_task():
+    """
+    A background task that periodically runs the recency check in the Nudge Engine.
+    """
+    logger.info("CELERY TASK: Kicking off daily check for recency nudges...")
+    try:
+        # --- FIX: Fetch the realtor and pass it to the function ---
+        # The generate_recency_nudges function requires the realtor object.
+        realtor_id = uuid.UUID("a8c6f1d7-8f7a-4b6e-8b0f-9e5a7d6c5b4a")
+        realtor = crm_service.get_user_by_id(realtor_id)
+        if not realtor:
+            logger.error("CELERY TASK FAILED: Could not find a default realtor user for recency check.")
+            return
+            
+        asyncio.run(nudge_engine.generate_recency_nudges(realtor))
+        logger.info("CELERY TASK: Recency nudge check completed successfully.")
+    except Exception as e:
+        logger.error(f"CELERY TASK ERROR: Recency nudge check failed: {e}")
 
 @celery_app.task
 def send_scheduled_message_task(message_id: str):
@@ -63,16 +67,3 @@ def send_scheduled_message_task(message_id: str):
     logger.info(f"CELERY TASK: Pretending to send scheduled message -> {message_id}")
     # TODO: Add logic to fetch the message by ID and send it via the communication tool.
     pass
-
-@celery_app.task
-def check_for_recency_nudges_task():
-    """
-    A background task that periodically runs the recency check in the Nudge Engine.
-    """
-    print("CELERY TASK: Kicking off daily check for recency nudges...")
-    try:
-        # We need to run our async function from the synchronous Celery task.
-        asyncio.run(nudge_engine.generate_recency_nudges())
-        print("CELERY TASK: Recency nudge check completed successfully.")
-    except Exception as e:
-        print(f"CELERY TASK ERROR: Recency nudge check failed: {e}")
