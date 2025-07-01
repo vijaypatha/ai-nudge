@@ -1,7 +1,7 @@
 # ---
 # File Path: backend/api/rest/admin_triggers.py
 # Purpose: Developer endpoints to manually trigger backend processes.
-# --- COMPREHENSIVELY FIXED ---
+# --- CORRECTED to fix TypeError in /run-daily-scan endpoint ---
 
 from fastapi import APIRouter, status, HTTPException
 from typing import Optional
@@ -27,10 +27,7 @@ router = APIRouter(
 def _get_realtor_and_property(property_id: Optional[uuid.UUID] = None) -> tuple[User, Property]:
     """
     Helper to fetch the default realtor USER and a specific or default property.
-    This is the core fix for the ForeignKeyViolation error.
     """
-    # --- FIX: Fetch the specific User (realtor) instead of a Client ---
-    # The system relies on a known, hardcoded user for these operations.
     realtor_id = uuid.UUID("a8c6f1d7-8f7a-4b6e-8b0f-9e5a7d6c5b4a")
     realtor = crm_service.get_user_by_id(realtor_id)
     if not realtor:
@@ -49,61 +46,79 @@ def _get_realtor_and_property(property_id: Optional[uuid.UUID] = None) -> tuple[
     return realtor, property_item
 
 
+@router.post("/run-market-scan", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_market_scan(minutes_ago: int = 60):
+    """
+    Manually triggers the full, autonomous market scan for market-based events.
+    """
+    realtor, _ = _get_realtor_and_property()
+    await nudge_engine.scan_for_all_market_events(realtor=realtor, minutes_ago=minutes_ago)
+    return {"status": "accepted", "message": f"Full market scan initiated, looking back {minutes_ago} minutes."}
+
+
 @router.post("/run-daily-scan", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_daily_scan():
     """
     Manually triggers the daily scan for relationship-based nudges (recency).
     """
-    # This function correctly calls the nudge_engine which handles fetching its own user.
-    await nudge_engine.generate_recency_nudges()
-    return {"status": "accepted", "message": "Daily relationship scan initiated."}
+    # --- FIX: Fetches the realtor user first. ---
+    realtor, _ = _get_realtor_and_property()
+    # --- FIX: Passes the required 'realtor' argument to the function call. ---
+    await nudge_engine.generate_recency_nudges(realtor=realtor) 
+    return {"status": "accepted", "message": "Daily relationship scan for recency nudges initiated."}
 
+
+# --- Individual Event Triggers for Testing ---
 
 @router.post("/create-sold-event", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_sold_event(property_id: Optional[uuid.UUID] = None):
-    """
-    (DEBUG ENDPOINT) Manually triggers a 'sold_listing' event for a property.
-    """
+    """(DEBUG) Manually triggers a 'sold_listing' event."""
     realtor, property_item = _get_realtor_and_property(property_id)
-
-    # --- FIX: Removed 'neighborhood' to prevent AttributeError ---
-    sold_event = MarketEvent(
-        event_type="sold_listing",
-        entity_id=property_item.id,
-        payload={"sold_price": property_item.price}
-    )
-    
-    await nudge_engine.process_market_event(sold_event, realtor)
-    
+    event = MarketEvent(event_type="sold_listing", entity_id=property_item.id, payload={"sold_price": property_item.price})
+    await nudge_engine.process_market_event(event, realtor)
     return {"status": "accepted", "message": f"'Sold Listing' event triggered for property: {property_item.address}"}
 
 
 @router.post("/create-back-on-market-event", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_back_on_market_event(property_id: Optional[uuid.UUID] = None):
-    """
-    (DEBUG ENDPOINT) Manually triggers a 'back_on_market' event for a property.
-    """
+    """(DEBUG) Manually triggers a 'back_on_market' event."""
     realtor, property_item = _get_realtor_and_property(property_id)
-
-    back_on_market_event = MarketEvent(
-        event_type="back_on_market",
-        entity_id=property_item.id,
-        payload={"previous_status": "Pending", "current_status": "Active"}
-    )
-    
-    await nudge_engine.process_market_event(back_on_market_event, realtor)
-    
+    event = MarketEvent(event_type="back_on_market", entity_id=property_item.id, payload={})
+    await nudge_engine.process_market_event(event, realtor)
     return {"status": "accepted", "message": f"'Back on Market' event triggered for property: {property_item.address}"}
+
+
+@router.post("/create-expired-event", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_expired_event(property_id: Optional[uuid.UUID] = None):
+    """(DEBUG) Manually triggers an 'expired_listing' event."""
+    realtor, property_item = _get_realtor_and_property(property_id)
+    event = MarketEvent(event_type="expired_listing", entity_id=property_item.id, payload={})
+    await nudge_engine.process_market_event(event, realtor)
+    return {"status": "accepted", "message": f"'Expired Listing' event triggered for property: {property_item.address}"}
+
+
+@router.post("/create-coming-soon-event", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_coming_soon_event(property_id: Optional[uuid.UUID] = None):
+    """(DEBUG) Manually triggers a 'coming_soon' event."""
+    realtor, property_item = _get_realtor_and_property(property_id)
+    event = MarketEvent(event_type="coming_soon", entity_id=property_item.id, payload={})
+    await nudge_engine.process_market_event(event, realtor)
+    return {"status": "accepted", "message": f"'Coming Soon' event triggered for property: {property_item.address}"}
+
+
+@router.post("/create-withdrawn-event", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_withdrawn_event(property_id: Optional[uuid.UUID] = None):
+    """(DEBUG) Manually triggers a 'withdrawn_listing' event."""
+    realtor, property_item = _get_realtor_and_property(property_id)
+    event = MarketEvent(event_type="withdrawn_listing", entity_id=property_item.id, payload={})
+    await nudge_engine.process_market_event(event, realtor)
+    return {"status": "accepted", "message": f"'Withdrawn Listing' event triggered for property: {property_item.address}"}
 
 
 @router.post("/create-test-nudge", status_code=status.HTTP_201_CREATED)
 async def create_test_nudge(count: int = 1):
-    """
-    (DEBUG ENDPOINT) Creates one or more hardcoded 'price_drop' CampaignBriefings.
-    """
-    # Uses the robust helper to get a real user and property.
+    """(DEBUG) Creates one or more hardcoded 'price_drop' CampaignBriefings."""
     realtor, property_item = _get_realtor_and_property()
-    
     clients = crm_service.get_all_clients()
     if not clients:
         raise HTTPException(status_code=404, detail="No clients found to create audience.")
@@ -111,18 +126,13 @@ async def create_test_nudge(count: int = 1):
     for i in range(count):
         key_intel = {"Price Change": "-$50,000", "Address": property_item.address}
         headline = f"Price Drop: {property_item.address}"
-
-        matched_client_data = [
-            MatchedClient(client_id=c.id, client_name=c.full_name, match_score=95, match_reason="Test Audience")
-            for c in clients[:1]
-        ]
-
+        matched_client_data = [MatchedClient(client_id=c.id, client_name=c.full_name, match_score=95, match_reason="Test Audience") for c in clients[:1]]
         test_briefing = CampaignBriefing(
-            user_id=realtor.id, # Uses the correct realtor ID
+            user_id=realtor.id,
             campaign_type="price_drop",
             headline=headline,
             key_intel=key_intel,
-            original_draft=f"Hi [Client Name], a test property at {property_item.address} just had a price drop. This is nudge #{i+1}.",
+            original_draft=f"Hi [Client Name], a test property at {property_item.address} just had a price drop.",
             matched_audience=[m.model_dump(mode='json') for m in matched_client_data],
             triggering_event_id=property_item.id,
             status="new"
