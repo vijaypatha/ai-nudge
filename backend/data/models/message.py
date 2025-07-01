@@ -1,6 +1,8 @@
+# File Path: backend/data/models/message.py
+# Purpose: Defines data models for all messages.
+# --- UPDATED to include a universal 'Message' log table ---
 
-# scheduledmessage - Stores scheduled messages with foreign key to client
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, List
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 from enum import Enum
@@ -14,8 +16,34 @@ class MessageStatus(str, Enum):
     SENT = "sent"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    RECEIVED = "received" # For inbound messages
+
+# --- NEW: Added to distinguish message direction ---
+class MessageDirection(str, Enum):
+    INBOUND = "inbound"
+    OUTBOUND = "outbound"
+
+# --- NEW: Universal Message Log Table ---
+class Message(SQLModel, table=True):
+    """
+    (Database Table) A log of every single message sent or received.
+    This provides a complete history for any conversation.
+    """
+    id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
+    client_id: UUID = Field(foreign_key="client.id", index=True)
+    content: str
+    direction: MessageDirection = Field(index=True)
+    status: MessageStatus
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+    
+    # Defines the many-to-one relationship with the Client table
+    client: Optional["Client"] = Relationship(back_populates="messages")
+
 
 class ScheduledMessage(SQLModel, table=True):
+    """
+    (Database Table) Stores messages scheduled to be sent in the future.
+    """
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     client_id: UUID = Field(foreign_key="client.id")
     content: str

@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 from sqlmodel import SQLModel, Field, Relationship, Column, JSON
 
 if TYPE_CHECKING:
-    from .message import ScheduledMessage
+    from .message import ScheduledMessage, Message
 
 class Client(SQLModel, table=True):
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
@@ -17,6 +17,9 @@ class Client(SQLModel, table=True):
     last_interaction: Optional[str] = Field(default=None)
     
     scheduled_messages: List["ScheduledMessage"] = Relationship(back_populates="client")
+
+    messages: List["Message"] = Relationship(back_populates="client")
+
 
 class ClientCreate(SQLModel):
     full_name: str

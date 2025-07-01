@@ -1,49 +1,31 @@
 # File Path: backend/api/rest/inbox.py
-# Purpose: Defines API endpoints for handling incoming messages that require AI processing.
-# CORRECTED VERSION: Updated to use database functions instead of mock data
+# Purpose: Defines the public webhook for receiving incoming SMS from Twilio.
+# --- UPDATED to use the new integration module for live Twilio messages ---
 
-from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
-from typing import Dict, Any
-import uuid
-from data.models.message import IncomingMessage
-from agent_core import orchestrator
+from fastapi import APIRouter, status, Form, Response
+
+# --- Import the dedicated Twilio integration module ---
+from integrations import twilio_incoming
 
 router = APIRouter(
     prefix="/inbox",
     tags=["Inbox"]
 )
 
-@router.post("/receive-message", response_model=Dict[str, Any], status_code=status.HTTP_200_OK)
-async def receive_incoming_message(message: IncomingMessage):
-    """Simulates receiving an incoming message from a client and generates an AI draft."""
-    from agent_core import orchestrator
-    from data import crm as crm_service
-    
-    # CORRECTED: Use database function instead of mock function
-    client_exists = crm_service.get_client_by_id(message.client_id)
-    if not client_exists:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Client with ID {message.client_id} not found."
-        )  # FIXED: Added missing closing parenthesis
-    
-    orchestration_result = await orchestrator.handle_incoming_message(
-        client_id=message.client_id,
-        incoming_message_content=message.content
-    )  # FIXED: Added missing closing parenthesis
-    
-    return orchestration_result
-
-@router.post("/receive-sms-mock", status_code=status.HTTP_200_OK)
-async def receive_sms_mock(message: IncomingMessage):
+@router.post("/twilio_inbound", status_code=status.HTTP_204_NO_CONTENT)
+async def handle_twilio_inbound_sms(
+    From: str = Form(...), 
+    Body: str = Form(...)
+):
     """
-    MOCK ENDPOINT: Simulates receiving an SMS from a client.
-    This triggers the full orchestration, including intel extraction.
-    """
-    await orchestrator.handle_incoming_message(
-        client_id=message.client_id,
-        incoming_message_content=message.content
-    )  # FIXED: Added missing closing parenthesis
+    Handles incoming SMS messages from Twilio's webhook.
     
-    return {"status": "message received and processed"}
+    This endpoint acts as a thin wrapper. It receives the request,
+    passes it to the integration layer for processing, and then sends
+    an empty response back to Twilio to acknowledge receipt.
+    """
+    # The core logic is now handled by the integration module
+    await twilio_incoming.process_incoming_sms(from_number=From, body=Body)
+    
+    # Always respond to Twilio with an empty TwiML response to prevent errors.
+    return Response(content="<Response></Response>", media_type="application/xml")
