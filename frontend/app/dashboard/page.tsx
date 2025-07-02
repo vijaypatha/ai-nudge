@@ -131,7 +131,8 @@ const DynamicTaggingCard = ({ client, onUpdate }: { client: Client, onUpdate: (u
       </div>
       <div className="p-4 space-y-4">
         <div>
-          <h4 className="text-sm font-semibold text-brand-text-muted flex items-center gap-2 mb-3"><Tag size={14} /> Your Tags</h4>
+          <h4 className="text-sm font-semibold text-brand-text-muted flex items-center gap-2 mb"><Tag size={14} /> Your Tags</h4>
+          <h6 className="text-xs font-semibold text-brand-text-muted flex items-center gap-1 mb-3"> Example Tags: Potential Seller, First Time Buyer, Investor, Past Seller</h6>
           <div className="flex flex-wrap gap-2 items-center">
             {(client.user_tags || []).map(tag => (
               <span key={tag} className="flex items-center gap-1.5 bg-primary-action/20 text-brand-accent text-xs font-semibold pl-2.5 pr-1.5 py-1 rounded-full animate-in fade-in-0 zoom-in-95">
