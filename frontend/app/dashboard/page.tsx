@@ -1,5 +1,7 @@
 // File Path: frontend/app/dashboard/page.tsx
-// --- UPDATED to use live backend APIs for conversations ---
+// --- ARCHITECTURE FIX ---
+// - `handlePlanCampaign` now calls the new `POST /campaigns/plan-relationship` endpoint.
+// - The client_id is now correctly passed in the request body.
 
 'use client';
 
@@ -9,21 +11,30 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import clsx from 'clsx';
 import { useAppContext } from '../../context/AppContext';
-import type { Client, Property, Message, Conversation, ScheduledMessage } from '../../context/AppContext';
+import type { Property, Message, Conversation, ScheduledMessage } from '../../context/AppContext';
 import {
   MessageCircleHeart, Zap, Users, MessageSquare, Paperclip, Phone, Video,
-  Sparkles, Search, Send, Calendar, Gift, Star, X, Edit2, Info, User as UserIcon, Menu
+  Sparkles, Search, Send, Calendar, Gift, Star, X, Edit2, Info, User as UserIcon, Menu, Tag, Plus, BrainCircuit, Loader2
 } from "lucide-react";
 
+interface Client {
+  id: string;
+  full_name: string;
+  email: string | null;
+  ai_tags: string[];
+  user_tags: string[];
+  preferences: {
+    notes?: string[];
+    [key: string]: any;
+  };
+}
 
-// --- Reusable Sub-Components (Preserved from original design) ---
-
-const InfoCard = ({ title, children, className, onEdit }: { title: string, children: React.ReactNode, className?: string, onEdit?: () => void }) => (
+const InfoCard = ({ title, icon, children, className, onEdit }: { title: string, icon?: React.ReactNode, children: React.ReactNode, className?: string, onEdit?: () => void }) => (
   <div className={clsx("bg-white/5 border border-white/10 rounded-xl relative", className)}>
     <div className="flex justify-between items-center px-4 pt-4 pb-2">
-      <h3 className="text-sm font-semibold text-brand-text-muted">{title}</h3>
+      <h3 className="text-sm font-semibold text-brand-text-muted flex items-center gap-2">{icon}{title}</h3>
       {onEdit && (
-        <button onClick={onEdit} className="p-1 text-brand-text-muted hover:text-white opacity-50 hover:opacity-100 transition-opacity" title="Edit Intel">
+        <button onClick={onEdit} className="p-1 text-brand-text-muted hover:text-white opacity-50 hover:opacity-100 transition-opacity" title="Edit">
           <Edit2 size={14} />
         </button>
       )}
@@ -75,6 +86,94 @@ const EditMessageModal = ({ isOpen, onClose, message, onSave }: { isOpen: boolea
   );
 };
 
+const DynamicTaggingCard = ({ client, onUpdate }: { client: Client, onUpdate: (updatedClient: Client) => void }) => {
+  const [newTag, setNewTag] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleUpdateTags = async (updatedUserTags: string[]) => {
+    setIsSaving(true);
+    try {
+      const res = await fetch(`http://localhost:8001/clients/${client.id}/tags`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_tags: updatedUserTags }),
+      });
+      if (!res.ok) throw new Error('Failed to update tags');
+      const updatedClient = await res.json();
+      onUpdate(updatedClient);
+    } catch (err) {
+      console.error("Tag update failed:", err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAddTag = () => {
+    const trimmedTag = newTag.trim();
+    if (trimmedTag && !(client.user_tags || []).includes(trimmedTag)) {
+      const updatedTags = [...(client.user_tags || []), trimmedTag];
+      handleUpdateTags(updatedTags);
+      setNewTag('');
+    }
+  };
+
+  const handleRemoveTag = (tagToRemove: string) => {
+    const updatedTags = (client.user_tags || []).filter(tag => tag !== tagToRemove);
+    handleUpdateTags(updatedTags);
+  };
+
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-xl">
+      <div className="p-4 text-center border-b border-white/10">
+        <Avatar name={client.full_name} className="w-16 h-16 text-2xl mb-3 mx-auto" />
+        <h3 className="text-lg font-bold text-brand-text-main">{client.full_name}</h3>
+        <p className="text-sm text-brand-text-muted">{client.email}</p>
+      </div>
+      <div className="p-4 space-y-4">
+        <div>
+          <h4 className="text-sm font-semibold text-brand-text-muted flex items-center gap-2 mb-3"><Tag size={14} /> Your Tags</h4>
+          <div className="flex flex-wrap gap-2 items-center">
+            {(client.user_tags || []).map(tag => (
+              <span key={tag} className="flex items-center gap-1.5 bg-primary-action/20 text-brand-accent text-xs font-semibold pl-2.5 pr-1.5 py-1 rounded-full animate-in fade-in-0 zoom-in-95">
+                {tag}
+                <button onClick={() => handleRemoveTag(tag)} className="bg-black/10 hover:bg-black/30 rounded-full p-0.5 transition-colors"><X size={12} /></button>
+              </span>
+            ))}
+            <div className="flex-1 min-w-[120px]">
+              <input
+                type="text"
+                value={newTag}
+                onChange={(e) => setNewTag(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
+                placeholder="Add tag..."
+                className="w-full bg-transparent text-sm text-brand-text-main placeholder:text-brand-text-muted/60 focus:outline-none"
+                disabled={isSaving}
+              />
+            </div>
+            <button
+                onClick={handleAddTag}
+                disabled={isSaving || !newTag.trim()}
+                className="p-1.5 bg-white/10 text-brand-text-muted hover:text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                <Plus size={14} />
+            </button>
+          </div>
+        </div>
+        {(client.ai_tags || []).length > 0 && (
+          <div className="pt-2">
+            <h4 className="text-sm font-semibold text-brand-text-muted flex items-center gap-2 mb-3"><BrainCircuit size={14} /> AI Suggested Tags</h4>
+            <div className="flex flex-wrap gap-2">
+              {(client.ai_tags || []).map(tag => (
+                <span key={tag} className="bg-white/10 text-brand-text-muted text-xs font-semibold px-2.5 py-1 rounded-full">{tag}</span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+
 const ClientIntelCard = ({ client, onUpdate, onReplan }: { client: Client | undefined, onUpdate: (updatedClient: Client) => void, onReplan: () => void }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [notes, setNotes] = useState('');
@@ -93,7 +192,7 @@ const ClientIntelCard = ({ client, onUpdate, onReplan }: { client: Client | unde
   };
   const handleReplan = () => { onReplan(); setShowReplanPrompt(false); };
   return (
-    <InfoCard title="Client Intel" onEdit={!isEditing ? () => setIsEditing(true) : undefined}>
+    <InfoCard title="Client Intel" icon={<Info size={14}/>} onEdit={!isEditing ? () => setIsEditing(true) : undefined}>
       <div className="pt-2">
         {isEditing ? (
           <div className="space-y-3">
@@ -107,7 +206,7 @@ const ClientIntelCard = ({ client, onUpdate, onReplan }: { client: Client | unde
         ) : (
           <ul className="space-y-2">
             {(client.preferences?.notes || []).length > 0 ? (
-              (client.preferences.notes).map((note: string, index: number) => (<li key={index} className="flex items-start gap-3 text-sm"><Info size={14} className="flex-shrink-0 mt-0.5" />{note}</li>))
+              (client.preferences?.notes || []).map((note: string, index: number) => (<li key={index} className="flex items-start gap-3 text-sm"><Sparkles size={14} className="flex-shrink-0 mt-0.5 text-brand-accent" />{note}</li>))
             ) : (<p className="text-xs text-brand-text-muted text-center py-2">No intel added. Click the edit icon to add notes.</p>)}
           </ul>
         )}
@@ -125,7 +224,7 @@ const ClientIntelCard = ({ client, onUpdate, onReplan }: { client: Client | unde
   );
 };
 
-const RelationshipCampaignCard = ({ messages, onReplan, onUpdateMessage }: { messages: ScheduledMessage[], onReplan: () => void, onUpdateMessage: (updatedMessage: ScheduledMessage) => void }) => {
+const RelationshipCampaignCard = ({ messages, onReplan, onUpdateMessage, isPlanning }: { messages: ScheduledMessage[], onReplan: () => void, onUpdateMessage: (updatedMessage: ScheduledMessage) => void, isPlanning: boolean }) => {
   const [editingMessage, setEditingMessage] = useState<ScheduledMessage | null>(null);
   const getIconForMessage = (content: string) => {
     const lowerContent = content.toLowerCase();
@@ -137,10 +236,7 @@ const RelationshipCampaignCard = ({ messages, onReplan, onUpdateMessage }: { mes
   return (
     <>
       <EditMessageModal isOpen={!!editingMessage} onClose={() => setEditingMessage(null)} message={editingMessage} onSave={onUpdateMessage} />
-      <InfoCard title="Relationship Campaign">
-        <button onClick={onReplan} className="absolute top-4 right-4 p-1 text-brand-text-muted hover:text-white opacity-50 hover:opacity-100 transition-opacity" title="Re-plan Campaign">
-          <Zap size={14} />
-        </button>
+      <InfoCard title="Relationship Campaign" icon={<Zap size={14} />}>
         {messages.length > 0 ? (
           <ul className="space-y-1 pt-2">
             {messages.map(msg => (
@@ -159,7 +255,9 @@ const RelationshipCampaignCard = ({ messages, onReplan, onUpdateMessage }: { mes
         ) : (
           <div className="text-center py-4">
             <p className="text-sm text-brand-text-muted mb-3">No campaign planned for this client.</p>
-            <button onClick={onReplan} className="w-full px-3 py-2 text-sm font-semibold bg-primary-action/20 text-brand-accent hover:bg-primary-action/30 rounded-md">+ Plan Relationship Campaign</button>
+            <button onClick={onReplan} disabled={isPlanning} className="w-full px-3 py-2 text-sm font-semibold bg-primary-action/20 text-brand-accent hover:bg-primary-action/30 rounded-md disabled:opacity-50 disabled:cursor-wait flex items-center justify-center gap-2">
+              {isPlanning ? <><Loader2 size={16} className="animate-spin" /> Planning...</> : `+ Plan Relationship Campaign`}
+            </button>
           </div>
         )}
       </InfoCard>
@@ -170,12 +268,11 @@ const RelationshipCampaignCard = ({ messages, onReplan, onUpdateMessage }: { mes
 
 // --- Main Dashboard Page Component ---
 export default function DashboardPage() {
-  const { clients, setClients } = useAppContext();
+  const [clients, setClients] = useState<Client[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
   
-  // --- STATE REFACTOR for live data ---
   const [loading, setLoading] = useState(true);
   const [conversationSummaries, setConversationSummaries] = useState<Conversation[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -188,8 +285,8 @@ export default function DashboardPage() {
   
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'messages' | 'intel'>('messages');
+  const [isPlanningCampaign, setIsPlanningCampaign] = useState(false);
 
-  // --- KEY FEATURE: Fetch initial dashboard data from the backend ---
   useEffect(() => {
     const fetchInitialData = async () => {
       setLoading(true);
@@ -212,7 +309,6 @@ export default function DashboardPage() {
         setClients(clientsData);
         setProperties(propertiesData);
 
-        // Auto-select first conversation or one from URL param
         const clientIdFromUrl = searchParams.get('clientId');
         if (clientIdFromUrl) {
           setSelectedClientId(clientIdFromUrl);
@@ -227,9 +323,8 @@ export default function DashboardPage() {
       }
     };
     fetchInitialData();
-  }, [setClients, searchParams]);
+  }, [searchParams]);
 
-  // --- KEY FEATURE: Fetch full conversation history when a client is selected ---
   useEffect(() => {
     if (!selectedClientId) {
       setCurrentMessages([]);
@@ -247,7 +342,6 @@ export default function DashboardPage() {
         if (!historyRes.ok) throw new Error('Failed to fetch message history');
         const historyData = await historyRes.json();
         
-        // Map backend 'direction' to frontend 'sender'
         const formattedMessages = historyData.map((msg: any) => ({
           id: msg.id,
           sender: msg.direction === 'inbound' ? 'client' : 'agent',
@@ -269,18 +363,16 @@ export default function DashboardPage() {
     };
 
     fetchConversationDetails();
-    setActiveTab('messages'); // Always switch to messages tab on selection change
+    setActiveTab('messages');
   }, [selectedClientId]);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [currentMessages, activeTab]);
 
-  // --- KEY INTEGRATION: Send a reply using the live backend endpoint ---
   const handleSendMessage = async () => {
     if (!composerMessage.trim() || !selectedClientId || isSending) return;
     setIsSending(true);
     const content = composerMessage;
     
-    // Optimistic UI update for a responsive feel
     const optimisticMessage: Message = {
       id: `agent-${Date.now()}`,
       sender: 'agent',
@@ -297,34 +389,50 @@ export default function DashboardPage() {
         body: JSON.stringify({ content: content }),
       });
 
-      if (!res.ok) {
-        throw new Error("Failed to send message");
-      }
-      // On success, we can optionally refetch history to get the real message from the server,
-      // but for now, the optimistic update is sufficient.
+      if (!res.ok) throw new Error("Failed to send message");
 
     } catch (err) {
       console.error(err);
-      setComposerMessage(content); // Restore message on failure
-      setCurrentMessages(prev => prev.filter(m => m.id !== optimisticMessage.id)); // Remove optimistic message
+      setComposerMessage(content);
+      setCurrentMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
       alert("Failed to send message.");
     } finally {
       setIsSending(false);
     }
   };
   
-  // Handlers for the right-hand context panel (logic is unchanged)
   const handleUpdateClient = (updatedClient: Client) => { setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c)); };
+  
+  // UPDATED: This now calls the correct endpoint and handles loading state.
+  // This version adds a check to ensure the POST was successful before refreshing the UI
   const handlePlanCampaign = async (clientId: string) => {
-    await fetch(`http://localhost:8001/clients/${clientId}/plan-campaign`, { method: 'POST' });
-    const res = await fetch(`http://localhost:8001/clients/${clientId}/scheduled-messages`);
-    const data = await res.json();
-    setScheduledMessages(data);
+    setIsPlanningCampaign(true);
+    try {
+        const response = await fetch(`http://localhost:8001/campaigns/plan-relationship`, { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ client_id: clientId }),
+        });
+
+        // This check prevents the refresh if the planning call fails
+        if (!response.ok) {
+            throw new Error(`Failed to plan campaign: ${response.statusText}`);
+        }
+        
+        // After planning succeeds, refetch the scheduled messages to update the UI
+        const res = await fetch(`http://localhost:8001/clients/${clientId}/scheduled-messages`);
+        const data = await res.json();
+        setScheduledMessages(data);
+    } catch (err) {
+        console.error("Failed to plan campaign:", err);
+        alert("There was an error planning the campaign.");
+    } finally {
+        setIsPlanningCampaign(false);
+    }
   };
+
   const handleUpdateScheduledMessage = (updatedMessage: ScheduledMessage) => { setScheduledMessages(prev => prev.map(msg => msg.id === updatedMessage.id ? updatedMessage : msg)); };
 
-
-  // --- Render Logic ---
   if (loading) { return (<div className="flex flex-col justify-center items-center h-screen text-brand-text-muted bg-brand-dark"><Sparkles className="w-10 h-10 text-brand-accent animate-spin mb-4" /><p className="text-xl font-medium">Loading your AI Nudge workspace...</p></div>); }
   if (error) { return (<div className="flex flex-col justify-center items-center h-screen text-red-400 bg-brand-dark"><p className="text-xl mb-4">Error loading dashboard</p><p className="text-sm font-mono bg-white/5 p-4 rounded-lg">{error}</p></div>); }
 
@@ -334,7 +442,6 @@ export default function DashboardPage() {
     <div className="h-screen w-screen bg-brand-dark text-brand-text-main font-sans flex overflow-hidden">
       {isSidebarOpen && (<div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/50 z-10 md:hidden"></div>)}
       
-      {/* Left Sidebar: Navigation & Conversation List */}
       <aside className={clsx( "bg-brand-dark border-r border-white/10 flex flex-col transition-transform duration-300 ease-in-out z-20", "absolute md:relative inset-y-0 left-0 w-80", isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0" )}>
         <div className="p-4 flex-shrink-0"> <Image src="/AI Nudge Logo.png" alt="AI Nudge Logo" width={260} height={60} priority /> </div>
         <nav className="px-4 space-y-1.5 flex-shrink-0">
@@ -404,9 +511,9 @@ export default function DashboardPage() {
               </div>
 
               <div className={clsx("p-6 space-y-6 h-full", activeTab === 'intel' ? 'block' : 'hidden')}>
-                 <InfoCard title="Client Details"> <div className="flex flex-col items-center text-center"> <Avatar name={selectedClient.full_name} className="w-16 h-16 text-2xl mb-3" /> <h3 className="text-lg font-bold text-brand-text-main">{selectedClient.full_name}</h3> <p className="text-sm text-brand-text-muted">{selectedClient?.email}</p> <div className="mt-4 flex flex-wrap justify-center gap-2"> {selectedClient?.tags.map(tag => (<span key={tag} className="bg-brand-accent/20 text-brand-accent text-xs font-semibold px-2.5 py-1 rounded-full">{tag}</span>))} </div> </div> </InfoCard>
+                 <DynamicTaggingCard client={selectedClient} onUpdate={handleUpdateClient} />
                 <ClientIntelCard client={selectedClient} onUpdate={handleUpdateClient} onReplan={() => handlePlanCampaign(selectedClient.id)} />
-                <RelationshipCampaignCard messages={scheduledMessages} onReplan={() => handlePlanCampaign(selectedClient.id)} onUpdateMessage={handleUpdateScheduledMessage} />
+                <RelationshipCampaignCard messages={scheduledMessages} onReplan={() => handlePlanCampaign(selectedClient.id)} onUpdateMessage={handleUpdateScheduledMessage} isPlanning={isPlanningCampaign} />
               </div>
             </div>
 
@@ -433,9 +540,9 @@ export default function DashboardPage() {
       <aside className="bg-white/5 border-l border-white/10 p-6 flex-col gap-6 overflow-y-auto w-96 flex-shrink-0 hidden lg:flex">
         {selectedClient ? (
           <>
-            <InfoCard title="Client Details"> <div className="flex flex-col items-center text-center"> <Avatar name={selectedClient.full_name} className="w-16 h-16 text-2xl mb-3" /> <h3 className="text-lg font-bold text-brand-text-main">{selectedClient.full_name}</h3> <p className="text-sm text-brand-text-muted">{selectedClient.email}</p> <div className="mt-4 flex flex-wrap justify-center gap-2"> {selectedClient.tags.map(tag => (<span key={tag} className="bg-brand-accent/20 text-brand-accent text-xs font-semibold px-2.5 py-1 rounded-full">{tag}</span>))} </div> </div> </InfoCard>
+            <DynamicTaggingCard client={selectedClient} onUpdate={handleUpdateClient} />
             <ClientIntelCard client={selectedClient} onUpdate={handleUpdateClient} onReplan={() => handlePlanCampaign(selectedClient.id)} />
-            <RelationshipCampaignCard messages={scheduledMessages} onReplan={() => handlePlanCampaign(selectedClient.id)} onUpdateMessage={handleUpdateScheduledMessage} />
+            <RelationshipCampaignCard messages={scheduledMessages} onReplan={() => handlePlanCampaign(selectedClient.id)} onUpdateMessage={handleUpdateScheduledMessage} isPlanning={isPlanningCampaign} />
             <InfoCard title="Properties">
               <ul className="space-y-4">
                 {properties.slice(0, 3).map(property => (

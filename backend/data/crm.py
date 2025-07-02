@@ -1,5 +1,6 @@
 # File Path: backend/data/crm.py
-# --- UPDATED to support the new Message log and finding clients by phone ---
+# --- UPDATE for Relationship Planner ---
+# This version adds the `save_scheduled_message` function required by the new planner.
 
 from typing import Optional, List, Dict, Any
 import uuid
@@ -7,11 +8,11 @@ from datetime import datetime, timezone
 from sqlmodel import Session, select, delete
 from .database import engine
 
-from .models.client import Client
-from .models.user import User
+from .models.client import Client, ClientUpdate
+from .models.user import User, UserUpdate
 from .models.property import Property
 from .models.campaign import CampaignBriefing, CampaignUpdate
-from .models.message import ScheduledMessage, Message # <-- Import new Message model
+from .models.message import ScheduledMessage, Message
 
 # --- User Functions ---
 def get_user_by_id(user_id: uuid.UUID) -> Optional[User]:
@@ -19,15 +20,13 @@ def get_user_by_id(user_id: uuid.UUID) -> Optional[User]:
     with Session(engine) as session:
         return session.get(User, user_id)
     
-# --- NEW: Function to update a user's details ---
-def update_user(user_id: uuid.UUID, update_data: User) -> Optional[User]:
+def update_user(user_id: uuid.UUID, update_data: UserUpdate) -> Optional[User]:
     """Updates a user's record in the database."""
     with Session(engine) as session:
         user = session.get(User, user_id)
         if not user:
             return None
         
-        # Using model_dump to get a dictionary of the fields to update
         update_dict = update_data.model_dump(exclude_unset=True)
         for key, value in update_dict.items():
             setattr(user, key, value)
@@ -80,11 +79,11 @@ def update_client_preferences(client_id: uuid.UUID, preferences: Dict[str, Any])
         return None
 
 def update_client_tags(client_id: uuid.UUID, tags: List[str]) -> Optional[Client]:
-    """Updates the tags for a specific client."""
+    """Updates the user-managed tags for a specific client."""
     with Session(engine) as session:
         client = session.get(Client, client_id)
         if client:
-            client.tags = tags
+            client.user_tags = tags
             session.add(client)
             session.commit()
             session.refresh(client)
@@ -163,14 +162,11 @@ def get_conversation_history(client_id: uuid.UUID) -> List[Message]:
         return session.exec(statement).all()
 
 def get_conversation_summaries() -> List[Dict[str, Any]]:
-    """
-    Generates a list of conversation summaries for the dashboard.
-    """
+    """Generates a list of conversation summaries for the dashboard."""
     summaries = []
     with Session(engine) as session:
         clients = session.exec(select(Client)).all()
         for client in clients:
-            # Find the most recent message for this client
             last_message_statement = select(Message).where(Message.client_id == client.id).order_by(Message.created_at.desc()).limit(1)
             last_message = session.exec(last_message_statement).first()
             
@@ -180,16 +176,54 @@ def get_conversation_summaries() -> List[Dict[str, Any]]:
                 "client_name": client.full_name,
                 "last_message": last_message.content if last_message else "No messages yet.",
                 "last_message_time": last_message.created_at.isoformat() if last_message else datetime.now(timezone.utc).isoformat(),
-                "unread_count": 0 # Placeholder for future feature
+                "unread_count": 0
             }
             summaries.append(summary)
     
-    # Sort summaries so the most recent conversations are first
     summaries.sort(key=lambda x: x['last_message_time'], reverse=True)
     return summaries
 
 
 # --- Scheduled Message Functions ---
+
+# NEW: Function to save a single scheduled message.
+def save_scheduled_message(message: ScheduledMessage):
+    """Saves a single scheduled message to the database."""
+    with Session(engine) as session:
+        session.add(message)
+        session.commit()
+        print(f"CRM: Saved scheduled message for client {message.client_id} at {message.scheduled_at}")
+        
+def get_all_scheduled_messages() -> List[ScheduledMessage]:
+    """Get all scheduled messages from the database."""
+    with Session(engine) as session:
+        statement = select(ScheduledMessage)
+        return session.exec(statement).all()
+
+def update_scheduled_message(message_id: uuid.UUID, update_data: Dict[str, Any]) -> Optional[ScheduledMessage]:
+    """Updates a scheduled message."""
+    with Session(engine) as session:
+        message = session.get(ScheduledMessage, message_id)
+        if not message:
+            return None
+        for key, value in update_data.items():
+            if value is not None:
+                setattr(message, key, value)
+        session.add(message)
+        session.commit()
+        session.refresh(message)
+        return message
+
+def delete_scheduled_message(message_id: uuid.UUID) -> bool:
+    """Deletes a scheduled message by ID."""
+    with Session(engine) as session:
+        message = session.get(ScheduledMessage, message_id)
+        if not message:
+            return False
+        session.delete(message)
+        session.commit()
+        return True
+
 def get_scheduled_messages_for_client(client_id: uuid.UUID) -> List[ScheduledMessage]:
     """Retrieves all scheduled messages for a client."""
     with Session(engine) as session:

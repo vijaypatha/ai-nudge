@@ -1,9 +1,8 @@
 // File Path: frontend/app/nudges/page.tsx
-// --- VISUAL REFINEMENT V7: Action Clarity
-// --- This version improves the clarity of key user actions based on feedback.
-// --- 1. The "Dismiss" button is now explicitly labeled "Dismiss Nudge".
-// --- 2. The "Matched Audience" section is now a clear, prominent button to make editing more obvious.
-// --- The core layout and functionality remain unchanged.
+// --- FIX for Runtime Error ---
+// This version fixes a TypeError caused by an outdated data model.
+// --- 1. The 'Client' type has been updated to use 'ai_tags' and 'user_tags'.
+// --- 2. The 'uniqueTags' logic in the modal now correctly reads from both tag fields.
 // ---
 
 'use client';
@@ -21,13 +20,18 @@ import {
 
 // --- TYPE DEFINITIONS ---
 interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reason: string; }
+// UPDATED: The Client type now reflects the new data model with separate tag fields.
 interface Client {
     id: string;
     full_name: string;
-    tags: string[];
+    ai_tags: string[];
+    user_tags: string[];
 }
 interface CampaignBriefing {
-    id: string; campaign_type: string; headline: string; original_draft: string;
+    id:string;
+    campaign_type: string; 
+    headline: string; 
+    original_draft: string;
     matched_audience: MatchedClient[];
     status: 'new' | 'insight' | 'approved' | 'dismissed' | 'sent';
     key_intel: { [key: string]: string | number | string[] };
@@ -49,7 +53,7 @@ const NUDGE_TYPE_CONFIG: Record<string, { icon: ReactNode; color: string; title:
 };
 const BRAND_ACCENT_COLOR = '#20D5B3';
 
-// --- MODAL & HELPER COMPONENTS (Integrated from ManageAudienceModal.tsx) ---
+// --- MODAL & HELPER COMPONENTS ---
 const Avatar = ({ name, className }: { name: string; className?: string }) => {
   const initials = name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
   return (
@@ -72,31 +76,35 @@ const ManageAudienceModal = ({ isOpen, onClose, onSave, allClients, initialSelec
   const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
   const [filteredClients, setFilteredClients] = useState<Client[]>([]);
   const [selectedClientIds, setSelectedClientIds] = useState<Set<string>>(initialSelectedClientIds);
-  const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const uniqueTags = useMemo(() => {
     const allTags = new Set<string>();
-    allClients.forEach((client) => { client.tags.forEach((tag) => allTags.add(tag)); });
+    // THE FIX: Iterate over both `ai_tags` and `user_tags` and check for their existence.
+    (allClients || []).forEach((client) => {
+        if (client.ai_tags) client.ai_tags.forEach((tag) => allTags.add(tag));
+        if (client.user_tags) client.user_tags.forEach((tag) => allTags.add(tag));
+    });
     return Array.from(allTags).sort();
   }, [allClients]);
 
   useEffect(() => {
     if (isOpen) {
       setSelectedClientIds(initialSelectedClientIds);
-      setFilteredClients(allClients); // Initially show all clients
+      setFilteredClients(allClients);
       setIsSaving(false);
       setError(null);
     }
   }, [isOpen, initialSelectedClientIds, allClients]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !allClients) return;
     const lowerCaseQuery = searchQuery.toLowerCase();
     const newFilteredClients = allClients.filter(client => {
         const matchesQuery = lowerCaseQuery ? client.full_name.toLowerCase().includes(lowerCaseQuery) : true;
-        const matchesTags = activeTags.size > 0 ? Array.from(activeTags).every(tag => client.tags.includes(tag)) : true;
+        const combinedTags = [...(client.ai_tags || []), ...(client.user_tags || [])];
+        const matchesTags = activeTags.size > 0 ? Array.from(activeTags).every(tag => combinedTags.includes(tag)) : true;
         return matchesQuery && matchesTags;
     });
     setFilteredClients(newFilteredClients);
@@ -168,9 +176,7 @@ const ManageAudienceModal = ({ isOpen, onClose, onSave, allClients, initialSelec
                 </label>
             </div>
             <div className="max-h-64 overflow-y-auto">
-              {isLoading ? (<p className="p-4 text-center text-brand-text-muted">Searching...</p>) 
-              : error ? (<p className="p-4 text-center text-red-400">{error}</p>) 
-              : filteredClients.length === 0 ? (<p className="p-4 text-center text-brand-text-muted">No clients found.</p>) 
+              {filteredClients.length === 0 ? (<p className="p-4 text-center text-brand-text-muted">No clients found.</p>) 
               : (filteredClients.map((client) => (
                   <div key={client.id} className="border-b border-white/10 last:border-b-0">
                     <label className="flex items-center gap-3 p-3 hover:bg-white/5 cursor-pointer">
@@ -185,7 +191,7 @@ const ManageAudienceModal = ({ isOpen, onClose, onSave, allClients, initialSelec
           </div>
         </div>
         <footer className="p-6 border-t border-white/10 flex justify-end items-center gap-4 flex-shrink-0">
-           {error && !isLoading && <p className="text-red-400 text-sm mr-auto">{error}</p>}
+           {error && <p className="text-red-400 text-sm mr-auto">{error}</p>}
           <button onClick={onClose} className="px-5 py-2.5 font-semibold text-brand-text-muted hover:text-white">Cancel</button>
           <button onClick={handleSave} disabled={selectedClientIds.size === 0 || isSaving} className="px-6 py-2.5 bg-primary-action text-brand-dark font-bold rounded-md hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed w-48 text-center">
             {isSaving ? 'Saving...' : `Save Audience (${selectedClientIds.size})`}
@@ -210,7 +216,6 @@ const IntelStat: FC<{ icon?: ReactNode; label: string; value: string | number; c
 
 const PersuasiveCommandCard: FC<{
     briefing: CampaignBriefing;
-    onStatusUpdate: (updatedBriefing: CampaignBriefing) => void;
     onBriefingUpdate: (updatedBriefing: CampaignBriefing) => void;
     onDismiss: () => void;
     onSend: () => void;
@@ -220,6 +225,10 @@ const PersuasiveCommandCard: FC<{
     const [draft, setDraft] = useState(briefing.edited_draft || briefing.original_draft || '');
     const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
 
+    useEffect(() => {
+        setDraft(briefing.edited_draft || briefing.original_draft || '');
+    }, [briefing.id, briefing.original_draft, briefing.edited_draft]);
+
     const imageUrl = useMemo(() => (briefing.key_intel?.image_urls as string[] | undefined)?.[0] || null, [briefing.key_intel]);
     const intel = briefing.key_intel || {};
     const price = intel.price ? `$${Number(intel.price).toLocaleString()}` : null;
@@ -227,12 +236,17 @@ const PersuasiveCommandCard: FC<{
     const baths = intel.bathrooms as number || null;
     const sqft = intel.sqft ? `${Number(intel.sqft).toLocaleString()} sqft` : null;
 
+    const handleDraftChange = (newDraft: string) => {
+        setDraft(newDraft);
+        onBriefingUpdate({ ...briefing, edited_draft: newDraft });
+    };
+
     const handleSaveAudience = async (newAudience: Client[]) => {
         const updatedMatchedAudience: MatchedClient[] = newAudience.map(c => ({
             client_id: c.id,
             client_name: c.full_name,
-            match_score: 0, // Score would be recalculated on the backend
-            match_reason: 'Manually added'
+            match_score: 0, 
+            match_reason: 'Manually selected'
         }));
         onBriefingUpdate({ ...briefing, matched_audience: updatedMatchedAudience });
     };
@@ -259,29 +273,20 @@ const PersuasiveCommandCard: FC<{
                     </div>
                     <div className="p-5 space-y-5 flex flex-col">
                         <div>
-                            {/* UPDATED: More explicit button for managing the audience */}
-                            <button
-                                onClick={() => setIsAudienceModalOpen(true)}
-                                className="w-full flex items-center justify-center gap-2 p-2 text-sm font-semibold text-brand-text-muted bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 hover:text-brand-text-main transition-colors mb-3"
-                            >
-                                <Users size={16}/>
-                                Manage Audience
-                            </button>
+                            <button onClick={() => setIsAudienceModalOpen(true)} className="w-full flex items-center justify-center gap-2 p-2 text-sm font-semibold text-brand-text-muted bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 hover:text-brand-text-main transition-colors mb-3"><Users size={16}/>Manage Audience</button>
                             <div className="space-y-3 max-h-40 overflow-y-auto pr-2">
                                 {briefing.matched_audience.map(client => (<div key={client.client_id}><p className="font-semibold text-brand-text-main text-base">{client.client_name}</p><p className={`text-sm ${config.color} flex items-center gap-1.5`}><Check size={14}/>{client.match_reason}</p></div>))}
                             </div>
                         </div>
-                        <div className="flex-grow flex flex-col"><h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2 mb-3"><Edit size={16}/>Draft Message</h4><textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="w-full flex-grow bg-brand-dark border border-white/10 rounded-md focus:ring-2 focus:ring-primary-action text-brand-text-main text-base p-3 resize-none"/></div>
+                        <div className="flex-grow flex flex-col">
+                            <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2 mb-3"><Edit size={16}/>Draft Message</h4>
+                            <textarea value={draft} onChange={(e) => handleDraftChange(e.target.value)} className="w-full flex-grow bg-brand-dark border border-white/10 rounded-md focus:ring-2 focus:ring-primary-action text-brand-text-main text-base p-3 resize-none"/>
+                        </div>
                     </div>
                 </div>
                 <div className="flex-shrink-0 p-3 bg-black/30 border-t border-white/10 grid grid-cols-2 gap-3">
-                    {/* UPDATED: More explicit label for the dismiss button */}
-                    <button onClick={onDismiss} className="p-3 bg-white/5 border border-white/10 text-brand-text-main rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-white/10 hover:border-white/20 transition-all duration-200">
-                        <X size={18} /> Dismiss Nudge
-                    </button>
-                    <button onClick={onSend} className="p-3 text-brand-dark rounded-lg font-bold flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(32,213,179,0.4)] hover:scale-[1.03] transition-all duration-200" style={{ backgroundColor: BRAND_ACCENT_COLOR }}>
-                        <Send size={18} /> Send to {briefing.matched_audience.length} Client(s)
-                    </button>
+                    <button onClick={onDismiss} className="p-3 bg-white/5 border border-white/10 text-brand-text-main rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-white/10 hover:border-white/20 transition-all duration-200"><X size={18} /> Dismiss Nudge</button>
+                    <button onClick={onSend} className="p-3 text-brand-dark rounded-lg font-bold flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(32,213,179,0.4)] hover:scale-[1.03] transition-all duration-200" style={{ backgroundColor: BRAND_ACCENT_COLOR }}><Send size={18} /> Send to {briefing.matched_audience.length} Client(s)</button>
                 </div>
             </div>
         </>
@@ -291,20 +296,30 @@ const PersuasiveCommandCard: FC<{
 const ActionDeck: FC<{
     briefings: CampaignBriefing[];
     onClose: () => void;
-    onStatusUpdate: (updatedBriefing: CampaignBriefing) => void;
+    onDismissNudge: (briefing: CampaignBriefing) => Promise<void>;
+    onSendNudge: (briefing: CampaignBriefing) => Promise<void>;
     onBriefingUpdate: (updatedBriefing: CampaignBriefing) => void;
     allClients: Client[];
-}> = ({ briefings, onClose, onStatusUpdate, onBriefingUpdate, allClients }) => {
+}> = ({ briefings, onClose, onDismissNudge, onSendNudge, onBriefingUpdate, allClients }) => {
     const [cardIndex, setCardIndex] = useState(0);
 
     const handleAction = async (action: 'send' | 'dismiss') => {
         const briefing = briefings[cardIndex];
-        const status = action === 'send' ? 'sent' : 'dismissed';
+        
         try {
-            console.log(`Updating campaign ${briefing.id} to ${status}`);
-            onStatusUpdate({ ...briefing, status });
-        } catch (error) { console.error(`Error processing campaign ${briefing.id}:`, error); }
-        if (cardIndex < briefings.length - 1) { setCardIndex(cardIndex + 1); } else { onClose(); }
+            if (action === 'send') {
+                await onSendNudge(briefing);
+            } else {
+                await onDismissNudge(briefing);
+            }
+            if (cardIndex < briefings.length - 1) {
+                setCardIndex(cardIndex + 1);
+            } else {
+                onClose();
+            }
+        } catch (error) {
+            console.error(`ActionDeck Error: Failed to ${action} campaign ${briefing.id}`, error);
+        }
     };
 
     return (
@@ -316,7 +331,13 @@ const ActionDeck: FC<{
                     <AnimatePresence mode="wait">
                         {cardIndex < briefings.length && (
                              <motion.div key={briefings[cardIndex].id} initial={{ scale: 0.95, y: 50, opacity: 0 }} animate={{ scale: 1, y: 0, opacity: 1 }} exit={{ scale: 0.95, y: -50, opacity: 0 }} transition={{ type: "spring", stiffness: 300, damping: 30 }} className="absolute inset-0">
-                                <PersuasiveCommandCard briefing={briefings[cardIndex]} onStatusUpdate={onStatusUpdate} onBriefingUpdate={onBriefingUpdate} onDismiss={() => handleAction('dismiss')} onSend={() => handleAction('send')} allClients={allClients} />
+                                <PersuasiveCommandCard 
+                                    briefing={briefings[cardIndex]} 
+                                    onBriefingUpdate={onBriefingUpdate} 
+                                    onDismiss={() => handleAction('dismiss')} 
+                                    onSend={() => handleAction('send')} 
+                                    allClients={allClients} 
+                                />
                             </motion.div>
                         )}
                     </AnimatePresence>
@@ -349,39 +370,58 @@ export default function NudgesPage() {
         const fetchInitialData = async () => {
             setLoading(true);
             try {
-                 const mockBriefings: CampaignBriefing[] = [
-                    { id: '1', campaign_type: 'new_listing', headline: 'New Listing: 123 Maple St, Sunnyvale, CA', original_draft: 'A beautiful new home just hit the market!', matched_audience: [{client_id: 'c1', client_name: 'John Doe', match_score: 0.9, match_reason: 'Looking in Sunnyvale'}], status: 'new', key_intel: {price: 1200000, bedrooms: 3, bathrooms: 2, sqft: 1800, image_urls: ['https://placehold.co/600x400/0B112B/E5E7EB?text=123+Maple+St']}, edited_draft: null, strategic_summary: 'This property matches the client\'s desired location and size requirements perfectly.', potential_commission: 30000 },
-                    { id: '9', campaign_type: 'new_listing', headline: 'New Listing: 654 Birch Rd, Sunnyvale, CA', original_draft: 'Another great listing in a desirable area.', matched_audience: [{client_id: 'c1', client_name: 'John Doe', match_score: 0.9, match_reason: 'Looking in Sunnyvale'}], status: 'new', key_intel: {price: 1350000, bedrooms: 3, bathrooms: 2.5, sqft: 1950, image_urls: ['https://placehold.co/600x400/0B112B/E5E7EB?text=654+Birch+Rd']}, edited_draft: null },
-                    { id: '2', campaign_type: 'price_drop', headline: 'Price Drop: 456 Oak Ave, Cupertino, CA', original_draft: 'Great news! The price has dropped on this property.', matched_audience: [{client_id: 'c2', client_name: 'Jane Smith', match_score: 0.9, match_reason: 'Budget matches new price'}], status: 'new', key_intel: {price: 2100000, bedrooms: 4, bathrooms: 3, sqft: 2500, image_urls: ['https://placehold.co/600x400/0B112B/E5E7EB?text=456+Oak+Ave']}, edited_draft: null, strategic_summary: 'The recent price reduction makes this home a compelling option for your client.', potential_commission: 52500 },
-                    { id: '3', campaign_type: 'sold_listing', headline: 'Just Sold Nearby: 789 Pine Ln, Mountain View, CA', original_draft: 'A similar home just sold nearby, indicating strong market activity.', matched_audience: [{client_id: 'c3', client_name: 'Peter Jones', match_score: 0.9, match_reason: 'Expressed interest in area'}], status: 'new', key_intel: {}, edited_draft: null },
-                    { id: '4', campaign_type: 'back_on_market', headline: 'Back on Market: 321 Elm Ct, Palo Alto, CA', original_draft: 'A second chance! This property is back on the market.', matched_audience: [{client_id: 'c4', client_name: 'Mary Williams', match_score: 0.9, match_reason: 'Previously viewed this property'}], status: 'new', key_intel: {price: 3500000, bedrooms: 5, bathrooms: 4, sqft: 3200, image_urls: ['https://placehold.co/600x400/0B112B/E5E7EB?text=321+Elm+Ct']}, edited_draft: null },
-                    { id: '5', campaign_type: 'expired_listing', headline: 'Expired Listing: 159 Cedar Pl, Los Altos, CA', original_draft: 'This could be an opportunity. This listing has expired.', matched_audience: [{client_id: 'c5', client_name: 'Sam Brown', match_score: 0.8, match_reason: 'Was interested in similar properties'}], status: 'new', key_intel: {}, edited_draft: null },
-                    { id: '6', campaign_type: 'coming_soon', headline: 'Coming Soon: 753 Spruce Dr, San Jose, CA', original_draft: 'Get a head start on this new property coming soon!', matched_audience: [{client_id: 'c6', client_name: 'Chris Green', match_score: 0.95, match_reason: 'Actively looking in this school district'}], status: 'new', key_intel: {}, edited_draft: null },
-                    { id: '7', campaign_type: 'withdrawn_listing', headline: 'Withdrawn: 852 Redwood Blvd, Santa Clara, CA', original_draft: 'This property was withdrawn. Might be a chance to connect with the seller.', matched_audience: [{client_id: 'c4', client_name: 'Mary Williams', match_score: 0.7, match_reason: 'Previously inquired about this address'}], status: 'new', key_intel: {}, edited_draft: null },
-                    { id: '8', campaign_type: 'recency_nudge', headline: 'Relationship: 3 clients you haven\'t contacted in 90 days', original_draft: 'Just checking in to see how you\'re doing!', matched_audience: [{client_id: 'c7', client_name: 'David Black', match_score: 0, match_reason: 'Past client'}, {client_id: 'c8', client_name: 'Nancy White', match_score: 0, match_reason: 'Past client'}], status: 'new', key_intel: {}, edited_draft: null },
-                 ];
-                 const mockClients: Client[] = [
-                    { id: 'c1', full_name: 'John Doe', tags: ['Buyer', 'Sunnyvale'] },
-                    { id: 'c2', full_name: 'Jane Smith', tags: ['Buyer', 'Cupertino'] },
-                    { id: 'c3', full_name: 'Peter Jones', tags: ['Past Client', 'Mountain View'] },
-                    { id: 'c4', full_name: 'Mary Williams', tags: ['Investor', 'Palo Alto'] },
-                    { id: 'c5', full_name: 'Sam Brown', tags: ['Buyer', 'Los Altos'] },
-                    { id: 'c6', full_name: 'Chris Green', tags: ['Buyer', 'San Jose'] },
-                    { id: 'c7', full_name: 'David Black', tags: ['Past Client'] },
-                    { id: 'c8', full_name: 'Nancy White', tags: ['Past Client'] },
-                 ];
-                setBriefings(mockBriefings);
-                setAllClients(mockClients);
-            } catch (err) { console.error('Error fetching data:', err); }
+                const nudgesResponse = await fetch('http://localhost:8001/nudges/');
+                if (!nudgesResponse.ok) throw new Error('Failed to fetch nudges');
+                const nudgesData = await nudgesResponse.json();
+                setBriefings(nudgesData);
+
+                const clientsResponse = await fetch('http://localhost:8001/clients/');
+                if (!clientsResponse.ok) throw new Error('Failed to fetch clients');
+                const clientsData = await clientsResponse.json();
+                setAllClients(clientsData);
+
+            } catch (err) { 
+                console.error('Error fetching data:', err);
+            }
             finally { setLoading(false); }
         };
         fetchInitialData();
     }, []);
 
-    const handleStatusUpdate = (updatedBriefing: CampaignBriefing) => {
-        setBriefings(prev => prev.filter(b => b.id !== updatedBriefing.id));
+    const handleDismissNudge = async (briefing: CampaignBriefing) => {
+        const response = await fetch(`http://localhost:8001/campaigns/${briefing.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'dismissed' }),
+        });
+        if (!response.ok) throw new Error('Failed to dismiss campaign.');
+        setBriefings(prev => prev.filter(b => b.id !== briefing.id));
         if (activeDeck) {
-            const newDeck = activeDeck.filter(b => b.id !== updatedBriefing.id);
+            const newDeck = activeDeck.filter(b => b.id !== briefing.id);
+            if (newDeck.length > 0) setActiveDeck(newDeck); else setActiveDeck(null);
+        }
+    };
+
+    const handleSendNudge = async (briefing: CampaignBriefing) => {
+        const updatePayload = {
+            edited_draft: briefing.edited_draft,
+            matched_audience: briefing.matched_audience,
+        };
+        const updateResponse = await fetch(`http://localhost:8001/campaigns/${briefing.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatePayload),
+        });
+        if (!updateResponse.ok) throw new Error('Failed to save campaign updates before sending.');
+
+        const sendResponse = await fetch(`http://localhost:8001/campaigns/${briefing.id}/send`, {
+            method: 'POST',
+        });
+        if (!sendResponse.ok) throw new Error('Failed to trigger campaign send.');
+
+        setBriefings(prev => prev.filter(b => b.id !== briefing.id));
+        if (activeDeck) {
+            const newDeck = activeDeck.filter(b => b.id !== briefing.id);
             if (newDeck.length > 0) setActiveDeck(newDeck); else setActiveDeck(null);
         }
     };
@@ -401,7 +441,16 @@ export default function NudgesPage() {
 
     return (
         <>
-            {activeDeck && <ActionDeck briefings={activeDeck} onClose={() => setActiveDeck(null)} onStatusUpdate={handleStatusUpdate} onBriefingUpdate={handleBriefingUpdate} allClients={allClients} />}
+            {activeDeck && (
+                <ActionDeck 
+                    briefings={activeDeck} 
+                    onClose={() => setActiveDeck(null)} 
+                    onDismissNudge={handleDismissNudge}
+                    onSendNudge={handleSendNudge}
+                    onBriefingUpdate={handleBriefingUpdate} 
+                    allClients={allClients} 
+                />
+            )}
             <div className="min-h-screen bg-brand-dark text-brand-text-main font-sans">
                 <main className="max-w-screen-xl mx-auto p-6 sm:p-8">
                     <header className="mb-12"><h1 className="text-4xl sm:text-5xl font-bold text-brand-white tracking-tight">AI Opportunities</h1><p className="text-brand-text-muted mt-2 text-lg">Your AI co-pilot has identified the following revenue opportunities.</p></header>

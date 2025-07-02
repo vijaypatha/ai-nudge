@@ -1,18 +1,49 @@
 # File Path: backend/api/rest/campaigns.py
-# CORRECTED VERSION: Added missing prefix
+# --- ARCHITECTURE FIX ---
+# - Moved the relationship campaign planning logic here from clients.py.
+# - The new endpoint is `POST /campaigns/plan-relationship`.
 
 from fastapi import APIRouter, HTTPException, status, BackgroundTasks
 from typing import Optional
 from uuid import UUID
+from pydantic import BaseModel
 from data.models.message import SendMessageImmediate
 from data.models.campaign import CampaignBriefing, CampaignUpdate
 from agent_core import orchestrator
 from data import crm as crm_service
 from workflow import outbound as outbound_workflow
+from agent_core.brain import relationship_planner # Import the planner
 
+router = APIRouter(
+    prefix="/campaigns",
+    tags=["Campaigns"]
+)
 
-# FIXED: Add prefix to router definition
-router = APIRouter(prefix="/campaigns")
+# --- NEW: Pydantic model for the request body ---
+class PlanRelationshipPayload(BaseModel):
+    client_id: UUID
+
+# --- NEW: Endpoint for planning a relationship campaign ---
+@router.post("/plan-relationship", status_code=status.HTTP_202_ACCEPTED)
+async def plan_relationship_campaign_endpoint(payload: PlanRelationshipPayload):
+    """
+    Triggers the AI to generate a long-term relationship campaign for a specific client.
+    This is the architecturally correct location for this endpoint.
+    """
+    client = crm_service.get_client_by_id(payload.client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found.")
+    
+    # Use the hardcoded demo user as the realtor
+    realtor_id = UUID("a8c6f1d7-8f7a-4b6e-8b0f-9e5a7d6c5b4a")
+    realtor = crm_service.get_user_by_id(realtor_id)
+    if not realtor:
+        raise HTTPException(status_code=500, detail="Default realtor user not found.")
+
+    await relationship_planner.plan_relationship_campaign(client=client, realtor=realtor)
+    
+    return {"status": "success", "message": f"Relationship campaign planning started for {client.full_name}."}
+
 
 @router.post("/messages/send-now", status_code=status.HTTP_200_OK)
 async def send_message_now(message_data: SendMessageImmediate):
@@ -30,22 +61,12 @@ async def send_message_now(message_data: SendMessageImmediate):
 @router.put("/{campaign_id}", response_model=CampaignBriefing)
 async def update_campaign_briefing(campaign_id: UUID, update_data: CampaignUpdate):
     """Update a campaign briefing by ID."""
-    print(f"CAMPAIGNS: Received update request for campaign {campaign_id}")
-    print(f"CAMPAIGNS: Update data: {update_data}")
-    
     try:
         updated_briefing = crm_service.update_campaign_briefing(campaign_id, update_data)
         if not updated_briefing:
-            print(f"CAMPAIGNS: Campaign {campaign_id} not found")
             raise HTTPException(status_code=404, detail="Campaign briefing not found.")
-        
-        print(f"CAMPAIGNS: Successfully updated campaign {campaign_id}")
         return updated_briefing
-        
-    except HTTPException:
-        raise
     except Exception as e:
-        print(f"CAMPAIGNS: Error updating campaign {campaign_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to update campaign: {str(e)}")
 
 
@@ -70,8 +91,5 @@ async def trigger_send_campaign(campaign_id: UUID, background_tasks: BackgroundT
     """
     Triggers the sending of a campaign to its audience in the background.
     """
-    print(f"CAMPAIGN API: Received request to send campaign {campaign_id}")
-    # Run the potentially long-running send operation in the background
-    # so the API can respond to the UI immediately.
     background_tasks.add_task(outbound_workflow.send_campaign_to_audience, campaign_id)
     return {"message": "Campaign sending process started."}

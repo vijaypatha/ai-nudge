@@ -1,6 +1,6 @@
 # File Path: backend/api/rest/clients.py
-# Purpose: Defines API endpoints for managing clients.
-# This version is UPDATED to call the new database-aware crm service functions.
+# --- DEFINITIVE FIX V3 for Dynamic Tagging ---
+# - The 'update_client_tags_endpoint' now correctly unpacks the 'user_tags' key from the request.
 
 from fastapi import APIRouter, HTTPException, status
 from typing import List, Optional
@@ -21,20 +21,21 @@ class ClientSearchQuery(BaseModel):
 @router.post("/search", response_model=List[Client])
 async def search_clients(query: ClientSearchQuery):
     all_clients = crm_service.get_all_clients()
-    # REMOVED: The call to build_or_rebuild_client_index is no longer needed here.
-    # The index is now built once on application startup.
-
     final_results = set()
+
     if query.natural_language_query:
         matched_ids = await audience_builder.find_clients_by_semantic_query(query.natural_language_query)
         final_results.update(matched_ids)
 
     if query.tags:
         query_tags_lower = {t.lower() for t in query.tags}
-        tag_ids = {c.id for c in all_clients if c.tags and any(ct.lower() in query_tags_lower for ct in c.tags)}
+        tag_ids = {
+            c.id for c in all_clients 
+            if (c.user_tags and any(ut.lower() in query_tags_lower for ut in c.user_tags)) or \
+               (c.ai_tags and any(at.lower() in query_tags_lower for at in c.ai_tags))
+        }
         
         if query.natural_language_query:
-            # If both searches ran, find clients that match both (intersection)
             final_results.intersection_update(tag_ids)
         else:
             final_results.update(tag_ids)
@@ -47,11 +48,16 @@ async def search_clients(query: ClientSearchQuery):
 
 @router.put("/{client_id}/tags", response_model=Client)
 async def update_client_tags_endpoint(client_id: UUID, tag_data: ClientTagUpdate):
-    updated_client = crm_service.update_client_tags(client_id, tag_data.tags)
+    """
+    (CORRECTED) This endpoint now expects a payload with a 'user_tags' key
+    and passes it to the crm service.
+    """
+    updated_client = crm_service.update_client_tags(client_id, tag_data.user_tags)
     if not updated_client:
         raise HTTPException(status_code=404, detail="Client not found.")
     return updated_client
 
+# --- Other endpoints remain the same ---
 @router.get("", response_model=List[Client])
 async def get_all_clients_endpoint():
     return crm_service.get_all_clients()
@@ -74,3 +80,11 @@ async def update_client_details(client_id: UUID, client_data: ClientUpdate):
     if not updated_client:
         raise HTTPException(status_code=404, detail="Client not found.")
     return updated_client
+
+# Add this endpoint to your clients.py file. It's for developer use to clear test data.
+@router.delete("/{client_id}/scheduled-messages", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_client_scheduled_messages(client_id: UUID):
+    """Deletes all scheduled messages for a given client."""
+    print(f"API: Received request to delete all scheduled messages for client {client_id}")
+    crm_service.delete_scheduled_messages_for_client(client_id)
+    return None

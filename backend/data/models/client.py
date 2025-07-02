@@ -1,5 +1,8 @@
 # File Path: backend/data/models/client.py
-# Purpose: Stores client information. This version adds a dedicated model for updating tags.
+# --- DEFINITIVE FIX V3 for Dynamic Tagging ---
+# 1. Removed the 'alias' from 'ai_tags' that was causing JSON serialization conflicts.
+# 2. Standardized the 'ClientTagUpdate' model to use 'user_tags' for clarity and consistency.
+
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
 from sqlmodel import SQLModel, Field, Relationship, Column, JSON
@@ -12,12 +15,17 @@ class Client(SQLModel, table=True):
     full_name: str
     email: str = Field(unique=True, index=True)
     phone: Optional[str] = Field(default=None, index=True)
-    tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    
+    # --- DYNAMIC TAGGING FIX ---
+    # REMOVED: `alias="tags"` which caused the serialization error.
+    # The frontend will now correctly receive both `ai_tags` and `user_tags`.
+    ai_tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    user_tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    
     preferences: Dict[str, Any] = Field(sa_column=Column(JSON))
     last_interaction: Optional[str] = Field(default=None)
     
     scheduled_messages: List["ScheduledMessage"] = Relationship(back_populates="client")
-
     messages: List["Message"] = Relationship(back_populates="client")
 
 
@@ -25,7 +33,8 @@ class ClientCreate(SQLModel):
     full_name: str
     email: str
     phone: Optional[str] = None
-    tags: List[str] = []
+    ai_tags: List[str] = []
+    user_tags: List[str] = []
     preferences: Dict[str, Any] = {}
 
 class ClientUpdate(SQLModel):
@@ -33,6 +42,6 @@ class ClientUpdate(SQLModel):
 
 class ClientTagUpdate(SQLModel):
     """
-    (New Data Model) Defines the schema for updating only the tags for a client.
+    (CORRECTED) The key is now 'user_tags' to match the frontend request.
     """
-    tags: List[str]
+    user_tags: List[str]
