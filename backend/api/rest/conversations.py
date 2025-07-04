@@ -1,11 +1,11 @@
-# ---
 # File Path: backend/api/rest/conversations.py
-# Purpose: Defines API endpoints for fetching conversation data and sending messages.
-# ---
-
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from typing import List, Dict, Any
 import uuid
+
+# --- MODIFIED: Import User model and security dependency ---
+from data.models.user import User
+from api.security import get_current_user_from_token
 
 from data import crm as crm_service
 from agent_core import orchestrator
@@ -17,7 +17,6 @@ router = APIRouter(
     tags=["Conversations"]
 )
 
-# --- Pydantic Models for API Data Shapes ---
 class ConversationSummary(BaseModel):
     id: str
     client_id: uuid.UUID
@@ -29,37 +28,25 @@ class ConversationSummary(BaseModel):
 class SendReplyPayload(BaseModel):
     content: str
 
-# --- API Endpoints ---
-
+# --- MODIFIED: Added security dependency ---
 @router.get("/", response_model=List[ConversationSummary])
-async def get_conversation_list():
-    """
-    Fetches a list of conversation summaries for the dashboard's left panel.
-    Each summary includes the client's name and the last message exchanged.
-    """
-    summaries = crm_service.get_conversation_summaries()
+async def get_conversation_list(current_user: User = Depends(get_current_user_from_token)):
+    summaries = crm_service.get_conversation_summaries(user_id=current_user.id)
     return summaries
 
+# --- MODIFIED: Added security dependency and tenant-aware logic ---
 @router.get("/{client_id}", response_model=List[Message])
-async def get_conversation_history(client_id: uuid.UUID):
-    """
-    Fetches the full message history for a specific client.
-    This powers the main chat window in the dashboard.
-    """
-    history = crm_service.get_conversation_history(client_id)
-    if not history:
-        # Return an empty list if no history, which is a valid state.
-        return []
+async def get_conversation_history(client_id: uuid.UUID, current_user: User = Depends(get_current_user_from_token)):
+    history = crm_service.get_conversation_history(client_id=client_id, user_id=current_user.id)
     return history
 
+# --- MODIFIED: Added security dependency and tenant-aware logic ---
 @router.post("/{client_id}/send_reply", status_code=status.HTTP_200_OK)
-async def send_reply(client_id: uuid.UUID, payload: SendReplyPayload):
-    """
-    Sends an immediate reply to a client from the dashboard composer.
-    """
+async def send_reply(client_id: uuid.UUID, payload: SendReplyPayload, current_user: User = Depends(get_current_user_from_token)):
     was_sent = await orchestrator.orchestrate_send_message_now(
         client_id=client_id,
-        content=payload.content
+        content=payload.content,
+        user_id=current_user.id
     )
     if not was_sent:
         raise HTTPException(

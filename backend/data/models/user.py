@@ -13,6 +13,8 @@ from sqlmodel import SQLModel, Field, Relationship, Column, JSON
 if TYPE_CHECKING:
     from .campaign import CampaignBriefing
     from .faq import Faq
+    from .client import Client 
+    from .message import Message, ScheduledMessage 
 
 # Defines the allowed user types for type safety.
 class UserType(str, Enum):
@@ -50,6 +52,9 @@ class User(SQLModel, table=True):
     # --- Relationships (All included) ---
     campaigns: List["CampaignBriefing"] = Relationship(back_populates="user")
     faqs: List["Faq"] = Relationship(back_populates="user")
+    clients: List["Client"] = Relationship(back_populates="user")
+    messages: List["Message"] = Relationship(back_populates="user")
+    scheduled_messages: List["ScheduledMessage"] = Relationship(back_populates="user")
 
 class UserUpdate(SQLModel):
     """Defines all updatable fields for the user settings page."""

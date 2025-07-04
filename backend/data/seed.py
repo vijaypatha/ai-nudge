@@ -2,9 +2,10 @@
 # File Path: backend/data/seed.py
 # Purpose: Seeds the database with initial data for development and testing.
 # ---
-# CORRECTED: 
+# CORRECTED:
 # 1. Assigns a `user_type` to the demo user to prevent NotNullViolation.
 # 2. Uses the correct `user_tags` and `ai_tags` fields for clients.
+# 3. (NEW) Assigns a user_id to each client to satisfy the foreign key constraint.
 # ---
 
 import uuid
@@ -53,7 +54,6 @@ async def seed_database():
         # Step 1: Create all data objects
         realtor_user = User(
             id=USER_ID_JANE,
-            # --- THE FIX for the user_type error ---
             user_type=UserType.REALTOR,
             full_name="Jane Doe",
             email="jane.doe@realty.com",
@@ -72,12 +72,10 @@ async def seed_database():
         )
 
         clients_data = [
-            # --- THE FIX for the tags error ---
-            # Was: tags=["Investor", "Past Client"]
-            # Now: Split into user_tags and ai_tags
-            Client(id=CLIENT_ID_ALEX, full_name="Alex Chen (Demo)", email="alex.chen@example.com", phone="+14155551234", user_tags=["investor"], ai_tags=["past_client"], preferences={"notes": ["Prefers properties with high ROI."], "source": "demo", "locations": ["Sunnyvale"], "budget_max": 2000000, "min_bedrooms": 3}),
-            Client(id=CLIENT_ID_SAM, full_name="Samantha Miller (Demo)", email="samantha.miller@example.com", phone="+16505555678", user_tags=["first_time_buyer"], ai_tags=[], preferences={"notes": ["Really wants a large yard for her dog. Loves Yoga", "birthday October 30"], "source": "demo", "min_bedrooms": 3}),
-            Client(id=CLIENT_ID_BEN, full_name="Ben Carter (Demo)", email="ben.carter@example.com", phone=None, user_tags=[], ai_tags=[], preferences={"notes": ["Wants to buy in the next 12 months."], "source": "demo"})
+            # --- MODIFIED: Added user_id to each Client ---
+            Client(id=CLIENT_ID_ALEX, user_id=USER_ID_JANE, full_name="Alex Chen (Demo)", email="alex.chen@example.com", phone="+14155551234", user_tags=["investor"], ai_tags=["past_client"], preferences={"notes": ["Prefers properties with high ROI."], "source": "demo", "locations": ["Sunnyvale"], "budget_max": 2000000, "min_bedrooms": 3}),
+            Client(id=CLIENT_ID_SAM, user_id=USER_ID_JANE, full_name="Samantha Miller (Demo)", email="samantha.miller@example.com", phone="+16505555678", user_tags=["first_time_buyer"], ai_tags=[], preferences={"notes": ["Really wants a large yard for her dog. Loves Yoga", "birthday October 30"], "source": "demo", "min_bedrooms": 3}),
+            Client(id=CLIENT_ID_BEN, user_id=USER_ID_JANE, full_name="Ben Carter (Demo)", email="ben.carter@example.com", phone=None, user_tags=[], ai_tags=[], preferences={"notes": ["Wants to buy in the next 12 months."], "source": "demo"})
         ]
 
         session.add(realtor_user)

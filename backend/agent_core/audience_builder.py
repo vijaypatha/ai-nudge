@@ -27,7 +27,8 @@ async def initialize_client_index():
     index_to_client_id = []
 
     print("AUDIENCE BUILDER: Initializing client index...")
-    clients = crm_service.get_all_clients()
+    # --- MODIFIED: Call the new system-level function ---
+    clients = crm_service._get_all_clients_for_system_indexing()
     clients_with_notes = [c for c in clients if c.preferences.get("notes")]
     
     if not clients_with_notes:
@@ -38,15 +39,24 @@ async def initialize_client_index():
     all_notes = [" ".join(c.preferences.get("notes", [])) for c in clients_with_notes]
     embeddings = [await gemini_integration.get_text_embedding(note) for note in all_notes]
 
-    item_ids = np.arange(len(clients_with_notes))
-    faiss_index.add_with_ids(np.array(embeddings).astype('float32'), item_ids)
-    index_to_client_id = [c.id for c in clients_with_notes]
+    # Filter out any potential None values from embeddings before converting to numpy array
+    valid_embeddings = [emb for emb in embeddings if emb is not None]
+    valid_clients = [client for client, emb in zip(clients_with_notes, embeddings) if emb is not None]
+
+    if not valid_embeddings:
+        print("AUDIENCE BUILDER: No valid embeddings were generated. Index will not be built.")
+        return
+
+    item_ids = np.arange(len(valid_clients))
+    faiss_index.add_with_ids(np.array(valid_embeddings).astype('float32'), item_ids)
+    index_to_client_id = [c.id for c in valid_clients]
     
     print(f"AUDIENCE BUILDER: Index built successfully with {faiss_index.ntotal} vectors.")
 
-async def find_clients_by_semantic_query(query: str, top_k: int = 5) -> List[UUID]:
+async def find_clients_by_semantic_query(query: str, top_k: int = 5, user_id: UUID = None) -> List[UUID]:
     """
     Searches the pre-built index for relevant clients.
+    Now accepts a user_id to filter results.
     """
     if faiss_index.ntotal == 0:
         print("AUDIENCE BUILDER WARNING: Search attempted but index is empty.")
@@ -54,23 +64,31 @@ async def find_clients_by_semantic_query(query: str, top_k: int = 5) -> List[UUI
 
     print(f"AUDIENCE BUILDER: Generating embedding for query '{query}' via Gemini API...")
     query_embedding = await gemini_integration.get_text_embedding(query)
+
+    if query_embedding is None:
+        return []
     
-    # Ensure k is not greater than the number of items in the index
     k = min(top_k, faiss_index.ntotal)
     
     distances, indices = faiss_index.search(np.array([query_embedding]).astype('float32'), k=k)
     
-    # CORRECTED: The distance threshold was too strict. Increased to allow for relevant matches.
-    # L2 distance is different from cosine similarity; a higher value can still be a good match.
-    # We also print the distances for debugging.
     DISTANCE_THRESHOLD = 1.2
     
     print(f"AUDIENCE BUILDER: Search results (Distances): {distances[0]}")
     
-    matched_client_ids = [
+    all_matched_client_ids = {
         index_to_client_id[i] for i, dist in zip(indices[0], distances[0])
         if i != -1 and dist < DISTANCE_THRESHOLD
-    ]
+    }
 
-    print(f"AUDIENCE BUILDER: Found {len(matched_client_ids)} relevant clients for query '{query}'.")
-    return matched_client_ids
+    if not user_id:
+        return list(all_matched_client_ids)
+
+    # Filter the results to only include clients belonging to the specified user
+    user_clients = crm_service.get_all_clients(user_id=user_id)
+    user_client_ids = {c.id for c in user_clients}
+    
+    final_matched_ids = list(all_matched_client_ids.intersection(user_client_ids))
+
+    print(f"AUDIENCE BUILDER: Found {len(final_matched_ids)} relevant clients for query '{query}' for user {user_id}.")
+    return final_matched_ids

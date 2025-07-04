@@ -1,11 +1,12 @@
 # File Path: backend/api/rest/clients.py
-# --- DEFINITIVE FIX V3 for Dynamic Tagging ---
-# - The 'update_client_tags_endpoint' now correctly unpacks the 'user_tags' key from the request.
-
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel
+
+# --- MODIFIED: Import User model and security dependency ---
+from data.models.user import User
+from api.security import get_current_user_from_token
 
 from data.models.client import Client, ClientCreate, ClientUpdate, ClientTagUpdate
 from data.models.message import ScheduledMessage
@@ -18,13 +19,14 @@ class ClientSearchQuery(BaseModel):
     natural_language_query: Optional[str] = None
     tags: Optional[List[str]] = None
 
+# --- MODIFIED: Added security dependency and tenant-aware logic ---
 @router.post("/search", response_model=List[Client])
-async def search_clients(query: ClientSearchQuery):
-    all_clients = crm_service.get_all_clients()
+async def search_clients(query: ClientSearchQuery, current_user: User = Depends(get_current_user_from_token)):
+    all_clients = crm_service.get_all_clients(user_id=current_user.id)
     final_results = set()
 
     if query.natural_language_query:
-        matched_ids = await audience_builder.find_clients_by_semantic_query(query.natural_language_query)
+        matched_ids = await audience_builder.find_clients_by_semantic_query(query.natural_language_query, user_id=current_user.id)
         final_results.update(matched_ids)
 
     if query.tags:
@@ -45,46 +47,44 @@ async def search_clients(query: ClientSearchQuery):
 
     return [client for client in all_clients if client.id in final_results]
 
-
+# --- MODIFIED: Added security dependency and tenant-aware logic ---
 @router.put("/{client_id}/tags", response_model=Client)
-async def update_client_tags_endpoint(client_id: UUID, tag_data: ClientTagUpdate):
-    """
-    (CORRECTED) This endpoint now expects a payload with a 'user_tags' key
-    and passes it to the crm service.
-    """
-    updated_client = crm_service.update_client_tags(client_id, tag_data.user_tags)
+async def update_client_tags_endpoint(client_id: UUID, tag_data: ClientTagUpdate, current_user: User = Depends(get_current_user_from_token)):
+    updated_client = crm_service.update_client_tags(client_id, tag_data.user_tags, user_id=current_user.id)
     if not updated_client:
         raise HTTPException(status_code=404, detail="Client not found.")
     return updated_client
 
-# --- Other endpoints remain the same ---
+# --- MODIFIED: Added security dependency ---
 @router.get("", response_model=List[Client])
-async def get_all_clients_endpoint():
-    return crm_service.get_all_clients()
+async def get_all_clients_endpoint(current_user: User = Depends(get_current_user_from_token)):
+    return crm_service.get_all_clients(user_id=current_user.id)
 
+# --- MODIFIED: Added security dependency and tenant-aware logic ---
 @router.get("/{client_id}", response_model=Client)
-async def get_client_by_id_endpoint(client_id: UUID):
-    client = crm_service.get_client_by_id(client_id)
+async def get_client_by_id_endpoint(client_id: UUID, current_user: User = Depends(get_current_user_from_token)):
+    client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
     if client:
         return client
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
 
+# --- MODIFIED: Added security dependency and tenant-aware logic ---
 @router.get("/{client_id}/scheduled-messages", response_model=List[ScheduledMessage])
-async def get_client_scheduled_messages(client_id: UUID):
-    messages = crm_service.get_scheduled_messages_for_client(client_id)
+async def get_client_scheduled_messages(client_id: UUID, current_user: User = Depends(get_current_user_from_token)):
+    messages = crm_service.get_scheduled_messages_for_client(client_id=client_id, user_id=current_user.id)
     return messages
 
+# --- MODIFIED: Added security dependency and tenant-aware logic ---
 @router.put("/{client_id}", response_model=Client)
-async def update_client_details(client_id: UUID, client_data: ClientUpdate):
-    updated_client = crm_service.update_client_preferences(client_id=client_id, preferences=client_data.preferences)
+async def update_client_details(client_id: UUID, client_data: ClientUpdate, current_user: User = Depends(get_current_user_from_token)):
+    updated_client = crm_service.update_client_preferences(client_id=client_id, preferences=client_data.preferences, user_id=current_user.id)
     if not updated_client:
         raise HTTPException(status_code=404, detail="Client not found.")
     return updated_client
 
-# Add this endpoint to your clients.py file. It's for developer use to clear test data.
+# --- MODIFIED: Added security dependency and tenant-aware logic ---
 @router.delete("/{client_id}/scheduled-messages", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_client_scheduled_messages(client_id: UUID):
-    """Deletes all scheduled messages for a given client."""
+async def delete_client_scheduled_messages(client_id: UUID, current_user: User = Depends(get_current_user_from_token)):
     print(f"API: Received request to delete all scheduled messages for client {client_id}")
-    crm_service.delete_scheduled_messages_for_client(client_id)
+    crm_service.delete_scheduled_messages_for_client(client_id=client_id, user_id=current_user.id)
     return None

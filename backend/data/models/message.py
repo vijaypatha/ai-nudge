@@ -10,6 +10,7 @@ from sqlmodel import SQLModel, Field, Relationship
 
 if TYPE_CHECKING:
     from .client import Client
+    from .user import User
 
 class MessageStatus(str, Enum):
     PENDING = "pending"
@@ -30,6 +31,7 @@ class Message(SQLModel, table=True):
     This provides a complete history for any conversation.
     """
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(foreign_key="user.id", index=True)
     client_id: UUID = Field(foreign_key="client.id", index=True)
     content: str
     direction: MessageDirection = Field(index=True)
@@ -38,6 +40,7 @@ class Message(SQLModel, table=True):
     
     # Defines the many-to-one relationship with the Client table
     client: Optional["Client"] = Relationship(back_populates="messages")
+    user: Optional["User"] = Relationship(back_populates="messages")
 
 
 class ScheduledMessage(SQLModel, table=True):
@@ -45,6 +48,7 @@ class ScheduledMessage(SQLModel, table=True):
     (Database Table) Stores messages scheduled to be sent in the future.
     """
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(foreign_key="user.id", index=True)
     client_id: UUID = Field(foreign_key="client.id")
     content: str
     scheduled_at: datetime = Field(index=True)
@@ -55,6 +59,7 @@ class ScheduledMessage(SQLModel, table=True):
     playbook_touchpoint_id: Optional[str] = Field(default=None, index=True)
     is_recurring: bool = Field(default=False, index=True)    
     client: Optional["Client"] = Relationship(back_populates="scheduled_messages")
+    user: Optional["User"] = Relationship(back_populates="scheduled_messages")
 
 # --- API Schemas ---
 class ScheduledMessageCreate(SQLModel):

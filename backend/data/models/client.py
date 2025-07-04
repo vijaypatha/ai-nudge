@@ -9,9 +9,11 @@ from sqlmodel import SQLModel, Field, Relationship, Column, JSON
 
 if TYPE_CHECKING:
     from .message import ScheduledMessage, Message
+    from .user import User
 
 class Client(SQLModel, table=True):
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(foreign_key="user.id", index=True)
     full_name: str
     email: str = Field(unique=True, index=True)
     phone: Optional[str] = Field(default=None, index=True)
@@ -24,6 +26,8 @@ class Client(SQLModel, table=True):
     
     preferences: Dict[str, Any] = Field(sa_column=Column(JSON))
     last_interaction: Optional[str] = Field(default=None)
+    
+    user: "User" = Relationship(back_populates="clients")
     
     scheduled_messages: List["ScheduledMessage"] = Relationship(back_populates="client")
     messages: List["Message"] = Relationship(back_populates="client")

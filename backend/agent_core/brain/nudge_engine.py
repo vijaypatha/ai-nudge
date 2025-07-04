@@ -1,6 +1,9 @@
 # ---
 # File Path: backend/agent_core/brain/nudge_engine.py
-# --- CORRECTED: Restored the generate_recency_nudges function ---
+# ---
+# CORRECTED: All calls to crm_service.get_all_clients() now correctly
+# pass the user_id to align with the new multi-tenant architecture.
+# ---
 
 import uuid
 import asyncio
@@ -101,7 +104,8 @@ async def process_market_event(event: MarketEvent, realtor: User):
         print(f"NUDGE ENGINE: Property {event.entity_id} not found.")
         return
 
-    all_clients = crm_service.get_all_clients()
+    # --- MODIFIED: Pass the user_id to get_all_clients ---
+    all_clients = crm_service.get_all_clients(user_id=realtor.id)
     matched_audience = []
     
     if event.event_type in ["expired_listing", "withdrawn_listing"]:
@@ -119,16 +123,15 @@ async def process_market_event(event: MarketEvent, realtor: User):
     await _create_campaign_from_event(event, realtor, property_item, matched_audience)
 
 
-# --- RESTORED: Relationship-based Nudge Generator ---
 async def generate_recency_nudges(realtor: User):
     """
     Finds clients who haven't been contacted in a long time and creates a nudge.
-    This is now restored as a standalone feature.
     """
     print("NUDGE ENGINE: Checking for clients needing a follow-up...")
     RECENCY_THRESHOLD_DAYS = 90
     
-    all_clients = crm_service.get_all_clients()
+    # --- MODIFIED: Pass the user_id to get_all_clients ---
+    all_clients = crm_service.get_all_clients(user_id=realtor.id)
     at_risk_clients = [
         client for client in all_clients 
         if not client.last_interaction or (datetime.now(timezone.utc) - datetime.fromisoformat(client.last_interaction)) > timedelta(days=RECENCY_THRESHOLD_DAYS)
@@ -178,11 +181,19 @@ async def scan_for_all_market_events(realtor: User, minutes_ago: int = 60):
     for event_type, fetcher_func in fetcher_map.items():
         print(f"NUDGE ENGINE: Scanning for '{event_type}' events...")
         try:
+            # In a real implementation, this would create/update properties in the DB
+            # For now, we'll just use the first property for demo purposes.
+            properties = crm_service.get_all_properties()
+            if not properties:
+                print("NUDGE ENGINE: No properties in DB to associate events with.")
+                continue
+            
+            property_id_for_demo = properties[0].id
+
             listings = fetcher_func(minutes_ago=minutes_ago)
             if listings:
                 for listing_data in listings:
-                    property_id = crm_service.get_all_properties()[0].id 
-                    event = MarketEvent(event_type=event_type, entity_id=property_id, payload=listing_data)
+                    event = MarketEvent(event_type=event_type, entity_id=property_id_for_demo, payload=listing_data, market_area="default")
                     await process_market_event(event, realtor)
         except Exception as e:
             print(f"NUDGE ENGINE: Error processing {event_type}: {e}")

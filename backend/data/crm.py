@@ -46,26 +46,28 @@ def update_user(user_id: uuid.UUID, update_data: UserUpdate) -> Optional[User]:
 
 # --- Client Functions ---
 
-def get_client_by_id(client_id: uuid.UUID) -> Optional[Client]:
-    """Retrieves a single client by their unique ID."""
+def get_client_by_id(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Client]:
+    """Retrieves a single client by their unique ID, ensuring it belongs to the user."""
     with Session(engine) as session:
-        return session.get(Client, client_id)
-
-def get_client_by_phone(phone_number: str) -> Optional[Client]:
-    """Retrieves a single client by their phone number."""
-    with Session(engine) as session:
-        statement = select(Client).where(Client.phone == phone_number)
+        statement = select(Client).where(Client.id == client_id, Client.user_id == user_id)
         return session.exec(statement).first()
 
-def get_all_clients() -> List[Client]:
-    """Retrieves all clients from the database."""
+def get_client_by_phone(phone_number: str, user_id: uuid.UUID) -> Optional[Client]:
+    """Retrieves a single client by their phone number, ensuring it belongs to the user."""
     with Session(engine) as session:
-        return session.exec(select(Client)).all()
+        statement = select(Client).where(Client.phone == phone_number, Client.user_id == user_id)
+        return session.exec(statement).first()
 
-def update_last_interaction(client_id: uuid.UUID) -> Optional[Client]:
+def get_all_clients(user_id: uuid.UUID) -> List[Client]:
+    """Retrieves all clients from the database for a specific user."""
+    with Session(engine) as session:
+        statement = select(Client).where(Client.user_id == user_id)
+        return session.exec(statement).all()
+
+def update_last_interaction(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Client]:
     """Updates the last_interaction timestamp for a client to the current time."""
     with Session(engine) as session:
-        client = session.get(Client, client_id)
+        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if client:
             client.last_interaction = datetime.now(timezone.utc).isoformat()
             session.add(client)
@@ -75,10 +77,10 @@ def update_last_interaction(client_id: uuid.UUID) -> Optional[Client]:
             return client
         return None
 
-def update_client_preferences(client_id: uuid.UUID, preferences: Dict[str, Any]) -> Optional[Client]:
+def update_client_preferences(client_id: uuid.UUID, preferences: Dict[str, Any], user_id: uuid.UUID) -> Optional[Client]:
     """Overwrites the entire 'preferences' JSON object for a specific client."""
     with Session(engine) as session:
-        client = session.get(Client, client_id)
+        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if client:
             client.preferences = preferences
             session.add(client)
@@ -87,10 +89,10 @@ def update_client_preferences(client_id: uuid.UUID, preferences: Dict[str, Any])
             return client
         return None
 
-def update_client_tags(client_id: uuid.UUID, tags: List[str]) -> Optional[Client]:
+def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uuid.UUID) -> Optional[Client]:
     """Overwrites the entire 'user_tags' list for a specific client."""
     with Session(engine) as session:
-        client = session.get(Client, client_id)
+        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if client:
             client.user_tags = tags
             session.add(client)
@@ -100,7 +102,7 @@ def update_client_tags(client_id: uuid.UUID, tags: List[str]) -> Optional[Client
         return None
 
 
-# --- Property Functions ---
+# --- Property Functions (No changes needed, properties are shared data) ---
 
 def get_property_by_id(property_id: uuid.UUID) -> Optional[Property]:
     """Retrieves a single property by its unique ID."""
@@ -130,7 +132,6 @@ def update_property_price(property_id: uuid.UUID, new_price: float) -> Optional[
 def save_campaign_briefing(briefing: CampaignBriefing):
     """Saves or updates a single CampaignBriefing in the database."""
     with Session(engine) as session:
-        # merge() is used to handle both new and existing records gracefully.
         session.merge(briefing)
         session.commit()
         print(f"CRM: Saved campaign briefing -> {briefing.headline}")
@@ -141,15 +142,16 @@ def get_new_campaign_briefings_for_user(user_id: uuid.UUID) -> List[CampaignBrie
         statement = select(CampaignBriefing).where(CampaignBriefing.user_id == user_id, CampaignBriefing.status.in_(["new", "insight"]))
         return session.exec(statement).all()
 
-def get_campaign_briefing_by_id(campaign_id: uuid.UUID) -> Optional[CampaignBriefing]:
-    """Retrieves a single campaign briefing by its unique ID."""
+def get_campaign_briefing_by_id(campaign_id: uuid.UUID, user_id: uuid.UUID) -> Optional[CampaignBriefing]:
+    """Retrieves a single campaign briefing by its unique ID, ensuring it belongs to the user."""
     with Session(engine) as session:
-        return session.get(CampaignBriefing, campaign_id)
+        statement = select(CampaignBriefing).where(CampaignBriefing.id == campaign_id, CampaignBriefing.user_id == user_id)
+        return session.exec(statement).first()
 
-def update_campaign_briefing(campaign_id: uuid.UUID, update_data: CampaignUpdate) -> Optional[CampaignBriefing]:
-    """Updates a campaign briefing with new data."""
+def update_campaign_briefing(campaign_id: uuid.UUID, update_data: CampaignUpdate, user_id: uuid.UUID) -> Optional[CampaignBriefing]:
+    """Updates a campaign briefing with new data, ensuring it belongs to the user."""
     with Session(engine) as session:
-        briefing = session.get(CampaignBriefing, campaign_id)
+        briefing = session.exec(select(CampaignBriefing).where(CampaignBriefing.id == campaign_id, CampaignBriefing.user_id == user_id)).first()
         if not briefing:
             return None
         update_dict = update_data.model_dump(exclude_unset=True)
@@ -171,19 +173,24 @@ def save_message(message: Message):
         session.refresh(message)
         print(f"CRM: Saved '{message.direction}' message for client_id: {message.client_id}")
 
-def get_conversation_history(client_id: uuid.UUID) -> List[Message]:
-    """Retrieves all messages for a given client, ordered by time."""
+def get_conversation_history(client_id: uuid.UUID, user_id: uuid.UUID) -> List[Message]:
+    """Retrieves all messages for a given client, ensuring it belongs to the user."""
     with Session(engine) as session:
+        # First, verify the client belongs to the user
+        client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
+        if not client_check:
+            return [] # Return empty list if client doesn't belong to user
+            
         statement = select(Message).where(Message.client_id == client_id).order_by(Message.created_at)
         return session.exec(statement).all()
 
-def get_conversation_summaries() -> List[Dict[str, Any]]:
-    """Generates a list of conversation summaries for the main dashboard view."""
+def get_conversation_summaries(user_id: uuid.UUID) -> List[Dict[str, Any]]:
+    """Generates a list of conversation summaries for a specific user."""
     summaries = []
     with Session(engine) as session:
-        clients = session.exec(select(Client)).all()
+        # Fetch only clients belonging to the current user
+        clients = session.exec(select(Client).where(Client.user_id == user_id)).all()
         for client in clients:
-            # Find the most recent message to display in the summary
             last_message_statement = select(Message).where(Message.client_id == client.id).order_by(Message.created_at.desc()).limit(1)
             last_message = session.exec(last_message_statement).first()
             
@@ -193,11 +200,10 @@ def get_conversation_summaries() -> List[Dict[str, Any]]:
                 "client_name": client.full_name,
                 "last_message": last_message.content if last_message else "No messages yet.",
                 "last_message_time": last_message.created_at.isoformat() if last_message else datetime.now(timezone.utc).isoformat(),
-                "unread_count": 0 # This is a placeholder for a future feature
+                "unread_count": 0
             }
             summaries.append(summary)
     
-    # Sort summaries so the most recent conversations appear first
     summaries.sort(key=lambda x: x['last_message_time'], reverse=True)
     return summaries
 
@@ -210,17 +216,17 @@ def save_scheduled_message(message: ScheduledMessage):
         session.add(message)
         session.commit()
         print(f"CRM: Saved scheduled message for client {message.client_id} at {message.scheduled_at}")
-        
-def get_all_scheduled_messages() -> List[ScheduledMessage]:
-    """Gets all scheduled messages from the database across all clients."""
+
+def get_all_scheduled_messages(user_id: uuid.UUID) -> List[ScheduledMessage]:
+    """Gets all scheduled messages from the database for a specific user."""
     with Session(engine) as session:
-        statement = select(ScheduledMessage)
+        statement = select(ScheduledMessage).where(ScheduledMessage.user_id == user_id)
         return session.exec(statement).all()
 
-def update_scheduled_message(message_id: uuid.UUID, update_data: Dict[str, Any]) -> Optional[ScheduledMessage]:
+def update_scheduled_message(message_id: uuid.UUID, update_data: Dict[str, Any], user_id: uuid.UUID) -> Optional[ScheduledMessage]:
     """Updates a scheduled message, typically its content or scheduled time."""
     with Session(engine) as session:
-        message = session.get(ScheduledMessage, message_id)
+        message = session.exec(select(ScheduledMessage).where(ScheduledMessage.id == message_id, ScheduledMessage.user_id == user_id)).first()
         if not message:
             return None
         for key, value in update_data.items():
@@ -231,25 +237,35 @@ def update_scheduled_message(message_id: uuid.UUID, update_data: Dict[str, Any])
         session.refresh(message)
         return message
 
-def delete_scheduled_message(message_id: uuid.UUID) -> bool:
+def delete_scheduled_message(message_id: uuid.UUID, user_id: uuid.UUID) -> bool:
     """Deletes a single scheduled message by its ID."""
     with Session(engine) as session:
-        message = session.get(ScheduledMessage, message_id)
+        message = session.exec(select(ScheduledMessage).where(ScheduledMessage.id == message_id, ScheduledMessage.user_id == user_id)).first()
         if not message:
             return False
         session.delete(message)
         session.commit()
         return True
 
-def get_scheduled_messages_for_client(client_id: uuid.UUID) -> List[ScheduledMessage]:
+def get_scheduled_messages_for_client(client_id: uuid.UUID, user_id: uuid.UUID) -> List[ScheduledMessage]:
     """Retrieves all scheduled messages for a single client."""
     with Session(engine) as session:
+        # Verify client ownership first
+        client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
+        if not client_check:
+            return []
+            
         statement = select(ScheduledMessage).where(ScheduledMessage.client_id == client_id)
         return session.exec(statement).all()
 
-def delete_scheduled_messages_for_client(client_id: uuid.UUID):
+def delete_scheduled_messages_for_client(client_id: uuid.UUID, user_id: uuid.UUID):
     """Deletes all scheduled messages for a single client. Used by the planner."""
     with Session(engine) as session:
+        # Verify client ownership before deleting
+        client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
+        if not client_check:
+            return
+            
         statement = delete(ScheduledMessage).where(ScheduledMessage.client_id == client_id)
         session.exec(statement)
         session.commit()
@@ -259,7 +275,7 @@ def delete_scheduled_messages_for_client(client_id: uuid.UUID):
 def get_all_sent_recurring_messages() -> List[ScheduledMessage]:
     """
     Retrieves all messages that have been sent and are marked as recurring.
-    Used by the daily Celery task to find campaigns that need rescheduling.
+    This function remains global as the background task iterates through all users.
     """
     with Session(engine) as session:
         statement = select(ScheduledMessage).where(
@@ -272,6 +288,7 @@ def has_future_recurring_message(client_id: uuid.UUID, playbook_touchpoint_id: s
     """
     Checks if a recurring message from a specific playbook rule is already
     pending for a client. This prevents the daily task from creating duplicates.
+    (No user_id needed as client_id is globally unique and this is an internal check)
     """
     with Session(engine) as session:
         statement = select(ScheduledMessage).where(
@@ -281,3 +298,19 @@ def has_future_recurring_message(client_id: uuid.UUID, playbook_touchpoint_id: s
         )
         result = session.exec(statement).first()
         return result is not None
+
+def get_all_users() -> List[User]:
+    """Retrieves all users from the database. For use by system-wide background tasks."""
+    with Session(engine) as session:
+        return session.exec(select(User)).all()
+
+# --- ADDED: New function for system-level indexing tasks ---
+def _get_all_clients_for_system_indexing() -> List[Client]:
+    """
+    Retrieves ALL clients from the database, across all users.
+    USE WITH CAUTION: This is only for system-level processes like building a
+    search index at startup. Do NOT use this in user-facing API endpoints.
+    """
+    with Session(engine) as session:
+        statement = select(Client)
+        return session.exec(statement).all()
