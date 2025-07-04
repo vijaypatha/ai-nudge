@@ -4,7 +4,6 @@
 # This version adds a strategic playbook for nurturing seller leads.
 # ---
 
-# --- NEW: Playbook for nurturing potential sellers ---
 POTENTIAL_SELLER_PLAYBOOK = {
     "name": "Potential Seller Nurture",
     "triggers": ["potential_seller", "seller_lead"],
@@ -89,7 +88,7 @@ NEW_BUYER_PLAYBOOK = {
             "offset_days": 7,
             "prompt": (
                 "<role>You are a friendly and professional real estate agent's assistant.</role>\n"
-                "<task>Draft a brief, casual SMS to welcome a new client named {client_name}.</task>\n"
+                "<task>Draft a brief, casual SMS to get in touch with a new client named {client_name}.</task>\n"
                 "<instructions>Ask if they have any initial questions about the home buying process. Keep it under 2 sentences. Sign it from {realtor_name}.</instructions>"
             )
         },
@@ -180,12 +179,79 @@ PAST_SELLER_PLAYBOOK = {
     ]
 }
 
+CUSTOM_FREQUENCY_PLAYBOOK = {
+    "name": "Client Preferred Cadence",
+    "triggers": [], # No explicit trigger tag
+    "touchpoints": [
+        {
+            "id": "custom_check_in",
+            "name": "Custom Frequency Check-in",
+            "event_type": "recurring",
+            "recurrence": {"parse_from_notes": True}, # Tells the planner to look for a frequency in the notes
+            "prompt": (
+                "<role>You are a friendly and professional real estate agent's assistant.</role>\n"
+                "<task>Draft a brief and casual SMS check-in for {client_name}.</task>\n"
+                "<instructions>Your goal is to be helpful and maintain the relationship. You can mention a local event or a general market insight. Client's notes for context: '{notes}'. Sign it from {realtor_name}.</instructions>"
+            )
+        }
+    ]
+}
+
+# --- NEW: Playbook for sending holiday messages ---
+HOLIDAY_GREETING_PLAYBOOK = {
+    "name": "General Holiday Greetings",
+    "triggers": ["sphere", "past_client", "lead"],
+    "touchpoints": [
+        {
+            "id": "holiday_july_4th",
+            "name": "4th of July Greeting",
+            "event_type": "holiday",
+            "holiday_name": "july_4th",
+            "send_before_days": 4,
+            "prompt": (
+                "<role>You are a friendly local professional.</role>\n"
+                "<task>Draft a brief, warm, and festive 4th of July greeting for {client_name}.</task>\n"
+                "<instructions>Wish them a happy and safe holiday. Do not mention real estate. Sign it from {realtor_name}.</instructions>"
+            )
+        },
+        {
+            "id": "holiday_thanksgiving",
+            "name": "Thanksgiving Greeting",
+            "event_type": "holiday",
+            "holiday_name": "thanksgiving",
+            "send_before_days": 3,
+            "prompt": (
+                "<role>You are a friendly local professional.</role>\n"
+                "<task>Draft a brief and sincere Thanksgiving message for {client_name}.</task>\n"
+                "<instructions>Express gratitude and wish them a wonderful time with family and friends. Sign it from {realtor_name}.</instructions>"
+            )
+        },
+        {
+            "id": "holiday_christmas",
+            "name": "Christmas Greeting",
+            "event_type": "holiday",
+            "holiday_name": "christmas",
+            "send_before_days": 4,
+            "prompt": (
+                "<role>You are a friendly local professional.</role>\n"
+                "<task>Draft a brief, warm, and festive Christmas or general holiday greeting for {client_name}.</task>\n"
+                "<instructions>Wish them a happy holiday season. Sign it from {realtor_name}.</instructions>"
+            )
+        }
+    ]
+}
+
+
 
 # A list of all available playbooks. They are matched in order.
+# The order determines priority. Custom frequency is checked first.
+
 ALL_PLAYBOOKS = [
+    CUSTOM_FREQUENCY_PLAYBOOK,
     POTENTIAL_SELLER_PLAYBOOK,
     FIRST_TIME_BUYER_PLAYBOOK,
     INVESTOR_PLAYBOOK,
     NEW_BUYER_PLAYBOOK,
-    PAST_SELLER_PLAYBOOK
+    PAST_SELLER_PLAYBOOK,
+    HOLIDAY_GREETING_PLAYBOOK
 ]

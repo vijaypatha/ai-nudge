@@ -52,7 +52,8 @@ class ScheduledMessage(SQLModel, table=True):
     sent_at: Optional[datetime] = Field(default=None)
     error_message: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    
+    playbook_touchpoint_id: Optional[str] = Field(default=None, index=True)
+    is_recurring: bool = Field(default=False, index=True)    
     client: Optional["Client"] = Relationship(back_populates="scheduled_messages")
 
 # --- API Schemas ---
