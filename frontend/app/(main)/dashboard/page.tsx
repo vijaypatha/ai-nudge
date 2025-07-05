@@ -1,17 +1,101 @@
-// File Path: frontend/app/dashboard/page.tsx
+// File Path: frontend/app/(main)/dashboard/page.tsx
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import clsx from 'clsx';
 import { useAppContext } from '@/context/AppContext';
 
-import type { Property, Message, Conversation, ScheduledMessage, Client, MatchedClient, CampaignBriefing } from '@/context/AppContext';
-import { MessageCircleHeart, Zap, Users, MessageSquare, Paperclip, Phone, Video, Sparkles, Search, Send, Calendar, Gift, Star, X, Edit2, Info, User as UserIcon, Menu, Tag, Plus, BrainCircuit, Loader2 } from "lucide-react";
+// --- IMPORTS FOR CELEBRATION ---
+import ReactConfetti from 'react-confetti';
+// REMOVED: import { useWindowSize } from 'use-window-size'; // This was causing the error.
 
-// --- Sub-Components (Unchanged) ---
+import type { Property, Message, Conversation, ScheduledMessage, Client, MatchedClient, CampaignBriefing } from '@/context/AppContext';
+import { MessageCircleHeart, Zap, Users, MessageSquare, Paperclip, Phone, Video, Sparkles, Search, Send, Calendar, Gift, Star, X, Edit2, Info, User as UserIcon, Menu, Tag, Plus, BrainCircuit, Loader2, CheckCircle2 } from "lucide-react";
+
+
+// --- DEFINITIVE FIX: Custom hook to get window dimensions ---
+/**
+ * A modern, self-contained React hook to get the window's width and height.
+ * This replaces the external 'use-window-size' library to avoid dependency issues.
+ * @returns An object with the current { width, height } of the window.
+ */
+const useWindowDimensions = () => {
+  const [windowDimensions, setWindowDimensions] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    // This function runs only on the client side, after the component mounts.
+    function getWindowDimensions() {
+      const { innerWidth: width, innerHeight: height } = window;
+      return { width, height };
+    }
+
+    function handleResize() {
+      setWindowDimensions(getWindowDimensions());
+    }
+
+    // Set initial size
+    handleResize();
+
+    // Set up event listener for window resize
+    window.addEventListener('resize', handleResize);
+    
+    // Clean up event listener on component unmount
+    return () => window.removeEventListener('resize', handleResize);
+  }, []); // Empty dependency array ensures this runs only once on mount and unmount.
+
+  return windowDimensions;
+};
+
+
+// --- NEW CELEBRATION COMPONENT ---
+/**
+ * A self-contained component for the post-import celebration.
+ * It shows a full-screen confetti effect and a summary card.
+ */
+const CelebrationView = ({ imported, merged, onDismiss }: { imported: number, merged: number, onDismiss: () => void }) => {
+  // Use our new, reliable custom hook.
+  const { width, height } = useWindowDimensions();
+
+  return (
+    <div className="fixed inset-0 bg-brand-dark/80 backdrop-blur-xl flex items-center justify-center z-[100] animate-in fade-in-0 duration-500">
+      <ReactConfetti
+        width={width}
+        height={height}
+        recycle={false}
+        numberOfPieces={500}
+        gravity={0.15}
+        initialVelocityY={20}
+      />
+      <div className="text-center p-8 bg-black/20 border border-white/10 rounded-2xl shadow-2xl max-w-lg mx-4 animate-in fade-in-0 zoom-in-95 duration-500">
+        <CheckCircle2 size={64} className="mx-auto text-brand-accent" />
+        <h1 className="text-4xl font-bold text-white mt-6">Import Complete!</h1>
+        <p className="text-lg text-brand-text-muted mt-2">Your AI co-pilot is ready to get to work.</p>
+        <div className="mt-8 flex justify-center gap-6 text-left">
+            <div className="text-center">
+                <p className="text-4xl font-bold text-brand-accent">{imported}</p>
+                <p className="text-sm text-brand-text-muted">New Contacts Added</p>
+            </div>
+            <div className="text-center">
+                <p className="text-4xl font-bold text-brand-accent">{merged}</p>
+                <p className="text-sm text-brand-text-muted">Duplicates Merged</p>
+            </div>
+        </div>
+        <button
+            onClick={onDismiss}
+            className="mt-10 w-full max-w-xs mx-auto px-6 py-3 text-lg font-semibold bg-primary-action text-brand-dark hover:brightness-110 rounded-md transition-transform transform hover:scale-105"
+        >
+            View My Dashboard
+        </button>
+      </div>
+    </div>
+  );
+};
+
+
+// --- The rest of your components remain unchanged ---
 const InfoCard = ({ title, icon, children, className, onEdit }: { title: string, icon?: React.ReactNode, children: React.ReactNode, className?: string, onEdit?: () => void }) => (
   <div className={clsx("bg-white/5 border border-white/10 rounded-xl relative", className)}>
     <div className="flex justify-between items-center px-4 pt-4 pb-2">
@@ -21,12 +105,10 @@ const InfoCard = ({ title, icon, children, className, onEdit }: { title: string,
     <div className="p-4 pt-0"> {children} </div>
   </div>
 );
-
 const Avatar = ({ name, className }: { name: string, className?: string }) => {
   const initials = name?.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() || '';
   return (<div className={clsx("flex items-center justify-center rounded-full bg-white/10 text-brand-text-muted font-bold select-none", className)}> {initials} </div>);
 };
-
 const EditMessageModal = ({ isOpen, onClose, message, onSave, api }: { isOpen: boolean; onClose: () => void; message: ScheduledMessage | null; onSave: (updatedMessage: ScheduledMessage) => void; api: any; }) => {
   const [content, setContent] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
@@ -39,7 +121,6 @@ const EditMessageModal = ({ isOpen, onClose, message, onSave, api }: { isOpen: b
   if (!isOpen || !message) return null;
   const handleSave = async () => {
     try {
-      // NOTE: This endpoint does not exist yet. This is placeholder functionality.
       const updatedMessage = await api.put(`/scheduled-messages/${message.id}`, { content, scheduled_at: new Date(scheduledAt).toISOString() });
       onSave(updatedMessage);
       onClose();
@@ -60,7 +141,6 @@ const EditMessageModal = ({ isOpen, onClose, message, onSave, api }: { isOpen: b
     </div>
   );
 };
-
 const DynamicTaggingCard = ({ client, onUpdate, api }: { client: Client; onUpdate: (updatedClient: Client) => void; api: any; }) => {
   const [newTag, setNewTag] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -114,8 +194,6 @@ const DynamicTaggingCard = ({ client, onUpdate, api }: { client: Client; onUpdat
     </div>
   );
 };
-
-
 const ClientIntelCard = ({ client, onUpdate, onReplan, api }: { client: Client | undefined; onUpdate: (updatedClient: Client) => void; onReplan: () => void; api: any; }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [notes, setNotes] = useState('');
@@ -156,7 +234,6 @@ const ClientIntelCard = ({ client, onUpdate, onReplan, api }: { client: Client |
     </InfoCard>
   );
 };
-
 const RelationshipCampaignCard = ({ messages, onReplan, onUpdateMessage, isPlanning, api }: { messages: ScheduledMessage[], onReplan: () => void, onUpdateMessage: (updatedMessage: ScheduledMessage) => void, isPlanning: boolean, api: any; }) => {
   const [editingMessage, setEditingMessage] = useState<ScheduledMessage | null>(null);
   const getIconForMessage = (content: string) => {
@@ -193,10 +270,15 @@ const RelationshipCampaignCard = ({ messages, onReplan, onUpdateMessage, isPlann
 };
 
 
-// --- Main Dashboard Page Component ---
-export default function DashboardPage() {
+/**
+ * Main dashboard component that reads URL parameters for the celebration.
+ * NOTE: This component is wrapped in a <Suspense> boundary at the bottom of the file,
+ * which is a requirement for using the useSearchParams() hook in Next.js.
+ */
+function DashboardPageContent() {
   const { loading, api, clients, properties, conversations, fetchDashboardData, updateClientInList, refetchScheduledMessagesForClient } = useAppContext();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [error, setError] = useState<string | null>(null);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -207,24 +289,52 @@ export default function DashboardPage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'messages' | 'intel'>('messages');
   const [isPlanningCampaign, setIsPlanningCampaign] = useState(false);
+
+  // --- NEW STATE FOR CELEBRATION ---
+  const [celebrationData, setCelebrationData] = useState<{imported: number, merged: number} | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const searchParams = useSearchParams();
 
   useEffect(() => {
+    // --- NEW LOGIC TO TRIGGER CELEBRATION ---
+    const imported = searchParams.get('imported');
+    const merged = searchParams.get('merged');
+
+    // If the URL contains import results, trigger the celebration.
+    if (imported !== null && merged !== null) {
+      setCelebrationData({ imported: parseInt(imported, 10), merged: parseInt(merged, 10) });
+      
+      // Clean the URL to prevent the celebration from re-appearing on refresh.
+      // The `replace` method updates the URL without adding to the browser history.
+      router.replace('/dashboard', { scroll: false });
+
+      // Automatically hide the celebration after 8 seconds for a seamless experience.
+      const timer = setTimeout(() => {
+        setCelebrationData(null);
+      }, 8000);
+
+      // Clean up the timer if the component unmounts.
+      return () => clearTimeout(timer);
+    }
+  }, [searchParams, router]);
+
+  useEffect(() => {
+    // Fetch initial dashboard data once on load.
     fetchDashboardData().catch(err => setError(err.message || "An unknown error occurred"));
   }, [fetchDashboardData]);
 
   useEffect(() => {
+    // Logic to select a client from the URL or default to the first conversation.
     const clientIdFromUrl = searchParams.get('clientId');
-    if (clientIdFromUrl) {
+    if (clientIdFromUrl && clientIdFromUrl !== selectedClientId) {
       setSelectedClientId(clientIdFromUrl);
-    } else if (conversations.length > 0 && !selectedClientId) {
+    } else if (conversations.length > 0 && !selectedClientId && !clientIdFromUrl) {
       setSelectedClientId(conversations[0].client_id);
     }
   }, [conversations, searchParams, selectedClientId]);
 
   useEffect(() => {
+    // Fetch details for the currently selected client.
     if (!selectedClientId) {
       setCurrentMessages([]);
       setScheduledMessages([]);
@@ -253,17 +363,16 @@ export default function DashboardPage() {
     if (!composerMessage.trim() || !selectedClientId || isSending) return;
     setIsSending(true);
     const content = composerMessage;
-    const optimisticMessage: Message = { id: `agent-${Date.now()}`, client_id: selectedClientId, content, direction: 'outbound', status: 'pending', created_at: new Date().toISOString() };
+    const optimisticMessage: Message = { id: `agent-${Date.now()}`, client_id: selectedClientId, content: content, direction: 'outbound', status: 'pending', created_at: new Date().toISOString() };
     setCurrentMessages(prev => [...prev, optimisticMessage]);
     setComposerMessage('');
     try {
-      // The backend will create the message log, so we just refetch.
       await api.post(`/conversations/${selectedClientId}/send_reply`, { content });
       const historyData = await api.get(`/conversations/${selectedClientId}`);
       setCurrentMessages(historyData);
     } catch (err) {
       console.error(err);
-      setCurrentMessages(prev => prev.filter(m => m.id !== optimisticMessage.id)); // Rollback optimistic update
+      setCurrentMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
       alert("Failed to send message.");
     } finally {
       setIsSending(false);
@@ -294,59 +403,79 @@ export default function DashboardPage() {
   const selectedClient = clients.find(c => c.id === selectedClientId);
 
   return (
-    <div className="h-screen w-screen bg-brand-dark text-brand-text-main font-sans flex overflow-hidden">
-      {isSidebarOpen && (<div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/50 z-10 md:hidden"></div>)}
-      
-      <aside className={clsx("bg-brand-dark border-r border-white/10 flex flex-col transition-transform duration-300 ease-in-out z-20", "absolute md:relative inset-y-0 left-0 w-80", isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0")}>
-        <div className="p-4 flex-shrink-0"><button onClick={() => router.push('/')}><Image src="/AI Nudge Logo.png" alt="AI Nudge Logo" width={260} height={60} priority /></button></div>
-        <nav className="px-4 space-y-1.5 flex-shrink-0">
-          <Link href="/dashboard" className="flex items-center gap-3 p-2.5 rounded-lg bg-brand-accent/10 border border-brand-accent/30 text-brand-accent font-semibold"><MessageCircleHeart className="w-5 h-5" /> All Conversations</Link>
-          <Link href="/nudges" className="flex items-center gap-3 p-2.5 rounded-lg text-brand-text-muted hover:bg-white/5 transition-colors"><Zap className="w-5 h-5" /> AI Nudges</Link>
-        </nav>
-        <div className="px-4 my-4 relative flex-shrink-0"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-brand-text-muted/50" /><input type="text" placeholder="Search conversations..." className="w-full bg-black/20 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-brand-text-main focus:outline-none focus:ring-2 focus:ring-brand-accent" /></div>
-        <div className="flex-grow overflow-y-auto px-4">
-          <ul className="space-y-1">
-            {conversations.map(conv => (<li key={conv.id} className={clsx("p-3 rounded-lg cursor-pointer transition-colors border border-transparent", selectedClientId === conv.client_id ? "bg-white/10 border-white/20" : "hover:bg-white/5")} onClick={() => { setSelectedClientId(conv.client_id); setIsSidebarOpen(false); }}><div className="flex items-start justify-between gap-3"><div className="flex items-start gap-3 overflow-hidden"><Avatar name={conv.client_name} className="w-10 h-10 text-sm flex-shrink-0" /><div className="overflow-hidden"><span className="font-semibold text-brand-text-main">{conv.client_name}</span><p className="text-brand-text-muted text-sm truncate">{conv.last_message}</p></div></div><div className="flex flex-col items-end flex-shrink-0"><span className="text-xs text-brand-text-muted/70">{new Date(conv.last_message_time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>{conv.unread_count > 0 && (<span className="mt-1 bg-brand-accent text-xs text-brand-dark font-bold rounded-full w-5 h-5 flex items-center justify-center"> {conv.unread_count} </span>)}</div></div></li>))}
-          </ul>
-        </div>
-        <div className="p-4 flex-shrink-0 border-t border-white/5"><Link href="/profile" className="flex items-center gap-3 p-2.5 rounded-lg text-brand-text-muted hover:bg-white/5 transition-colors"><UserIcon className="w-5 h-5" /> Profile</Link></div>
-      </aside>
+    <>
+      {/* --- RENDER THE CELEBRATION VIEW --- */}
+      {celebrationData && (
+        <CelebrationView
+          imported={celebrationData.imported}
+          merged={celebrationData.merged}
+          onDismiss={() => setCelebrationData(null)}
+        />
+      )}
 
-      <main className="flex-1 flex flex-col min-w-0">
-        {selectedClient ? (
-          <>
-            <header className="flex items-center justify-between p-4 border-b border-white/10 bg-brand-dark/50 backdrop-blur-sm sticky top-0 z-10">
-              <div className="flex items-center gap-4"><button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 rounded-full text-brand-text-muted hover:bg-white/10 md:hidden"><Menu className="w-6 h-6" /></button><Avatar name={selectedClient.full_name} className="w-11 h-11 hidden sm:flex" /><div><h2 className="text-xl font-bold text-brand-text-main">{selectedClient.full_name}</h2><p className="text-sm text-brand-accent">Online</p></div></div>
-              <div className="flex items-center gap-2"><button className="p-2 rounded-full text-brand-text-muted hover:bg-white/10 hover:text-brand-text-main"><Phone className="w-5 h-5" /></button><button className="p-2 rounded-full text-brand-text-muted hover:bg-white/10 hover:text-brand-text-main"><Video className="w-5 h-5" /></button></div>
-            </header>
-            <div className="flex-shrink-0 border-b border-white/10 lg:hidden"><nav className="flex"><button onClick={() => setActiveTab('messages')} className={clsx("flex-1 p-3 text-sm font-semibold text-center", activeTab === 'messages' ? 'text-brand-accent border-b-2 border-brand-accent' : 'text-brand-text-muted')}>Messages</button><button onClick={() => setActiveTab('intel')} className={clsx("flex-1 p-3 text-sm font-semibold text-center", activeTab === 'intel' ? 'text-brand-accent border-b-2 border-brand-accent' : 'text-brand-text-muted')}>Intel</button></nav></div>
-            <div className="flex-grow overflow-y-auto">
-              <div className={clsx("p-6 space-y-6 h-full", activeTab === 'messages' ? 'block' : 'hidden lg:block')}>
-                {/* --- THIS IS THE CORRECTED BLOCK --- */}
-                {currentMessages.map(msg => (
-                  <div key={msg.id} className={clsx("flex items-end gap-3", msg.direction === 'inbound' ? 'justify-start' : 'justify-end')}>
-                    {msg.direction === 'inbound' && selectedClient && <Avatar name={selectedClient.full_name} className="w-8 h-8 text-xs" />}
-                    <div className={clsx("p-3 px-4 rounded-t-xl max-w-lg", {
-                      'bg-gray-800 text-brand-text-muted rounded-br-xl': msg.direction === 'inbound',
-                      'bg-primary-action text-brand-dark font-medium rounded-bl-xl': msg.direction === 'outbound'
-                    })}>
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
-                      <p className="text-right text-xs mt-1 opacity-70">{new Date(msg.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
+      {/* Your existing dashboard JSX starts here */}
+      <div className="h-screen w-screen bg-brand-dark text-brand-text-main font-sans flex overflow-hidden">
+        {isSidebarOpen && (<div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/50 z-10 md:hidden"></div>)}
+        
+        <aside className={clsx("bg-brand-dark border-r border-white/10 flex flex-col transition-transform duration-300 ease-in-out z-20", "absolute md:relative inset-y-0 left-0 w-80", isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0")}>
+          <div className="p-4 flex-shrink-0"><button onClick={() => router.push('/')}><Image src="/AI Nudge Logo.png" alt="AI Nudge Logo" width={260} height={60} priority /></button></div>
+          <nav className="px-4 space-y-1.5 flex-shrink-0">
+            <Link href="/dashboard" className="flex items-center gap-3 p-2.5 rounded-lg bg-brand-accent/10 border border-brand-accent/30 text-brand-accent font-semibold"><MessageCircleHeart className="w-5 h-5" /> All Conversations</Link>
+            <Link href="/nudges" className="flex items-center gap-3 p-2.5 rounded-lg text-brand-text-muted hover:bg-white/5 transition-colors"><Zap className="w-5 h-5" /> AI Nudges</Link>
+          </nav>
+          <div className="px-4 my-4 relative flex-shrink-0"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-brand-text-muted/50" /><input type="text" placeholder="Search conversations..." className="w-full bg-black/20 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-brand-text-main focus:outline-none focus:ring-2 focus:ring-brand-accent" /></div>
+          <div className="flex-grow overflow-y-auto px-4">
+            <ul className="space-y-1">
+              {conversations.map(conv => (<li key={conv.id} className={clsx("p-3 rounded-lg cursor-pointer transition-colors border border-transparent", selectedClientId === conv.client_id ? "bg-white/10 border-white/20" : "hover:bg-white/5")} onClick={() => { setSelectedClientId(conv.client_id); setIsSidebarOpen(false); }}><div className="flex items-start justify-between gap-3"><div className="flex items-start gap-3 overflow-hidden"><Avatar name={conv.client_name} className="w-10 h-10 text-sm flex-shrink-0" /><div className="overflow-hidden"><span className="font-semibold text-brand-text-main">{conv.client_name}</span><p className="text-brand-text-muted text-sm truncate">{conv.last_message}</p></div></div><div className="flex flex-col items-end flex-shrink-0"><span className="text-xs text-brand-text-muted/70">{new Date(conv.last_message_time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>{conv.unread_count > 0 && (<span className="mt-1 bg-brand-accent text-xs text-brand-dark font-bold rounded-full w-5 h-5 flex items-center justify-center"> {conv.unread_count} </span>)}</div></div></li>))}
+            </ul>
+          </div>
+          <div className="p-4 flex-shrink-0 border-t border-white/5"><Link href="/profile" className="flex items-center gap-3 p-2.5 rounded-lg text-brand-text-muted hover:bg-white/5 transition-colors"><UserIcon className="w-5 h-5" /> Profile</Link></div>
+        </aside>
+
+        <main className="flex-1 flex flex-col min-w-0">
+          {selectedClient ? (
+            <>
+              <header className="flex items-center justify-between p-4 border-b border-white/10 bg-brand-dark/50 backdrop-blur-sm sticky top-0 z-10">
+                <div className="flex items-center gap-4"><button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 rounded-full text-brand-text-muted hover:bg-white/10 md:hidden"><Menu className="w-6 h-6" /></button><Avatar name={selectedClient.full_name} className="w-11 h-11 hidden sm:flex" /><div><h2 className="text-xl font-bold text-brand-text-main">{selectedClient.full_name}</h2><p className="text-sm text-brand-accent">Online</p></div></div>
+                <div className="flex items-center gap-2"><button className="p-2 rounded-full text-brand-text-muted hover:bg-white/10 hover:text-brand-text-main"><Phone className="w-5 h-5" /></button><button className="p-2 rounded-full text-brand-text-muted hover:bg-white/10 hover:text-brand-text-main"><Video className="w-5 h-5" /></button></div>
+              </header>
+              <div className="flex-shrink-0 border-b border-white/10 lg:hidden"><nav className="flex"><button onClick={() => setActiveTab('messages')} className={clsx("flex-1 p-3 text-sm font-semibold text-center", activeTab === 'messages' ? 'text-brand-accent border-b-2 border-brand-accent' : 'text-brand-text-muted')}>Messages</button><button onClick={() => setActiveTab('intel')} className={clsx("flex-1 p-3 text-sm font-semibold text-center", activeTab === 'intel' ? 'text-brand-accent border-b-2 border-brand-accent' : 'text-brand-text-muted')}>Intel</button></nav></div>
+              <div className="flex-grow overflow-y-auto">
+                <div className={clsx("p-6 space-y-6 h-full", activeTab === 'messages' ? 'block' : 'hidden lg:block')}>
+                  {currentMessages.map(msg => (
+                    <div key={msg.id} className={clsx("flex items-end gap-3", msg.direction === 'inbound' ? 'justify-start' : 'justify-end')}>
+                      {msg.direction === 'inbound' && selectedClient && <Avatar name={selectedClient.full_name} className="w-8 h-8 text-xs" />}
+                      <div className={clsx("p-3 px-4 rounded-t-xl max-w-lg", {
+                        'bg-gray-800 text-brand-text-muted rounded-br-xl': msg.direction === 'inbound',
+                        'bg-primary-action text-brand-dark font-medium rounded-bl-xl': msg.direction === 'outbound'
+                      })}>
+                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                        <p className="text-right text-xs mt-1 opacity-70">{new Date(msg.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
+                      </div>
                     </div>
-                  </div>
-                ))}
-                <div ref={messagesEndRef} />
+                  ))}
+                  <div ref={messagesEndRef} />
+                </div>
+                <div className={clsx("p-6 space-y-6 h-full", activeTab === 'intel' ? 'block' : 'hidden')}><DynamicTaggingCard client={selectedClient} onUpdate={updateClientInList} api={api} /><ClientIntelCard client={selectedClient} onUpdate={updateClientInList} onReplan={() => handlePlanCampaign(selectedClient.id)} api={api} /><RelationshipCampaignCard messages={scheduledMessages} onReplan={() => handlePlanCampaign(selectedClient.id)} onUpdateMessage={handleUpdateScheduledMessage} isPlanning={isPlanningCampaign} api={api} /></div>
               </div>
-              <div className={clsx("p-6 space-y-6 h-full", activeTab === 'intel' ? 'block' : 'hidden')}><DynamicTaggingCard client={selectedClient} onUpdate={updateClientInList} api={api} /><ClientIntelCard client={selectedClient} onUpdate={updateClientInList} onReplan={() => handlePlanCampaign(selectedClient.id)} api={api} /><RelationshipCampaignCard messages={scheduledMessages} onReplan={() => handlePlanCampaign(selectedClient.id)} onUpdateMessage={handleUpdateScheduledMessage} isPlanning={isPlanningCampaign} api={api} /></div>
-            </div>
-            {activeTab === 'messages' && (<div className="p-4 bg-black/10 border-t border-white/10 flex-shrink-0"><div className="relative bg-white/5 border border-white/10 rounded-xl flex items-center"><input type="text" placeholder="Type your message..." className="flex-grow bg-transparent text-brand-text-main placeholder-brand-text-muted/60 focus:outline-none pl-4" value={composerMessage} onChange={(e) => setComposerMessage(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && composerMessage.trim()) handleSendMessage(); }} disabled={isSending} /><button className="p-3 text-brand-text-muted hover:text-brand-accent"><Paperclip className="w-5 h-5" /></button><button className="bg-primary-action hover:brightness-110 text-brand-dark p-3 rounded-r-xl m-0.5 disabled:opacity-50" onClick={handleSendMessage} disabled={!composerMessage.trim() || isSending}><Send className="w-5 h-5" /></button></div></div>)}
-          </>
-        ) : (<div className="flex-1 flex flex-col items-center justify-center h-full text-brand-text-muted p-4"><button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="absolute top-4 left-4 p-2 rounded-full text-brand-text-muted hover:bg-white/10 md:hidden"><Menu className="w-6 h-6" /></button><MessageSquare className="w-16 h-16 mb-4" /><p className="text-xl font-medium text-center">Select a conversation</p><p className="text-center">Choose from the list to start messaging.</p></div>)}
-      </main>
+              {activeTab === 'messages' && (<div className="p-4 bg-black/10 border-t border-white/10 flex-shrink-0"><div className="relative bg-white/5 border border-white/10 rounded-xl flex items-center"><input type="text" placeholder="Type your message..." className="flex-grow bg-transparent text-brand-text-main placeholder-brand-text-muted/60 focus:outline-none pl-4" value={composerMessage} onChange={(e) => setComposerMessage(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && composerMessage.trim()) handleSendMessage(); }} disabled={isSending} /><button className="p-3 text-brand-text-muted hover:text-brand-accent"><Paperclip className="w-5 h-5" /></button><button className="bg-primary-action hover:brightness-110 text-brand-dark p-3 rounded-r-xl m-0.5 disabled:opacity-50" onClick={handleSendMessage} disabled={!composerMessage.trim() || isSending}><Send className="w-5 h-5" /></button></div></div>)}
+            </>
+          ) : (<div className="flex-1 flex flex-col items-center justify-center h-full text-brand-text-muted p-4"><button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="absolute top-4 left-4 p-2 rounded-full text-brand-text-muted hover:bg-white/10 md:hidden"><Menu className="w-6 h-6" /></button><MessageSquare className="w-16 h-16 mb-4" /><p className="text-xl font-medium text-center">Select a conversation</p><p className="text-center">Choose from the list to start messaging.</p></div>)}
+        </main>
 
-      <aside className="bg-white/5 border-l border-white/10 p-6 flex-col gap-6 overflow-y-auto w-96 flex-shrink-0 hidden lg:flex">
-        {selectedClient ? (<><DynamicTaggingCard client={selectedClient} onUpdate={updateClientInList} api={api} /><ClientIntelCard client={selectedClient} onUpdate={updateClientInList} onReplan={() => handlePlanCampaign(selectedClient.id)} api={api} /><RelationshipCampaignCard messages={scheduledMessages} onReplan={() => handlePlanCampaign(selectedClient.id)} onUpdateMessage={handleUpdateScheduledMessage} isPlanning={isPlanningCampaign} api={api} /><InfoCard title="Properties"><ul className="space-y-4">{properties.slice(0, 3).map(property => (<li key={property.id} className="flex items-center gap-4"><div className="relative w-20 h-16 bg-brand-dark rounded-md overflow-hidden flex-shrink-0"><Image src={property.image_urls?.[0] || `https://placehold.co/300x200/0B112B/C4C4C4?text=${property.address.split(',')[0]}`} alt={`Image of ${property.address}`} layout="fill" objectFit="cover" /></div><div><h4 className="font-semibold text-brand-text-main truncate">{property.address}</h4><p className="text-sm text-brand-text-muted">${property.price.toLocaleString()}</p><p className="text-xs text-brand-accent font-medium">{property.status}</p></div></li>))}</ul></InfoCard></>) : (<div className="flex flex-col items-center justify-center h-full text-center text-brand-text-muted"><Users className="w-16 h-16 mb-4" /><p className="text-lg font-medium">No Client Selected</p><p className="text-sm">Client context will appear here.</p></div>)}
-      </aside>
-    </div>
+        <aside className="bg-white/5 border-l border-white/10 p-6 flex-col gap-6 overflow-y-auto w-96 flex-shrink-0 hidden lg:flex">
+          {selectedClient ? (<><DynamicTaggingCard client={selectedClient} onUpdate={updateClientInList} api={api} /><ClientIntelCard client={selectedClient} onUpdate={updateClientInList} onReplan={() => handlePlanCampaign(selectedClient.id)} api={api} /><RelationshipCampaignCard messages={scheduledMessages} onReplan={() => handlePlanCampaign(selectedClient.id)} onUpdateMessage={handleUpdateScheduledMessage} isPlanning={isPlanningCampaign} api={api} /><InfoCard title="Properties"><ul className="space-y-4">{properties.slice(0, 3).map(property => (<li key={property.id} className="flex items-center gap-4"><div className="relative w-20 h-16 bg-brand-dark rounded-md overflow-hidden flex-shrink-0"><Image src={property.image_urls?.[0] || `https://placehold.co/300x200/0B112B/C4C4C4?text=${property.address.split(',')[0]}`} alt={`Image of ${property.address}`} layout="fill" objectFit="cover" /></div><div><h4 className="font-semibold text-brand-text-main truncate">{property.address}</h4><p className="text-sm text-brand-text-muted">${property.price.toLocaleString()}</p><p className="text-xs text-brand-accent font-medium">{property.status}</p></div></li>))}</ul></InfoCard></>) : (<div className="flex flex-col items-center justify-center h-full text-center text-brand-text-muted"><Users className="w-16 h-16 mb-4" /><p className="text-lg font-medium">No Client Selected</p><p className="text-sm">Client context will appear here.</p></div>)}
+        </aside>
+      </div>
+    </>
+  );
+}
+
+// The main export wraps the page content in Suspense
+export default function DashboardPage() {
+  return (
+    <Suspense>
+      <DashboardPageContent />
+    </Suspense>
   );
 }

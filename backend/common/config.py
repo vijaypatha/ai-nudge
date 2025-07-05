@@ -1,8 +1,8 @@
 # ---
 # File Path: backend/common/config.py
 # Purpose: Loads and manages all environment variables for the application using Pydantic.
-# --- UPDATED to include new RESO API settings ---
 # ---
+
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import Optional
@@ -41,10 +41,24 @@ class Settings(BaseSettings):
     # --- Demo Spark API Credentials ---
     SPARK_API_DEMO_TOKEN: str
     
-    # --- NEW: Live RESO API Credentials ---
-    # These will be used when you are ready to "go live".
+    # --- Live RESO API Credentials ---
     RESO_API_BASE_URL: str
     RESO_API_TOKEN: str
+
+    # --- DEFINITIVE FIX: Added OAuth Credentials ---
+    # These fields are now defined, which will resolve the Pydantic validation error
+    # and allow the backend service to start correctly.
+    
+    # Google OAuth for Contact Import
+    GOOGLE_CLIENT_ID: str
+    GOOGLE_CLIENT_SECRET: str
+    GOOGLE_REDIRECT_URI: str
+
+    # Microsoft OAuth (placeholders for future implementation)
+    MICROSOFT_CLIENT_ID: str
+    MICROSOFT_CLIENT_SECRET: str
+    MICROSOFT_REDIRECT_URI: str
+
 
     class Config:
         env_file = ".env"
@@ -54,4 +68,3 @@ class Settings(BaseSettings):
 def get_settings():
     """Returns a cached instance of the Settings for performance."""
     return Settings()
-

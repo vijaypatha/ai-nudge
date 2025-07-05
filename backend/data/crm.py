@@ -12,7 +12,10 @@ from sqlmodel import Session, select, delete
 from .database import engine
 import logging
 
-from backend.agent_core.deduplication.deduplication_engine import find_strong_duplicate
+# --- DEFINITIVE FIX ---
+# Corrected the import path to be absolute from the project root (`/app` in Docker).
+# This resolves the ModuleNotFoundError.
+from agent_core.deduplication.deduplication_engine import find_strong_duplicate
 
 # Import all necessary models
 from .models.client import Client, ClientUpdate, ClientCreate
@@ -91,24 +94,15 @@ def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tu
             # 2. A strong duplicate was found, merge by enrichment
             logging.info(f"CRM: Found duplicate. Merging '{client_data.full_name}' into existing client ID {existing_client.id}")
 
-            # This flag tracks if any data was actually changed to avoid a needless DB write
             is_updated = False
 
-            # Fill in missing email if the new data has one
             if not existing_client.email and client_data.email:
                 existing_client.email = client_data.email
                 is_updated = True
 
-            # Fill in missing phone if the new data has one
             if not existing_client.phone and client_data.phone:
                 existing_client.phone = client_data.phone
                 is_updated = True
-
-            # Note: You could extend this to merge other fields, like tags:
-            # combined_tags = list(set(existing_client.user_tags + client_data.user_tags))
-            # if len(combined_tags) > len(existing_client.user_tags):
-            #     existing_client.user_tags = combined_tags
-            #     is_updated = True
 
             if is_updated:
                 session.add(existing_client)
@@ -116,12 +110,11 @@ def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tu
                 session.refresh(existing_client)
                 logging.info(f"CRM: Successfully enriched client ID {existing_client.id}.")
 
-            return existing_client, False # False = not a new creation
+            return existing_client, False
         else:
             # 3. No duplicate found, create a new client record
             logging.info(f"CRM: No duplicate found. Creating new client '{client_data.full_name}' for user {user_id}.")
 
-            # Use .model_dump() to safely convert Pydantic model to a dict for the database model
             new_client_data = client_data.model_dump()
             new_client = Client(**new_client_data, user_id=user_id)
 
@@ -130,7 +123,7 @@ def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tu
             session.refresh(new_client)
             logging.info(f"CRM: Successfully created new client with ID {new_client.id}")
 
-            return new_client, True # True = a new creation
+            return new_client, True
 
 def update_last_interaction(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Client]:
     """Updates the last_interaction timestamp for a client to the current time."""
@@ -244,10 +237,9 @@ def save_message(message: Message):
 def get_conversation_history(client_id: uuid.UUID, user_id: uuid.UUID) -> List[Message]:
     """Retrieves all messages for a given client, ensuring it belongs to the user."""
     with Session(engine) as session:
-        # First, verify the client belongs to the user
         client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client_check:
-            return [] # Return empty list if client doesn't belong to user
+            return []
             
         statement = select(Message).where(Message.client_id == client_id).order_by(Message.created_at)
         return session.exec(statement).all()
@@ -256,7 +248,6 @@ def get_conversation_summaries(user_id: uuid.UUID) -> List[Dict[str, Any]]:
     """Generates a list of conversation summaries for a specific user."""
     summaries = []
     with Session(engine) as session:
-        # Fetch only clients belonging to the current user
         clients = session.exec(select(Client).where(Client.user_id == user_id)).all()
         for client in clients:
             last_message_statement = select(Message).where(Message.client_id == client.id).order_by(Message.created_at.desc()).limit(1)
@@ -318,7 +309,6 @@ def delete_scheduled_message(message_id: uuid.UUID, user_id: uuid.UUID) -> bool:
 def get_scheduled_messages_for_client(client_id: uuid.UUID, user_id: uuid.UUID) -> List[ScheduledMessage]:
     """Retrieves all scheduled messages for a single client."""
     with Session(engine) as session:
-        # Verify client ownership first
         client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client_check:
             return []
@@ -329,7 +319,6 @@ def get_scheduled_messages_for_client(client_id: uuid.UUID, user_id: uuid.UUID) 
 def delete_scheduled_messages_for_client(client_id: uuid.UUID, user_id: uuid.UUID):
     """Deletes all scheduled messages for a single client. Used by the planner."""
     with Session(engine) as session:
-        # Verify client ownership before deleting
         client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client_check:
             return

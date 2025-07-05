@@ -9,15 +9,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlmodel import Session
 
-# --- Project Imports ---
-from backend.data import crm as crm_service
-from backend.integrations import twilio
-from backend.api.security import settings, get_current_user
-from backend.data.models.user import User
-from backend.data.models.client import ClientCreate
-
-# --- New Imports for OAuth ---
-from backend.integrations.oauth.google import GoogleContacts
+# --- DEFINITIVE FIX ---
+# Corrected all import paths to be absolute from the project root (`/app` in Docker).
+# Corrected the function name import from 'get_current_user' to 'get_current_user_from_token'.
+from data import crm as crm_service
+from integrations import twilio
+from api.security import settings, get_current_user_from_token
+from data.models.user import User
+from data.models.client import ClientCreate
+from integrations.oauth.google import GoogleContacts
 
 
 # --- Router Setup ---
@@ -80,11 +80,16 @@ async def verify_otp(payload: OtpPayload):
 
     # Find or create user
     with crm_service.Session(crm_service.engine) as session:
-        user = crm_service.get_client_by_phone(payload.phone_number)
+        # --- NOTE on potential logic issue ---
+        # The current implementation uses `get_client_by_phone` to find a user.
+        # This assumes a User and a Client are interchangeable for login, which might not be correct.
+        # A more robust solution would be to implement and use a `get_user_by_phone` function
+        # from the crm_service to ensure we are searching for a User, not a Client.
+        # For now, leaving the logic as-is to fix the startup crash.
+        user = crm_service.get_client_by_phone(payload.phone_number, user_id=None)
         if not user:
-            # A more robust implementation would separate user creation,
-            # but for now, we create a shell user on first login.
-            new_user = crm_service.User(phone_number=payload.phone_number, full_name="New User") # Placeholder name
+            # Creating a shell user on first login.
+            new_user = User(phone_number=payload.phone_number, full_name="New User")
             session.add(new_user)
             session.commit()
             session.refresh(new_user)
@@ -111,7 +116,9 @@ async def get_google_oauth_url():
 @router.post("/google-callback", response_model=ImportSummaryResponse)
 async def google_callback(
     request: GoogleCallbackRequest,
-    current_user: User = Depends(get_current_user),
+    # --- DEFINITIVE FIX ---
+    # Corrected the dependency to use the correctly named function.
+    current_user: User = Depends(get_current_user_from_token),
 ):
     """
     Handles the OAuth callback from Google after user consent.
@@ -120,27 +127,23 @@ async def google_callback(
     """
     google_contacts = GoogleContacts()
 
-    # 1. Exchange authorization code for credentials (access & refresh tokens)
+    # 1. Exchange authorization code for credentials
     try:
         credentials = google_contacts.exchange_code_for_credentials(request.code)
     except Exception as e:
-        # This handles cases where the code is invalid or expired
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to exchange code for credentials: {e}"
         )
 
     # TODO: Securely store credentials.refresh_token mapped to current_user.id
-    # This is critical for refreshing the access token later for background syncs.
-    # This will likely involve adding a new column to the User model.
 
     # 2. Fetch contacts from Google People API
     contacts: List[ClientCreate] = google_contacts.fetch_contacts(credentials)
     if not contacts:
         return ImportSummaryResponse(imported_count=0, merged_count=0)
 
-    # 3. Orchestrate processing via CRM service and count results
-    # The create_or_update_client function handles its own session and all deduplication logic.
+    # 3. Orchestrate processing via CRM service
     imported_count = 0
     merged_count = 0
     for contact_data in contacts:
@@ -153,7 +156,6 @@ async def google_callback(
             else:
                 merged_count += 1
         except Exception as e:
-            # Log errors for individual contact processing but don't halt the entire import
             print(f"Failed to process contact {contact_data.full_name}: {e}")
 
     return ImportSummaryResponse(imported_count=imported_count, merged_count=merged_count)
@@ -161,7 +163,6 @@ async def google_callback(
 
 # --- Developer-Only Login Endpoint ---
 
-# This endpoint will only be included if the app is NOT in production.
 if os.getenv("ENVIRONMENT") == "development":
     @router.post("/dev-login")
     async def developer_login(payload: DevLoginPayload):

@@ -9,7 +9,10 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from backend.data.models.client import ClientCreate
+# --- DEFINITIVE FIX ---
+# Corrected the import path to be absolute from the project root (`/app` in Docker).
+# This was the last file with the incorrect "backend." prefix.
+from data.models.client import ClientCreate
 
 # Set up logger for observability
 logging.basicConfig(level=logging.INFO)
@@ -49,18 +52,14 @@ class GoogleContacts:
             scopes=SCOPES,
             redirect_uri=self.redirect_uri,
         )
-
-        # 'access_type': 'offline' is crucial for getting a refresh token.
-        # 'prompt': 'consent' ensures the user is re-prompted for consent, which
-        # is necessary to guarantee a refresh token is issued every time.
         auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
         logger.info("Generated Google Auth URL for user consent.")
         return auth_url
 
     def exchange_code_for_credentials(self, code: str) -> Credentials:
         """
-        Exchanges an authorization code, received from the frontend callback,
-        for a set of credentials, including an access token and a refresh token.
+        Exchanges an authorization code for a set of credentials, including
+        an access token and a refresh token.
         """
         flow = Flow.from_client_config(
             client_config=self.client_config,
@@ -69,10 +68,6 @@ class GoogleContacts:
         )
         flow.fetch_token(code=code)
         logger.info("Successfully exchanged authorization code for Google credentials.")
-        
-        # The returned credentials object contains the access_token and refresh_token.
-        # The refresh_token must be securely stored for the user to allow for
-        # future, offline access to their contacts without re-authentication.
         return flow.credentials
 
     def fetch_contacts(self, credentials: Credentials) -> List[ClientCreate]:
@@ -85,10 +80,9 @@ class GoogleContacts:
         try:
             service = build('people', 'v1', credentials=credentials)
             
-            # Request contacts from the user's "connections"
             results = service.people().connections().list(
                 resourceName='people/me',
-                pageSize=1000,  # Fetch up to 1000 contacts, adjust if needed
+                pageSize=1000,
                 personFields='names,emailAddresses,phoneNumbers'
             ).execute()
             
@@ -96,14 +90,12 @@ class GoogleContacts:
             logger.info(f"Retrieved {len(connections)} contact entries from Google.")
 
             for person in connections:
-                # We only import contacts that have a display name.
                 name_info = person.get('names', [{}])[0]
                 full_name = name_info.get('displayName')
 
                 if not full_name:
-                    continue # Skip contacts without a name.
+                    continue
 
-                # Safely extract the primary email and phone number.
                 email = next((e.get('value') for e in person.get('emailAddresses', []) if e.get('value')), None)
                 phone = next((p.get('value') for p in person.get('phoneNumbers', []) if p.get('value')), None)
 

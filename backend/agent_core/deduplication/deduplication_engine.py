@@ -6,7 +6,10 @@ from uuid import UUID
 from sqlmodel import Session, select
 from thefuzz import fuzz
 
-from backend.data.models.client import Client, ClientCreate
+# --- DEFINITIVE FIX ---
+# Corrected the import path to be absolute from the project root (`/app` in Docker).
+# This resolves the ModuleNotFoundError.
+from data.models.client import Client, ClientCreate
 
 # Set up logger for observability
 logging.basicConfig(level=logging.INFO)
