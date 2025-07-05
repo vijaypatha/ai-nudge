@@ -64,20 +64,16 @@ export default function LandingPage() {
       <section className="w-full bg-animated-gradient flex flex-col items-center justify-center py-28 md:py-36 lg:py-48 text-center min-h-[75vh] md:min-h-[65vh] px-4">
         <div className="max-w-4xl mx-auto">
         <div className="flex justify-center mb-10 md:mb-12">
-            <div className="relative overflow-hidden group rounded-lg">
-              <Image
-                src="/AI Nudge Logo.png"
-                alt="AI Nudge Logo"
-                width={800}
-                height={160}
-                priority
-                className="block drop-shadow-2xl max-w-full h-auto"
-              />
-              <div
-                className="absolute inset-0 w-full h-full
-                           bg-gradient-to-r from-transparent via-white/5 to-transparent "
-              ></div>
-            </div>
+        <div className="flex justify-center mb-10 md:mb-12">
+          
+            <Image
+              src="/AI Nudge Logo.png"
+              alt="AI Nudge Logo"
+              width={800}
+              height={160}
+              priority
+            />
+          </div>
           </div>
           <h2 className="text-2xl md:text-3xl lg:text-4xl text-gray-100 mb-4 leading-tight max-w-3xl mx-auto font-semibold">
             Client Engagement, Back to Basics. <span className="whitespace-nowrap">Powered by AI.</span>

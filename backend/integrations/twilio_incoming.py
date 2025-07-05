@@ -7,6 +7,8 @@ import uuid
 from agent_core import orchestrator
 from data import crm as crm_service
 from data.models.message import Message, MessageDirection, MessageStatus
+from data.models.client import Client
+from data.models.user import User
 
 async def process_incoming_sms(from_number: str, body: str):
     """
@@ -21,35 +23,50 @@ async def process_incoming_sms(from_number: str, body: str):
     """
     print(f"TWILIO INTEGRATION: Processing SMS from {from_number}: '{body}'")
     
-    # 1. Find the client by their phone number.
-    client = crm_service.get_client_by_phone(phone_number=from_number)
-    if not client:
+    # --- MODIFIED: Securely find the client in a multi-tenant way ---
+    # 1. Get all users from the system.
+    all_users: list[User] = crm_service.get_all_users()
+    found_client: Client | None = None
+    
+    # 2. Check each user's contact list for the phone number.
+    for user in all_users:
+        client_for_user = crm_service.get_client_by_phone(phone_number=from_number, user_id=user.id)
+        if client_for_user:
+            found_client = client_for_user
+            break # Stop searching once we find the client
+
+    if not found_client:
         print(f"TWILIO INTEGRATION: ERROR - No client found for phone number {from_number}. Message will be ignored.")
-        # Return early if no client is found. The API layer will handle the response to Twilio.
         return
 
-    # 2. Log the incoming message to our universal conversation log.
+    # 3. Now that we have the client, we know the user/realtor.
+    realtor = crm_service.get_user_by_id(found_client.user_id)
+    if not realtor:
+        print(f"TWILIO INTEGRATION ERROR: Could not find the user owner for client {found_client.id}.")
+        return
+
+    # 4. Log the incoming message to our universal conversation log.
     try:
         incoming_message = Message(
-            client_id=client.id,
+            client_id=found_client.id,
+            user_id=realtor.id, # Also log the user_id on the message
             content=body,
             direction=MessageDirection.INBOUND,
             status=MessageStatus.RECEIVED
         )
         crm_service.save_message(incoming_message)
-        print(f"TWILIO INTEGRATION: Logged incoming message from client {client.id}")
+        print(f"TWILIO INTEGRATION: Logged incoming message from client {found_client.id}")
     except Exception as e:
         print(f"TWILIO INTEGRATION: ERROR - Failed to save message to database: {e}")
-        # If saving fails, we stop processing to avoid further errors.
         return
 
-    # 3. Trigger the AI orchestrator to process the message and generate a response draft.
+    # 5. Trigger the AI orchestrator to process the message and generate a response draft.
     try:
         await orchestrator.handle_incoming_message(
-            client_id=client.id,
-            incoming_message_content=body
+            client_id=found_client.id,
+            incoming_message_content=body,
+            realtor=realtor # Pass the full realtor object
         )
-        print(f"TWILIO INTEGRATION: AI orchestrator triggered for client {client.id}")
+        print(f"TWILIO INTEGRATION: AI orchestrator triggered for client {found_client.id}")
     except Exception as e:
-        print(f"TWILIO INTEGRATION: ERROR - AI orchestrator failed for client {client.id}: {e}")
-
+        print(f"TWILIO INTEGRATION: ERROR - AI orchestrator failed for client {found_client.id}: {e}")
