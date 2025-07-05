@@ -233,7 +233,7 @@ export default function DashboardPage() {
     const fetchConversationDetails = async () => {
       try {
         const [historyData, scheduledData] = await Promise.all([
-            api.get(`/conversations/${selectedClientId}`),
+            api.get(`/api/conversations/${selectedClientId}`),
             refetchScheduledMessagesForClient(selectedClientId)
         ]);
         setCurrentMessages(historyData);

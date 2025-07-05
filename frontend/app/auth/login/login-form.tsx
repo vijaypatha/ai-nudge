@@ -94,7 +94,7 @@ export default function LoginForm() {
             const data = await api.post('/api/auth/dev-login', { user_id: demoUserId });
             if (data.access_token) {
                 await login(data.access_token);
-                router.push('/(main)/dashboard');
+                router.push('/dashboard');
             } else {
                 throw new Error('Dev login failed.');
             }
@@ -134,7 +134,7 @@ export default function LoginForm() {
             const data = await api.post('/api/auth/otp/verify', { phone_number: fullPhoneNumber, otp_code: otp });
             if (data.access_token) {
                 await login(data.access_token);
-                router.push('/(main)/dashboard');
+                router.push('/dashboard');
             } else {
                 throw new Error('Login failed.');
             }

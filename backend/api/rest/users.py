@@ -12,6 +12,8 @@ from uuid import UUID
 from data.database import engine
 # CORRECTLY import the models, don't redefine them
 from data.models.user import User, UserUpdate 
+from api.security import get_current_user_from_token
+
 
 # This placeholder function would be replaced by a real authentication dependency
 def get_current_user_from_token() -> User:
