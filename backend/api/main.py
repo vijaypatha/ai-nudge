@@ -9,7 +9,7 @@ from fastapi.routing import APIRoute
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from api.rest import clients, properties, inbox, nudges, admin_triggers, scheduled_messages, users, campaigns, conversations, faqs
+from api.rest import clients, properties, inbox, nudges, admin_triggers, scheduled_messages, users, campaigns, conversations, faqs, auth
 from data.database import create_db_and_tables
 from data.seed import seed_database
 from agent_core import audience_builder
@@ -62,6 +62,7 @@ app.include_router(scheduled_messages.router)
 app.include_router(users.router)
 app.include_router(conversations.router)
 app.include_router(faqs.router)
+app.include_router(auth.router)
 
 @app.get("/")
 async def read_root():
