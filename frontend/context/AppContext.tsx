@@ -1,6 +1,4 @@
 // frontend/context/AppContext.tsx
-//Purpose: manages the authentication token, user data, and provides login and logout functions to the rest of the application
-
 'use client';
 
 import { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
@@ -16,7 +14,6 @@ export interface ScheduledMessage { id: string; content: string; scheduled_at: s
 export interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reason: string; }
 export interface CampaignBriefing { id: string; user_id: string; campaign_type: string; headline: string; listing_url?: string; key_intel: { [key: string]: string }; original_draft: string; edited_draft?: string; matched_audience: MatchedClient[]; status: 'new' | 'launched' | 'dismissed'; }
 
-// --- MODIFIED: Expanded context shape with data and fetchers ---
 interface AppContextType {
   loading: boolean;
   isAuthenticated: boolean;
@@ -25,8 +22,6 @@ interface AppContextType {
   login: (token: string) => Promise<void>;
   logout: () => void;
   api: { get: (endpoint: string) => Promise<any>; post: (endpoint: string, body: any) => Promise<any>; put: (endpoint: string, body: any) => Promise<any>; del: (endpoint: string) => Promise<any>; };
-  
-  // --- ADDED: State and fetchers for dashboard data ---
   clients: Client[];
   properties: Property[];
   conversations: Conversation[];
@@ -44,21 +39,29 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
 
-  // --- ADDED: State for dashboard data ---
   const [clients, setClients] = useState<Client[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [nudges, setNudges] = useState<CampaignBriefing[]>([]);
 
+  // --- MODIFIED: This function now uses the NEXT_PUBLIC_API_URL environment variable ---
   const createApiClient = useCallback((authToken: string | null) => {
     const request = async (endpoint: string, method: string, body?: any) => {
+      // Get the base URL from environment variables, fallback for safety
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
+      const url = `${baseUrl}${endpoint}`; // Construct the full URL
+      
       const headers: HeadersInit = { 'Content-Type': 'application/json' };
       if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+      
       const config: RequestInit = { method, headers };
       if (body) config.body = JSON.stringify(body);
-      const response = await fetch(`/api${endpoint}`, config);
+      
+      // Use the full URL in the fetch call
+      const response = await fetch(url, config); 
+      
       if (!response.ok) {
-        if (response.status === 401) logout();
+        if (response.status === 401) logout(); // Logout on auth error
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       return response.json();
@@ -69,7 +72,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       put: (endpoint: string, body: any) => request(endpoint, 'PUT', body),
       del: (endpoint: string) => request(endpoint, 'DELETE'),
     };
-  }, []);
+  }, []); // The empty dependency array for logout will be fixed by storing logout in a ref if needed, but is fine for now.
 
   const [api, setApi] = useState(() => createApiClient(null));
 
@@ -87,7 +90,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setToken(newToken);
     const tempApi = createApiClient(newToken);
     try {
-      const userData = await tempApi.get('/users/me');
+      const userData = await tempApi.get('/api/users/me');
       setUser(userData);
       setIsAuthenticated(true);
     } catch (error) {
@@ -96,16 +99,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // --- ADDED: Central function to fetch all initial dashboard data ---
   const fetchDashboardData = useCallback(async () => {
     if (!isAuthenticated || !api) return;
     setLoading(true);
     try {
       const [clientsData, propertiesData, conversationsData, nudgesData] = await Promise.all([
-        api.get('/clients'),
-        api.get('/properties'),
-        api.get('/conversations'),
-        api.get('/nudges'),
+        api.get('/api/clients'),
+        api.get('/api/properties'),
+        api.get('/api/conversations'),
+        api.get('/api/nudges'),
       ]);
       setClients(clientsData);
       setProperties(propertiesData);
@@ -117,8 +119,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       setLoading(false);
     }
   }, [isAuthenticated, api]);
-
-  // --- ADDED: Helper functions to manage state from components ---
+  
   const updateClientInList = (updatedClient: Client) => {
     setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
   };
@@ -126,7 +127,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const refetchScheduledMessagesForClient = async (clientId: string) => {
     if (!api) return [];
     try {
-      return await api.get(`/clients/${clientId}/scheduled-messages`);
+      return await api.get(`/api/clients/${clientId}/scheduled-messages`);
     } catch (error) {
       console.error("Failed to refetch scheduled messages", error);
       return [];

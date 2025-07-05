@@ -13,12 +13,12 @@ body {
   @apply bg-gray-900 text-gray-200;
 }
 
-/* --- ADDED: New subtle background pattern --- */
-.bg-subtle-pattern {
-  background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 3rem 3rem;
+/* --- ADDED: The animated gradient background class --- */
+.bg-animated-gradient {
+  background: linear-gradient(-45deg, #0c1421, #111827, #1e3a8a, #1e293b);
+  background-size: 400% 400%;
+  @apply animate-gradient-animation; /* Uses the utility from tailwind.config.js */
 }
-
 
 @layer components {
   /* Main Gradient Button */
@@ -36,14 +36,10 @@ body {
     @apply bg-gray-800/40 border border-white/10;
   }
 
-  /* --- ADDED: Animated text gradient --- */
+  /* --- MODIFIED: Keyframes removed, now uses utility from tailwind.config.js --- */
   .text-gradient-animated {
     @apply text-transparent bg-clip-text bg-gradient-to-r from-[var(--brand-teal)] to-[var(--brand-blue)];
     background-size: 200% auto;
-    animation: text-shine 5s linear infinite;
-  }
-  
-  @keyframes text-shine {
-    to { background-position: 200% center; }
+    @apply animate-text-shine;
   }
 }

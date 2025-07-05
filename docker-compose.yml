@@ -35,6 +35,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8001:8000"
+    environment:
+      - ENVIRONMENT=development
     volumes:
       - ./backend:/app
     env_file:
@@ -64,7 +66,7 @@ services:
     networks:
       - ai_nudge_net
     environment:
-      - NEXT_PUBLIC_API_URL=http://backend:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:8001
 
   # Celery Worker Service
   celery-worker:

@@ -1,3 +1,4 @@
+// frontend/tailwind.config.js
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
@@ -8,41 +9,31 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // --- CORE THEME ---
-        'brand-dark': '#0B112B', // Deep, dark blue for backgrounds
-        'brand-text-main': '#E5E7EB', // Off-white for primary text
-        'brand-text-muted': '#9CA3AF', // Gray for secondary/muted text
-
-        // --- ACTION & ACCENT COLORS ---
-        'primary-action': '#20D5B3', // Bright teal for primary buttons/actions
-        'brand-accent': '#4EDAA8',   // Lighter green for highlights and secondary elements
-
-        // --- Original colors for reference, can be removed if unused ---
+        'brand-dark': '#0B112B',
+        'brand-text-main': '#E5E7EB',
+        'brand-text-muted': '#9CA3AF',
+        'primary-action': '#20D5B3',
+        'brand-accent': '#4EDAA8',
         'brand-primary': '#191C36',
         'brand-secondary': '#20D5B3',
         'brand-white': '#FFFFFF',
         'brand-gray': '#C4C4C4',
       },
-      backgroundImage: {
-        "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
-        "gradient-conic":
-          "conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))",
-      },
-      // --- ADD THIS ---
-      animation: {
-        'aurora': 'aurora 60s linear infinite',
-      },
+      // --- MODIFIED: Added keyframes and animation utilities ---
       keyframes: {
-        aurora: {
-          from: {
-            backgroundPosition: '0% 50%',
-          },
-          to: {
-            backgroundPosition: '200% 50%',
-          },
+        'gradient-animation': {
+          '0%': { backgroundPosition: '0% 50%' },
+          '50%': { backgroundPosition: '100% 50%' },
+          '100%': { backgroundPosition: '0% 50%' },
         },
+        'text-shine': {
+          'to': { backgroundPosition: '200% center' },
+        }
       },
-      // --- END ADD ---
+      animation: {
+        'gradient-animation': 'gradient-animation 30s ease infinite',
+        'text-shine': 'text-shine 5s linear infinite',
+      },
     },
   },
   plugins: [],
