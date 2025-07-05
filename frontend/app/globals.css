@@ -2,3 +2,48 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --brand-teal: #2dd4bf;
+  --brand-blue: #3b82f6;
+  --brand-dark-blue: #1e3a8a;
+}
+
+body {
+  @apply bg-gray-900 text-gray-200;
+}
+
+/* --- ADDED: New subtle background pattern --- */
+.bg-subtle-pattern {
+  background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 3rem 3rem;
+}
+
+
+@layer components {
+  /* Main Gradient Button */
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-6 py-3 font-bold text-white rounded-lg transition-all duration-300 ease-in-out;
+    @apply bg-gradient-to-r from-[var(--brand-teal)] to-[var(--brand-blue)];
+    @apply hover:scale-105 hover:shadow-2xl hover:shadow-teal-500/20;
+    @apply focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-teal-400;
+  }
+
+  .btn-lg { @apply text-lg px-8 py-4; }
+
+  /* Card style */
+  .card {
+    @apply bg-gray-800/40 border border-white/10;
+  }
+
+  /* --- ADDED: Animated text gradient --- */
+  .text-gradient-animated {
+    @apply text-transparent bg-clip-text bg-gradient-to-r from-[var(--brand-teal)] to-[var(--brand-blue)];
+    background-size: 200% auto;
+    animation: text-shine 5s linear infinite;
+  }
+  
+  @keyframes text-shine {
+    to { background-position: 200% center; }
+  }
+}

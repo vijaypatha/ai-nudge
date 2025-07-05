@@ -11,6 +11,8 @@
 import { useState, useEffect, ChangeEvent, FC } from "react";
 import { Trash2, Edit3, Save, XCircle, Loader2, User, Briefcase, Bot } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
+import { useAppContext } from '@/context/AppContext';
+
 
 // --- TYPE DEFINITIONS ---
 interface UserProfile {

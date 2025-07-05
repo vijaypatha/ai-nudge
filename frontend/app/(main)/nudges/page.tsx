@@ -11,6 +11,8 @@ import { useState, useEffect, FC, ReactNode, useMemo } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
+import { useAppContext } from '@/context/AppContext';
+
 
 // --- ICONS ---
 import {

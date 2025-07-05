@@ -9,7 +9,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { X, Search } from 'lucide-react';
 import clsx from 'clsx';
-import type { Client } from '../../context/AppContext';
+import { useAppContext } from '@/context/AppContext';
+
+import type { Property, Message, Conversation, ScheduledMessage, Client, MatchedClient, CampaignBriefing } from '@/context/AppContext';
 
 // --- Helper Components ---
 const Avatar = ({ name, className }: { name: string; className?: string }) => {
@@ -55,7 +57,13 @@ export const ManageAudienceModal = ({
   const uniqueTags = useMemo(() => {
     const allTags = new Set<string>();
     allClients.forEach((client) => {
-      client.tags.forEach((tag) => allTags.add(tag));
+      // --- MODIFIED: Iterate over both user_tags and ai_tags ---
+      if (client.user_tags) {
+        client.user_tags.forEach((tag) => allTags.add(tag));
+      }
+      if (client.ai_tags) {
+        client.ai_tags.forEach((tag) => allTags.add(tag));
+      }
     });
     return Array.from(allTags).sort();
   }, [allClients]);
