@@ -5,18 +5,22 @@
 # This keeps the business logic in the API endpoints and agents clean and database-agnostic.
 # ---
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import uuid
 from datetime import datetime, timezone
 from sqlmodel import Session, select, delete
 from .database import engine
+import logging
+
+from backend.agent_core.deduplication.deduplication_engine import find_strong_duplicate
 
 # Import all necessary models
-from .models.client import Client, ClientUpdate
+from .models.client import Client, ClientUpdate, ClientCreate
 from .models.user import User, UserUpdate
 from .models.property import Property
 from .models.campaign import CampaignBriefing, CampaignUpdate
 from .models.message import ScheduledMessage, Message, MessageStatus
+
 
 
 # --- User Functions ---
@@ -63,6 +67,70 @@ def get_all_clients(user_id: uuid.UUID) -> List[Client]:
     with Session(engine) as session:
         statement = select(Client).where(Client.user_id == user_id)
         return session.exec(statement).all()
+    
+def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tuple[Client, bool]:
+    """
+    Creates a new client or updates an existing one based on deduplication logic.
+    This function orchestrates the check for duplicates and performs a "merge by enrichment" strategy.
+
+    Args:
+        user_id: The UUID of the user.
+        client_data: The data for the new client to be imported.
+
+    Returns:
+        A tuple containing the final Client object and a boolean, where True indicates
+        a new client was created and False indicates an existing client was updated.
+    """
+    with Session(engine) as session:
+        logging.info(f"CRM: Processing contact '{client_data.full_name}' for user {user_id}")
+
+        # 1. Find potential duplicates using the deduplication engine
+        existing_client = find_strong_duplicate(db=session, user_id=user_id, new_contact=client_data)
+
+        if existing_client:
+            # 2. A strong duplicate was found, merge by enrichment
+            logging.info(f"CRM: Found duplicate. Merging '{client_data.full_name}' into existing client ID {existing_client.id}")
+
+            # This flag tracks if any data was actually changed to avoid a needless DB write
+            is_updated = False
+
+            # Fill in missing email if the new data has one
+            if not existing_client.email and client_data.email:
+                existing_client.email = client_data.email
+                is_updated = True
+
+            # Fill in missing phone if the new data has one
+            if not existing_client.phone and client_data.phone:
+                existing_client.phone = client_data.phone
+                is_updated = True
+
+            # Note: You could extend this to merge other fields, like tags:
+            # combined_tags = list(set(existing_client.user_tags + client_data.user_tags))
+            # if len(combined_tags) > len(existing_client.user_tags):
+            #     existing_client.user_tags = combined_tags
+            #     is_updated = True
+
+            if is_updated:
+                session.add(existing_client)
+                session.commit()
+                session.refresh(existing_client)
+                logging.info(f"CRM: Successfully enriched client ID {existing_client.id}.")
+
+            return existing_client, False # False = not a new creation
+        else:
+            # 3. No duplicate found, create a new client record
+            logging.info(f"CRM: No duplicate found. Creating new client '{client_data.full_name}' for user {user_id}.")
+
+            # Use .model_dump() to safely convert Pydantic model to a dict for the database model
+            new_client_data = client_data.model_dump()
+            new_client = Client(**new_client_data, user_id=user_id)
+
+            session.add(new_client)
+            session.commit()
+            session.refresh(new_client)
+            logging.info(f"CRM: Successfully created new client with ID {new_client.id}")
+
+            return new_client, True # True = a new creation
 
 def update_last_interaction(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Client]:
     """Updates the last_interaction timestamp for a client to the current time."""

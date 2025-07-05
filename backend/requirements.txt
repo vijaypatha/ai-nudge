@@ -82,3 +82,9 @@ google-generativeai
 # --- ADDED: For JWT authentication ---
 python-jose[cryptography]
 passlib[bcrypt]
+# Python libraries for Google/Microsoft OAuth and fuzzy string matching.
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+msal
+thefuzz
