@@ -6,48 +6,55 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
 
 function GoogleCallback() {
-  const { api } = useAppContext();
+  const { api, login, isAuthenticated } = useAppContext();
   const searchParams = useSearchParams();
   const router = useRouter();
   
-  const [status, setStatus] = useState("Processing authentication...");
+  const [status, setStatus] = useState("Finalizing authentication...");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const code = searchParams.get('code');
+    const state = searchParams.get('state'); // The 'state' parameter now contains our auth token
     const errorParam = searchParams.get('error');
 
     if (errorParam) {
-      setError(`Authentication failed: ${errorParam}. Please try again.`);
+      setError(`Authentication was denied by Google: ${errorParam}.`);
       setStatus("Error");
       return;
     }
 
-    if (code) {
+    // If we are not yet authenticated but have a token in the state, log in first.
+    if (state && !isAuthenticated) {
+        setStatus("Verifying your session...");
+        login(state).then(() => {
+            // After login completes, the component will re-render, and this
+            // useEffect will run again. On the next run, `isAuthenticated` will be true.
+            console.log("Session restored from state token.");
+        });
+        return; // Return here to wait for the re-render after login.
+    }
+
+    // Once we are authenticated AND we have the code from Google, proceed.
+    if (isAuthenticated && code) {
+      setStatus("Session verified. Processing Google sign-in...");
+      
       api.handleGoogleCallback(code)
         .then(result => {
-          setStatus("Import successful! Redirecting...");
-          
-          // --- DEFINITIVE FIX ---
-          // Redirect to the dashboard and pass the import results as URL query
-          // parameters. This allows the dashboard to trigger our celebration.
+          setStatus("Import successful! Redirecting to your dashboard...");
           const { imported_count, merged_count } = result;
           router.push(`/dashboard?imported=${imported_count}&merged=${merged_count}`);
-
         })
         .catch(err => {
-          console.error("Callback handler failed:", err);
+          console.error("Backend callback handler failed:", err);
           const errorMessage = err.response?.data?.detail || "An unexpected error occurred during import.";
           setError(errorMessage);
           setStatus("Error");
         });
-    } else {
-        setError("Authorization code not found in URL. Please try again.");
-        setStatus("Error");
     }
-  }, [api, searchParams, router]);
 
-  // This UI is shown briefly while the backend processes the import.
+  }, [isAuthenticated, api, login, router, searchParams]);
+
   return (
     <div className="flex h-screen w-full flex-col items-center justify-center bg-background">
       <div className="text-center p-4">
@@ -69,7 +76,6 @@ function GoogleCallback() {
   );
 }
 
-// The Suspense wrapper is required by Next.js for useSearchParams()
 export default function GoogleCallbackPage() {
     return (
         <Suspense>

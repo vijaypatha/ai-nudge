@@ -34,7 +34,7 @@ const VerticalCard = ({ icon, title, value, onClick, isSelected }: { icon: React
 export default function OnboardingPage() {
   const { user, api } = useAppContext();
   const router = useRouter();
-  const [step, setStep] = useState<Step>('profile');
+  const [step, setStep] = useState<Step>('connect'); //profile or connect
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 

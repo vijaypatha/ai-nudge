@@ -4,7 +4,7 @@
 import { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
 import Cookies from 'js-cookie';
 
-// --- TYPE INTERFACES ---
+// --- TYPE INTERFACES (unchanged) ---
 export interface User { id: string; full_name: string; email?: string; phone_number: string; user_type: string; }
 export interface Client { id: string; user_id: string; full_name: string; email: string | null; ai_tags: string[]; user_tags: string[]; preferences: { notes?: string[]; [key: string]: any; }; last_interaction: string | null; }
 export interface Property { id: string; address: string; price: number; status: string; image_urls: string[]; }
@@ -14,10 +14,6 @@ export interface ScheduledMessage { id: string; content: string; scheduled_at: s
 export interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reason: string; }
 export interface CampaignBriefing { id: string; user_id: string; campaign_type: string; headline: string; listing_url?: string; key_intel: { [key: string]: string }; original_draft: string; edited_draft?: string; matched_audience: MatchedClient[]; status: 'new' | 'launched' | 'dismissed'; }
 
-/**
- * Defines the shape of the context object provided to the application.
- * This ensures type safety for all components that use the context.
- */
 interface AppContextType {
   loading: boolean;
   isAuthenticated: boolean;
@@ -25,20 +21,7 @@ interface AppContextType {
   token: string | null;
   login: (token: string) => Promise<void>;
   logout: () => void;
-  /**
-   * Centralized API client for making authenticated requests to the backend.
-   */
-  api: {
-    get: (endpoint: string) => Promise<any>;
-    post: (endpoint: string, body: any) => Promise<any>;
-    put: (endpoint: string, body: any) => Promise<any>;
-    del: (endpoint: string) => Promise<any>;
-    // --- DEFINITIVE FIX ---
-    // Added the new function signatures here to make TypeScript aware of them.
-    // This resolves the errors in the components that use these functions.
-    getGoogleAuthUrl: () => Promise<{ auth_url: string }>;
-    handleGoogleCallback: (code: string) => Promise<{ imported_count: number; merged_count: number }>;
-  };
+  api: { get: (endpoint: string) => Promise<any>; post: (endpoint: string, body: any) => Promise<any>; put: (endpoint: string, body: any) => Promise<any>; del: (endpoint: string) => Promise<any>; getGoogleAuthUrl: (state?: string) => Promise<{ auth_url: string; }>; handleGoogleCallback: (code: string) => Promise<{ imported_count: number; merged_count: number; }>; };
   clients: Client[];
   properties: Property[];
   conversations: Conversation[];
@@ -62,16 +45,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [nudges, setNudges] = useState<CampaignBriefing[]>([]);
 
   const logout = useCallback(() => {
-    Cookies.remove('auth_token');
+    Cookies.remove('auth_token', { path: '/' });
     setToken(null);
     setUser(null);
     setIsAuthenticated(false);
   }, []);
   
-  /**
-   * A factory function to create an API client instance.
-   * It encapsulates the fetch logic and automatically adds the auth token.
-   */
   const createApiClient = useCallback((authToken: string | null) => {
     const request = async (endpoint: string, method: string, body?: any) => {
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
@@ -87,7 +66,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       
       if (!response.ok) {
         if (response.status === 401) logout();
-        // Propagate a more informative error for components to catch
         const errorData = await response.json().catch(() => ({ detail: "An unknown error occurred" }));
         const error = new Error(`HTTP error! status: ${response.status}`);
         (error as any).response = { data: errorData };
@@ -95,17 +73,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       }
       return response.json();
     };
-
-    // The returned object matches the 'api' shape in AppContextType
     return {
       get: (endpoint: string) => request(endpoint, 'GET'),
       post: (endpoint: string, body: any) => request(endpoint, 'POST', body),
       put: (endpoint: string, body: any) => request(endpoint, 'PUT', body),
       del: (endpoint: string) => request(endpoint, 'DELETE'),
-      
-      // The implementation of the new functions. This was already correct.
-      getGoogleAuthUrl: async () => {
-        return request('/api/auth/google-oauth-url', 'GET');
+      // This function is modified to accept the 'state' parameter
+      getGoogleAuthUrl: async (state?: string) => {
+        const endpoint = state ? `/api/auth/google-oauth-url?state=${state}` : '/api/auth/google-oauth-url';
+        return request(endpoint, 'GET');
       },
       handleGoogleCallback: async (code: string) => {
         return request('/api/auth/google-callback', 'POST', { code });
@@ -115,12 +91,19 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const [api, setApi] = useState(() => createApiClient(null));
   
-  // Re-create the API client whenever the token changes.
   useEffect(() => { setApi(() => createApiClient(token)); }, [token, createApiClient]);
 
   const login = async (newToken: string) => {
     setLoading(true);
-    Cookies.set('auth_token', newToken, { expires: 7, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
+    
+    // This sets the cookie with the correct security attributes
+    Cookies.set('auth_token', newToken, { 
+        expires: 7, 
+        secure: process.env.NODE_ENV === 'production', 
+        sameSite: 'lax',
+        path: '/' 
+    });
+
     setToken(newToken);
     const tempApi = createApiClient(newToken);
     try {
@@ -177,7 +160,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       }
     };
     checkUserSession();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const value = { 

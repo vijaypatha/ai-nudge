@@ -2,30 +2,21 @@
 
 import os
 import logging
-from typing import List
+from typing import List, Optional
 
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-# --- DEFINITIVE FIX ---
-# Corrected the import path to be absolute from the project root (`/app` in Docker).
-# This was the last file with the incorrect "backend." prefix.
 from data.models.client import ClientCreate
 
-# Set up logger for observability
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# The specific permissions we are requesting from the user.
 SCOPES = ['https://www.googleapis.com/auth/contacts.readonly']
 
 class GoogleContacts:
-    """
-    A class to handle all interactions with the Google People API for OAuth
-    and contact fetching. It relies on environment variables for configuration.
-    """
     def __init__(self):
         self.client_id = os.getenv("GOOGLE_CLIENT_ID")
         self.client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
@@ -34,7 +25,6 @@ class GoogleContacts:
         if not all([self.client_id, self.client_secret, self.redirect_uri]):
             raise ValueError("Google OAuth credentials are not fully configured in environment variables.")
 
-        # This client_config structure is required by the Google OAuth library.
         self.client_config = {
             "web": {
                 "client_id": self.client_id,
@@ -45,22 +35,29 @@ class GoogleContacts:
             }
         }
 
-    def get_auth_url(self) -> str:
-        """Generates the Google OAuth consent URL for the user to visit."""
+    # --- DEFINITIVE FIX ---
+    # Modified to accept and pass along the 'state' parameter. This is crucial
+    # for carrying the user's session token across the redirect.
+    def get_auth_url(self, state: Optional[str] = None) -> str:
+        """Generates the Google OAuth URL, including the state parameter if provided."""
         flow = Flow.from_client_config(
             client_config=self.client_config,
             scopes=SCOPES,
             redirect_uri=self.redirect_uri,
         )
-        auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
+        
+        # The 'state' parameter is included here. Google will return it to us untouched.
+        auth_url, _ = flow.authorization_url(
+            access_type='offline', 
+            prompt='consent',
+            state=state
+        )
+        
         logger.info("Generated Google Auth URL for user consent.")
         return auth_url
 
     def exchange_code_for_credentials(self, code: str) -> Credentials:
-        """
-        Exchanges an authorization code for a set of credentials, including
-        an access token and a refresh token.
-        """
+        """Exchanges an authorization code for a set of credentials."""
         flow = Flow.from_client_config(
             client_config=self.client_config,
             scopes=SCOPES,
@@ -71,10 +68,7 @@ class GoogleContacts:
         return flow.credentials
 
     def fetch_contacts(self, credentials: Credentials) -> List[ClientCreate]:
-        """
-        Fetches all contacts from the Google People API using the provided credentials
-        and transforms them into a list of ClientCreate models.
-        """
+        """Fetches contacts from the Google People API."""
         logger.info("Attempting to fetch contacts from Google People API...")
         contacts_list = []
         try:

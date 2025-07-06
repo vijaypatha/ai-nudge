@@ -10,21 +10,22 @@ const GoogleIcon = () => (
   </svg>
 );
 
-/**
- * A self-contained component for initiating the Google OAuth flow.
- * It handles its own loading and error states.
- */
 export const ProviderConnect = () => {
-  const { api } = useAppContext();
+  const { api, token } = useAppContext(); // Get the current auth token
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleConnect = async () => {
+    if (!token) {
+        setError("Your session is not ready. Please refresh and try again.");
+        return;
+    }
     setIsLoading(true);
     setError(null);
     try {
-      // This call is now correctly typed and will not cause an error.
-      const { auth_url } = await api.getGoogleAuthUrl();
+      // Pass the current auth token in the 'state' parameter.
+      // The backend will add this to the Google URL.
+      const { auth_url } = await api.getGoogleAuthUrl(token);
       window.location.href = auth_url;
     } catch (err) {
       setError("Could not connect. Please try again.");

@@ -34,8 +34,11 @@ class Client(SQLModel, table=True):
 
 
 class ClientCreate(SQLModel):
+    """
+    This is the model used for creating new clients, including during import.
+    """
     full_name: str
-    email: str
+    email: Optional[str] = None
     phone: Optional[str] = None
     ai_tags: List[str] = []
     user_tags: List[str] = []
