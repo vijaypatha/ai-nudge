@@ -4,7 +4,7 @@
 import { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
 import Cookies from 'js-cookie';
 
-// --- TYPE INTERFACES (unchanged) ---
+// --- TYPE INTERFACES ---
 export interface User { id: string; full_name: string; email?: string; phone_number: string; user_type: string; }
 export interface Client { id: string; user_id: string; full_name: string; email: string | null; ai_tags: string[]; user_tags: string[]; preferences: { notes?: string[]; [key: string]: any; }; last_interaction: string | null; }
 export interface Property { id: string; address: string; price: number; status: string; image_urls: string[]; }
@@ -21,7 +21,16 @@ interface AppContextType {
   token: string | null;
   login: (token: string) => Promise<void>;
   logout: () => void;
-  api: { get: (endpoint: string) => Promise<any>; post: (endpoint: string, body: any) => Promise<any>; put: (endpoint: string, body: any) => Promise<any>; del: (endpoint: string) => Promise<any>; getGoogleAuthUrl: (state?: string) => Promise<{ auth_url: string; }>; handleGoogleCallback: (code: string) => Promise<{ imported_count: number; merged_count: number; }>; };
+  api: { 
+    get: (endpoint: string) => Promise<any>; 
+    post: (endpoint: string, body: any) => Promise<any>; 
+    put: (endpoint: string, body: any) => Promise<any>; 
+    del: (endpoint: string) => Promise<any>; 
+    getGoogleAuthUrl: (state?: string) => Promise<{ auth_url: string; }>; 
+    handleGoogleCallback: (code: string) => Promise<{ imported_count: number; merged_count: number; }>;
+    // --- NEW: Added function type for manual client add ---
+    addManualClient: (clientData: { full_name: string; email?: string; phone?: string }) => Promise<Client>;
+  };
   clients: Client[];
   properties: Property[];
   conversations: Conversation[];
@@ -78,13 +87,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       post: (endpoint: string, body: any) => request(endpoint, 'POST', body),
       put: (endpoint: string, body: any) => request(endpoint, 'PUT', body),
       del: (endpoint: string) => request(endpoint, 'DELETE'),
-      // This function is modified to accept the 'state' parameter
       getGoogleAuthUrl: async (state?: string) => {
         const endpoint = state ? `/api/auth/google-oauth-url?state=${state}` : '/api/auth/google-oauth-url';
         return request(endpoint, 'GET');
       },
       handleGoogleCallback: async (code: string) => {
         return request('/api/auth/google-callback', 'POST', { code });
+      },
+      // --- NEW: Added implementation for manual client add ---
+      addManualClient: async (clientData: { full_name: string; email?: string; phone?: string }) => {
+        return request('/api/clients/manual', 'POST', clientData);
       },
     };
   }, [logout]);
@@ -94,16 +106,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => { setApi(() => createApiClient(token)); }, [token, createApiClient]);
 
   const login = async (newToken: string) => {
+    // ... existing login function ...
     setLoading(true);
-    
-    // This sets the cookie with the correct security attributes
     Cookies.set('auth_token', newToken, { 
         expires: 7, 
         secure: process.env.NODE_ENV === 'production', 
         sameSite: 'lax',
         path: '/' 
     });
-
     setToken(newToken);
     const tempApi = createApiClient(newToken);
     try {
@@ -119,6 +129,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const fetchDashboardData = useCallback(async () => {
+    // ... existing fetchDashboardData function ...
     if (!isAuthenticated || !api) return;
     try {
       const [clientsData, propertiesData, conversationsData, nudgesData] = await Promise.all([
@@ -137,10 +148,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [isAuthenticated, api]);
   
   const updateClientInList = (updatedClient: Client) => {
+    // ... existing updateClientInList function ...
     setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
   };
 
   const refetchScheduledMessagesForClient = async (clientId: string) => {
+    // ... existing refetchScheduledMessagesForClient function ...
     if (!api) return [];
     try {
       return await api.get(`/api/clients/${clientId}/scheduled-messages`);
@@ -151,6 +164,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   useEffect(() => {
+    // ... existing useEffect for checkUserSession ...
     const checkUserSession = async () => {
       const savedToken = Cookies.get('auth_token');
       if (savedToken) {
