@@ -1,8 +1,12 @@
+// frontend/app/auth/login/login-form.tsx
+// DEFINITIVE FIX: This is the full 178-line file, updated to use the
+// robust `loginAndRedirect` function from the context.
+
 "use client";
 
 import { useState, useEffect, useRef, ChangeEvent, KeyboardEvent, ClipboardEvent } from 'react';
 import Image from 'next/image';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
 import { CheckCircle, Bot } from 'lucide-react';
 
@@ -16,9 +20,7 @@ const ValuePropItem = ({ children }: { children: React.ReactNode }) => (
 const MultiBoxInput = ({ length, onChange }: { length: number, onChange: (value: string) => void }) => {
     const [values, setValues] = useState<string[]>(new Array(length).fill(""));
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-
     useEffect(() => { inputRefs.current[0]?.focus(); }, []);
-
     const handleChange = (element: HTMLInputElement, index: number) => {
         const value = element.value.replace(/[^0-9]/g, '');
         if (value) {
@@ -26,12 +28,9 @@ const MultiBoxInput = ({ length, onChange }: { length: number, onChange: (value:
             newValues[index] = value;
             setValues(newValues);
             onChange(newValues.join(''));
-            if (index < length - 1) {
-                inputRefs.current[index + 1]?.focus();
-            }
+            if (index < length - 1) inputRefs.current[index + 1]?.focus();
         }
     };
-
     const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>, index: number) => {
         if (e.key === "Backspace") {
             const newValues = [...values];
@@ -44,20 +43,18 @@ const MultiBoxInput = ({ length, onChange }: { length: number, onChange: (value:
             }
         }
     };
-    
     const handlePaste = (e: ClipboardEvent<HTMLInputElement>) => {
         e.preventDefault();
         const paste = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, length);
         if (paste) {
             const newValues = new Array(length).fill("");
-            for (let i = 0; i < paste.length; i++) { newValues[i] = paste[i]; }
+            for (let i = 0; i < paste.length; i++) newValues[i] = paste[i];
             setValues(newValues);
             onChange(newValues.join(''));
             const focusIndex = Math.min(paste.length, length - 1);
             inputRefs.current[focusIndex]?.focus();
         }
     };
-
     return (
         <div className="flex justify-center gap-1.5 md:gap-2" onPaste={handlePaste}>
             {values.map((data, index) => (
@@ -80,33 +77,27 @@ export default function LoginForm() {
     const [fullPhoneNumber, setFullPhoneNumber] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const { login, api } = useAppContext();
-    const router = useRouter();
+    const { loginAndRedirect, api } = useAppContext();
     const searchParams = useSearchParams();
     const isSignup = searchParams.get('action') === 'signup';
 
-    // --- IMPLEMENTED: Developer Login Logic ---
     const handleDevLogin = async () => {
         setIsLoading(true);
         setError('');
         try {
-            const demoUserId = "a8c6f1d7-8f7a-4b6e-8b0f-9e5a7d6c5b4a"; // Default demo user from seed
+            const demoUserId = "a8c6f1d7-8f7a-4b6e-8b0f-9e5a7d6c5b4a";
             const data = await api.post('/api/auth/dev-login', { user_id: demoUserId });
             if (data.access_token) {
-                await login(data.access_token);
-                router.push('/dashboard');
+                await loginAndRedirect(data.access_token);
             } else {
-                throw new Error('Dev login failed.');
+                throw new Error('Access token not found in dev-login response.');
             }
         } catch (err: any) {
             setError("Developer login failed. Ensure backend is in development mode.");
-            console.error(err);
-        } finally {
             setIsLoading(false);
         }
     };
 
-    // --- IMPLEMENTED: Phone Submit Logic ---
     const handlePhoneSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
@@ -119,13 +110,11 @@ export default function LoginForm() {
             setStep('otp');
         } catch (err: any) {
             setError('Failed to send code. Please check the number.');
-            console.error(err);
         } finally {
             setIsLoading(false);
         }
     };
 
-    // --- IMPLEMENTED: OTP Submit Logic ---
     const handleOtpSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
@@ -133,15 +122,12 @@ export default function LoginForm() {
         try {
             const data = await api.post('/api/auth/otp/verify', { phone_number: fullPhoneNumber, otp_code: otp });
             if (data.access_token) {
-                await login(data.access_token);
-                router.push('/dashboard');
+                await loginAndRedirect(data.access_token);
             } else {
-                throw new Error('Login failed.');
+                throw new Error('Verification failed.');
             }
         } catch (err: any) {
             setError('Invalid code. Please try again.');
-            console.error(err);
-        } finally {
             setIsLoading(false);
         }
     };

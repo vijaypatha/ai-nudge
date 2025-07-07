@@ -1,8 +1,8 @@
 # ---
 # File Path: backend/data/models/user.py
-# --- FINAL, CONSOLIDATED VERSION ---
-# This version merges all original fields with all the new fields 
-# required for multi-tenancy and the settings page. Nothing has been removed.
+# ---
+# DEFINITIVE FIX: Adds onboarding_state and onboarding_complete fields to track
+# the user's progress through the new onboarding flow.
 # ---
 
 from enum import Enum
@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from .client import Client 
     from .message import Message, ScheduledMessage 
 
-# Defines the allowed user types for type safety.
 class UserType(str, Enum):
     REALTOR = "realtor"
     THERAPIST = "therapist"
@@ -27,29 +26,34 @@ class User(SQLModel, table=True):
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     
     # --- Base User Information ---
-    user_type: UserType
+    user_type: Optional[UserType] = Field(default=None) # Now optional, will be set during onboarding
     full_name: str
-    email: Optional[str] = Field(default=None, index=True) # Optional as requested
-    phone_number: str = Field(index=True, unique=True) # Primary identifier
+    email: Optional[str] = Field(default=None, index=True)
+    phone_number: str = Field(index=True, unique=True)
     
-    # --- Original Fields (Restored) ---
+    # --- ADDED: Onboarding Tracking Fields ---
+    onboarding_complete: bool = Field(default=False)
+    onboarding_state: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "phone_verified": False,
+            "work_style_set": False,
+            "contacts_imported": False,
+            "first_nudges_seen": False
+        }, 
+        sa_column=Column(JSON)
+    )
+    
+    # --- Existing Fields ---
     market_focus: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     ai_style_guide: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     strategy: Dict[str, Any] = Field(default_factory=lambda: {"nudge_format": "ready-to-send"}, sa_column=Column(JSON))
-
-    # --- New Settings Fields ---
-    # Realtor-specific
     mls_username: Optional[str] = Field(default=None)
     mls_password: Optional[str] = Field(default=None)
-    
-    # Therapist-specific
     license_number: Optional[str] = Field(default=None)
     specialties: Optional[List[str]] = Field(default_factory=list, sa_column=Column(JSON))
-    
-    # AI Automation Fields
     faq_auto_responder_enabled: bool = Field(default=True)
     
-    # --- Relationships (All included) ---
+    # --- Relationships ---
     campaigns: List["CampaignBriefing"] = Relationship(back_populates="user")
     faqs: List["Faq"] = Relationship(back_populates="user")
     clients: List["Client"] = Relationship(back_populates="user")
@@ -57,16 +61,19 @@ class User(SQLModel, table=True):
     scheduled_messages: List["ScheduledMessage"] = Relationship(back_populates="user")
 
 class UserUpdate(SQLModel):
-    """Defines all updatable fields for the user settings page."""
+    """Defines all updatable fields for a user."""
     full_name: Optional[str] = None
     email: Optional[str] = None
+    user_type: Optional[UserType] = None # Added user_type
     
-    # Original Fields
+    # --- ADDED: Onboarding fields can be updated ---
+    onboarding_complete: Optional[bool] = None
+    onboarding_state: Optional[Dict[str, Any]] = None
+
+    # Existing Fields
     market_focus: Optional[List[str]] = None
     ai_style_guide: Optional[Dict[str, Any]] = None
     strategy: Optional[Dict[str, Any]] = None
-
-    # New Settings Fields
     mls_username: Optional[str] = None
     mls_password: Optional[str] = None
     license_number: Optional[str] = None

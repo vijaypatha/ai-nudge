@@ -6,6 +6,7 @@
 # ---
 
 from typing import Optional, List, Dict, Any, Tuple
+from datetime import datetime, timezone
 import uuid
 from datetime import datetime, timezone
 from sqlmodel import Session, select, delete
@@ -371,3 +372,69 @@ def _get_all_clients_for_system_indexing() -> List[Client]:
     with Session(engine) as session:
         statement = select(Client)
         return session.exec(statement).all()
+
+# Community 
+
+def get_community_overview(user_id: uuid.UUID) -> List[Dict[str, Any]]:
+    """
+    Retrieves all clients for a user and calculates health metrics for each.
+    
+    Health Score is a simple heuristic based on:
+    - Last interaction time (recency is good)
+    - Profile completeness (phone/email is good)
+    - Tagging (more tags is good)
+    """
+    logging.info(f"CRM: Calculating community overview for user_id: {user_id}")
+    
+    with Session(engine) as session:
+        statement = select(Client).where(Client.user_id == user_id)
+        clients = session.exec(statement).all()
+        
+        community_list = []
+        for client in clients:
+            health_score = 0
+            
+            # 1. Last Interaction Score (up to 50 points)
+            last_interaction_days = None
+            if client.last_interaction:
+                try:
+                    last_interaction_dt = datetime.fromisoformat(client.last_interaction).replace(tzinfo=timezone.utc)
+                    delta = datetime.now(timezone.utc) - last_interaction_dt
+                    last_interaction_days = delta.days
+                    if last_interaction_days <= 7:
+                        health_score += 50
+                    elif last_interaction_days <= 30:
+                        health_score += 30
+                    elif last_interaction_days <= 90:
+                        health_score += 10
+                except (ValueError, TypeError):
+                    logging.warning(f"CRM: Could not parse last_interaction for client {client.id}: {client.last_interaction}")
+
+            # 2. Profile Completeness Score (up to 30 points)
+            if client.email and client.phone:
+                health_score += 30
+            elif client.email or client.phone:
+                health_score += 15
+
+            # 3. Tagging Score (up to 20 points)
+            tag_count = len(client.user_tags) + len(client.ai_tags)
+            if tag_count > 5:
+                health_score += 20
+            elif tag_count > 0:
+                health_score += 10
+            
+            member_data = {
+                "client_id": client.id,
+                "full_name": client.full_name,
+                "email": client.email,
+                "phone": client.phone,
+                "user_tags": client.user_tags,
+                "ai_tags": client.ai_tags,
+                "last_interaction_days": last_interaction_days,
+                "health_score": min(health_score, 100) # Cap score at 100
+            }
+            community_list.append(member_data)
+            
+        # Sort by health score descending
+        community_list.sort(key=lambda x: x['health_score'], reverse=True)
+        return community_list

@@ -1,16 +1,37 @@
 // frontend/context/AppContext.tsx
+// DEFINITIVE FIX: Adds the new onboarding fields to the frontend User interface
+// to match the updated backend model.
+
 'use client';
 
-import { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
 
-// --- TYPE INTERFACES ---
-export interface User { id: string; full_name: string; email?: string; phone_number: string; user_type: string; }
+// --- Type Definitions ---
+
+// MODIFIED: Added onboarding_complete and onboarding_state to the User interface
+export interface User {
+  id: string;
+  full_name: string;
+  email?: string;
+  phone_number: string;
+  user_type: string | null; // Can be null before onboarding
+  onboarding_complete: boolean;
+  onboarding_state: {
+      phone_verified: boolean;
+      work_style_set: boolean;
+      contacts_imported: boolean;
+      first_nudges_seen: boolean;
+      [key: string]: any;
+  };
+}
+
 export interface Client { id: string; user_id: string; full_name: string; email: string | null; ai_tags: string[]; user_tags: string[]; preferences: { notes?: string[]; [key: string]: any; }; last_interaction: string | null; }
 export interface Property { id: string; address: string; price: number; status: string; image_urls: string[]; }
 export interface Message { id:string; client_id: string; content: string; direction: 'inbound' | 'outbound'; status: string; created_at: string; }
 export interface Conversation { id: string; client_id: string; client_name: string; last_message: string; last_message_time: string; unread_count: number; }
-export interface ScheduledMessage { id: string; content: string; scheduled_at: string; status: string; }
+export interface ScheduledMessage { id: string; user_id: string; client_id: string; content: string; scheduled_at: string; status: string; }
 export interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reason: string; }
 export interface CampaignBriefing { id: string; user_id: string; campaign_type: string; headline: string; listing_url?: string; key_intel: { [key: string]: string }; original_draft: string; edited_draft?: string; matched_audience: MatchedClient[]; status: 'new' | 'launched' | 'dismissed'; }
 
@@ -18,26 +39,23 @@ interface AppContextType {
   loading: boolean;
   isAuthenticated: boolean;
   user: User | null;
-  token: string | null;
-  login: (token: string) => Promise<void>;
-  logout: () => void;
-  api: { 
-    get: (endpoint: string) => Promise<any>; 
-    post: (endpoint: string, body: any) => Promise<any>; 
-    put: (endpoint: string, body: any) => Promise<any>; 
-    del: (endpoint: string) => Promise<any>; 
-    getGoogleAuthUrl: (state?: string) => Promise<{ auth_url: string; }>; 
-    handleGoogleCallback: (code: string) => Promise<{ imported_count: number; merged_count: number; }>;
-    // --- NEW: Added function type for manual client add ---
-    addManualClient: (clientData: { full_name: string; email?: string; phone?: string }) => Promise<Client>;
-  };
   clients: Client[];
   properties: Property[];
   conversations: Conversation[];
   nudges: CampaignBriefing[];
+  logout: () => void;
+  api: {
+    get: (endpoint: string) => Promise<any>;
+    post: (endpoint: string, body: any) => Promise<any>;
+    put: (endpoint: string, body: any) => Promise<any>;
+    del: (endpoint: string) => Promise<any>;
+  };
+  login: (token: string) => Promise<boolean>;
+  loginAndRedirect: (token: string) => Promise<boolean>;
   fetchDashboardData: () => Promise<void>;
   updateClientInList: (updatedClient: Client) => void;
   refetchScheduledMessagesForClient: (clientId: string) => Promise<ScheduledMessage[]>;
+  refreshUser: () => Promise<void>; // Added function to refresh user data
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -46,144 +64,145 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-
   const [clients, setClients] = useState<Client[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [nudges, setNudges] = useState<CampaignBriefing[]>([]);
+  const tokenRef = useRef<string | null>(null);
+  const router = useRouter();
 
   const logout = useCallback(() => {
-    Cookies.remove('auth_token', { path: '/' });
-    setToken(null);
+    Cookies.remove('auth_token');
+    tokenRef.current = null;
     setUser(null);
     setIsAuthenticated(false);
-  }, []);
+    setClients([]);
+    setProperties([]);
+    setConversations([]);
+    setNudges([]);
+    router.replace('/auth/login');
+  }, [router]);
   
-  const createApiClient = useCallback((authToken: string | null) => {
+  const api = useCallback(() => {
     const request = async (endpoint: string, method: string, body?: any) => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
-      const url = `${baseUrl}${endpoint}`; 
-      
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const url = `${baseUrl}${endpoint}`;
       const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-      
-      const config: RequestInit = { method, headers };
-      if (body) config.body = JSON.stringify(body);
-      
-      const response = await fetch(url, config); 
-      
+      if (tokenRef.current) headers['Authorization'] = `Bearer ${tokenRef.current}`;
+      const config: RequestInit = { method, headers, body: body ? JSON.stringify(body) : undefined };
+      const response = await fetch(url, config);
       if (!response.ok) {
         if (response.status === 401) logout();
-        const errorData = await response.json().catch(() => ({ detail: "An unknown error occurred" }));
-        const error = new Error(`HTTP error! status: ${response.status}`);
-        (error as any).response = { data: errorData };
-        throw error;
+        const errorData = await response.json().catch(() => ({ detail: `API Error: ${response.statusText}` }));
+        throw new Error(errorData.detail || 'An unknown error occurred');
       }
-      return response.json();
+      const text = await response.text();
+      return text ? JSON.parse(text) : {};
     };
     return {
       get: (endpoint: string) => request(endpoint, 'GET'),
       post: (endpoint: string, body: any) => request(endpoint, 'POST', body),
       put: (endpoint: string, body: any) => request(endpoint, 'PUT', body),
       del: (endpoint: string) => request(endpoint, 'DELETE'),
-      getGoogleAuthUrl: async (state?: string) => {
-        const endpoint = state ? `/api/auth/google-oauth-url?state=${state}` : '/api/auth/google-oauth-url';
-        return request(endpoint, 'GET');
-      },
-      handleGoogleCallback: async (code: string) => {
-        return request('/api/auth/google-callback', 'POST', { code });
-      },
-      // --- NEW: Added implementation for manual client add ---
-      addManualClient: async (clientData: { full_name: string; email?: string; phone?: string }) => {
-        return request('/api/clients/manual', 'POST', clientData);
-      },
     };
   }, [logout]);
 
-  const [api, setApi] = useState(() => createApiClient(null));
-  
-  useEffect(() => { setApi(() => createApiClient(token)); }, [token, createApiClient]);
-
-  const login = async (newToken: string) => {
-    // ... existing login function ...
-    setLoading(true);
-    Cookies.set('auth_token', newToken, { 
-        expires: 7, 
-        secure: process.env.NODE_ENV === 'production', 
-        sameSite: 'lax',
-        path: '/' 
-    });
-    setToken(newToken);
-    const tempApi = createApiClient(newToken);
+  const refreshUser = useCallback(async () => {
     try {
-      const userData = await tempApi.get('/api/users/me');
+        const userData = await api().get('/api/users/me');
+        setUser(userData);
+    } catch (error) {
+        console.error("Failed to refresh user data:", error);
+        logout(); // If we can't get user data, log out
+    }
+  }, [api, logout]);
+
+  const login = useCallback(async (newToken: string): Promise<boolean> => {
+    Cookies.set('auth_token', newToken, { expires: 7, path: '/' });
+    tokenRef.current = newToken;
+    try {
+      const userData = await api().get('/api/users/me');
       setUser(userData);
       setIsAuthenticated(true);
+      return true;
     } catch (error) {
-      console.error("Failed to fetch user profile:", error);
+      console.error("Authentication failed:", error);
       logout();
-    } finally {
-      setLoading(false); 
+      return false;
     }
+  }, [api, logout]);
+
+  const loginAndRedirect = async (token: string): Promise<boolean> => {
+      const success = await login(token);
+      if (success) {
+          // The AuthGuard will handle the redirect logic based on onboarding status
+          router.push('/community'); 
+      }
+      return success;
   };
 
   const fetchDashboardData = useCallback(async () => {
-    // ... existing fetchDashboardData function ...
-    if (!isAuthenticated || !api) return;
+    if (!isAuthenticated) return;
     try {
-      const [clientsData, propertiesData, conversationsData, nudgesData] = await Promise.all([
-        api.get('/api/clients'),
-        api.get('/api/properties'),
-        api.get('/api/conversations'),
-        api.get('/api/nudges'),
+      const results = await Promise.allSettled([
+        api().get('/api/clients'),
+        api().get('/api/properties'),
+        api().get('/api/conversations/'),
+        api().get('/api/campaigns')
       ]);
-      setClients(clientsData);
-      setProperties(propertiesData);
-      setConversations(conversationsData);
-      setNudges(nudgesData);
+      if (results[0].status === 'fulfilled') setClients(results[0].value);
+      if (results[1].status === 'fulfilled') setProperties(results[1].value);
+      if (results[2].status === 'fulfilled') setConversations(results[2].value);
+      if (results[3].status === 'fulfilled') setNudges(results[3].value);
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') console.error(`Failed to fetch endpoint ${index}:`, result.reason);
+      });
     } catch (error) {
-      console.error("Failed to fetch dashboard data", error);
+      console.error("A critical error occurred while fetching dashboard data:", error);
     }
-  }, [isAuthenticated, api]);
-  
-  const updateClientInList = (updatedClient: Client) => {
-    // ... existing updateClientInList function ...
-    setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-  };
-
-  const refetchScheduledMessagesForClient = async (clientId: string) => {
-    // ... existing refetchScheduledMessagesForClient function ...
-    if (!api) return [];
-    try {
-      return await api.get(`/api/clients/${clientId}/scheduled-messages`);
-    } catch (error) {
-      console.error("Failed to refetch scheduled messages", error);
-      return [];
-    }
-  };
+  }, [api, isAuthenticated]);
 
   useEffect(() => {
-    // ... existing useEffect for checkUserSession ...
     const checkUserSession = async () => {
+      setLoading(true);
       const savedToken = Cookies.get('auth_token');
       if (savedToken) {
         await login(savedToken);
-      } else {
-        setLoading(false);
       }
+      setLoading(false);
     };
     checkUserSession();
-  }, []);
+  }, [login]);
 
-  const value = { 
-    loading, 
-    isAuthenticated, user, token,
-    login, logout, api,
-    clients, properties, conversations, nudges,
+  const updateClientInList = (updatedClient: Client) => {
+    setClients(prevClients => prevClients.map(c => c.id === updatedClient.id ? updatedClient : c));
+  };
+  
+  const refetchScheduledMessagesForClient = useCallback(async (clientId: string): Promise<ScheduledMessage[]> => {
+    try {
+      return await api().get(`/api/scheduled-messages/?client_id=${clientId}`);
+    } catch (error) {
+      console.error(`Failed to fetch scheduled messages for ${clientId}:`, error);
+      return [];
+    }
+  }, [api]);
+
+  const value: AppContextType = {
+    loading,
+    isAuthenticated,
+    user,
+    clients,
+    properties,
+    conversations,
+    nudges,
+    logout,
+    api: api(),
+    login,
+    loginAndRedirect,
     fetchDashboardData,
     updateClientInList,
     refetchScheduledMessagesForClient,
+    refreshUser,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

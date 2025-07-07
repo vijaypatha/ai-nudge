@@ -2,6 +2,10 @@
   "dependencies": {
     "@types/uuid": "^10.0.0",
     "framer-motion": "^12.22.0",
+    "lodash": "^4.17.21",
     "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/lodash": "^4.17.20"
   }
 }

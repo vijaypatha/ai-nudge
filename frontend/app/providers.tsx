@@ -1,16 +1,19 @@
 // frontend/app/providers.tsx
-//Purpose: To create a single Client Component that wraps all shared context providers, making them available to all client-side pages and components in the application.
-
+// DEFINITIVE FIX: Wraps all children with the SidebarProvider so the layout
+// and its pages can share sidebar state.
 
 'use client';
 
-import { AppProvider } from '../context/AppContext';
-import { ReactNode } from 'react';
+import { AppProvider } from '@/context/AppContext';
+import { SidebarProvider } from '@/context/SidebarContext'; // Import the provider
 
-export function Providers({ children }: { children: ReactNode }) {
+export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AppProvider>
-      {children}
+      {/* SidebarProvider now wraps the children, making the context available */}
+      <SidebarProvider>
+        {children}
+      </SidebarProvider>
     </AppProvider>
   );
 }

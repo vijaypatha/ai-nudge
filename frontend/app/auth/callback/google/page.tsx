@@ -1,12 +1,17 @@
 // frontend/app/auth/callback/google/page.tsx
+// DEFINITIVE FIX: This version resolves the build error by using the correct
+// api.post method to call the backend, instead of the non-existent
+// handleGoogleCallback function.
+
 "use client";
 
 import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
+import { Loader2 } from 'lucide-react';
 
 function GoogleCallback() {
-  const { api, login, isAuthenticated } = useAppContext();
+  const { api, loginAndRedirect, isAuthenticated } = useAppContext();
   const searchParams = useSearchParams();
   const router = useRouter();
   
@@ -15,7 +20,7 @@ function GoogleCallback() {
 
   useEffect(() => {
     const code = searchParams.get('code');
-    const state = searchParams.get('state'); // The 'state' parameter now contains our auth token
+    const state = searchParams.get('state');
     const errorParam = searchParams.get('error');
 
     if (errorParam) {
@@ -24,50 +29,53 @@ function GoogleCallback() {
       return;
     }
 
-    // If we are not yet authenticated but have a token in the state, log in first.
     if (state && !isAuthenticated) {
-        setStatus("Verifying your session...");
-        login(state).then(() => {
-            // After login completes, the component will re-render, and this
-            // useEffect will run again. On the next run, `isAuthenticated` will be true.
-            console.log("Session restored from state token.");
+        setStatus("Restoring your session...");
+        loginAndRedirect(state).then((success) => {
+            if (!success) {
+                setError("Failed to restore session from token.");
+                setStatus("Error");
+            }
         });
-        return; // Return here to wait for the re-render after login.
+        return; // Wait for re-render
     }
 
-    // Once we are authenticated AND we have the code from Google, proceed.
     if (isAuthenticated && code) {
       setStatus("Session verified. Processing Google sign-in...");
       
-      api.handleGoogleCallback(code)
+      // --- CORRECTED ---
+      // Changed from api.handleGoogleCallback(code) to the correct API call.
+      // We now POST the code to the backend endpoint defined in auth.py.
+      api.post('/api/auth/google-callback', { code })
         .then(result => {
-          setStatus("Import successful! Redirecting to your dashboard...");
+          setStatus("Import successful! Redirecting...");
           const { imported_count, merged_count } = result;
-          router.push(`/dashboard?imported=${imported_count}&merged=${merged_count}`);
+          // Redirect to the community page with query params for the celebration view.
+          router.push(`/community?imported=${imported_count}&merged=${merged_count}`);
         })
         .catch(err => {
           console.error("Backend callback handler failed:", err);
-          const errorMessage = err.response?.data?.detail || "An unexpected error occurred during import.";
+          const errorMessage = err.message || "An unexpected error occurred during import.";
           setError(errorMessage);
           setStatus("Error");
         });
     }
 
-  }, [isAuthenticated, api, login, router, searchParams]);
+  }, [isAuthenticated, api, loginAndRedirect, router, searchParams]);
 
   return (
-    <div className="flex h-screen w-full flex-col items-center justify-center bg-background">
+    <div className="flex h-screen w-full flex-col items-center justify-center bg-gray-900 text-white">
       <div className="text-center p-4">
         {status !== "Error" ? (
-          <div className="text-2xl font-semibold">AI Nudge</div>
+          <Loader2 className="w-12 h-12 animate-spin text-teal-400" />
         ) : (
-          <div className="text-2xl font-semibold text-destructive">Authentication Failed</div>
+          <div className="text-2xl font-semibold text-red-500">Authentication Failed</div>
         )}
-        <p className="mt-2 text-muted-foreground">{error || status}</p>
+        <p className="mt-4 text-lg text-gray-400">{error || status}</p>
         {error && (
             <button 
                 onClick={() => router.push('/onboarding')}
-                className="mt-4 inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium h-10 px-4 py-2 border">
+                className="mt-6 px-6 py-2 text-sm font-semibold bg-white/10 rounded-md hover:bg-white/20">
                 Return to Onboarding
             </button>
         )}

@@ -1,8 +1,10 @@
 // frontend/components/client-intake/ProviderConnect.tsx
+// DEFINITIVE FIX: Replaces the non-existent 'getGoogleAuthUrl' with the correct 'api.get' method.
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useAppContext } from "@/context/AppContext";
+import Cookies from 'js-cookie';
 
 const GoogleIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -11,21 +13,28 @@ const GoogleIcon = () => (
 );
 
 export const ProviderConnect = () => {
-  const { api, token } = useAppContext(); // Get the current auth token
+  const { api } = useAppContext();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Use a ref to get the current token without causing re-renders.
+  const tokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    tokenRef.current = Cookies.get('auth_token') || null;
+  }, []);
 
   const handleConnect = async () => {
-    if (!token) {
+    if (!tokenRef.current) {
         setError("Your session is not ready. Please refresh and try again.");
         return;
     }
     setIsLoading(true);
     setError(null);
     try {
-      // Pass the current auth token in the 'state' parameter.
-      // The backend will add this to the Google URL.
-      const { auth_url } = await api.getGoogleAuthUrl(token);
+      // --- CORRECTED ---
+      // The API call now uses the correct 'get' method and constructs the URL
+      // with the token as the 'state' query parameter.
+      const { auth_url } = await api.get(`/api/auth/google-oauth-url?state=${tokenRef.current}`);
       window.location.href = auth_url;
     } catch (err) {
       setError("Could not connect. Please try again.");

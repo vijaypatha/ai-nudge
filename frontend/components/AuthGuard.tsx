@@ -1,43 +1,45 @@
 // frontend/components/AuthGuard.tsx
-// single "security checkpoint" for the entire authenticated part of our app.
+// DEFINITIVE FIX: This version uses the new `onboarding_complete` flag from the
+// user object to enforce the onboarding flow.
+
 "use client";
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
 import { Sparkles } from 'lucide-react';
-
-// --- ADDED: Helper to check if user profile is complete ---
-// We consider the profile complete if they have selected a user_type.
-const isProfileComplete = (user: any) => {
-  return user && user.user_type;
-};
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, user, loading } = useAppContext();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
-    // Don't do anything while the context is loading its state.
+    // Don't do anything while the context is loading its initial state.
     if (loading) {
       return;
     }
 
-    // If not authenticated, redirect to the login page.
-    if (!isAuthenticated) {
+    // If the user is not authenticated, redirect them to the login page.
+    // Exception: Allow access to the login page itself.
+    if (!isAuthenticated && pathname !== '/auth/login') {
+      console.log("AuthGuard: Not authenticated, redirecting to login.");
       router.push('/auth/login');
       return;
     }
 
-    // If authenticated but the profile is not complete, redirect to onboarding.
-    if (isAuthenticated && !isProfileComplete(user)) {
+    // If the user is authenticated but has NOT completed onboarding,
+    // redirect them to the onboarding page.
+    // Exception: Allow access to the onboarding page itself.
+    if (isAuthenticated && user && !user.onboarding_complete && pathname !== '/onboarding') {
+      console.log("AuthGuard: Onboarding not complete, redirecting to onboarding.");
       router.push('/onboarding');
       return;
     }
 
-  }, [isAuthenticated, user, loading, router]);
+  }, [isAuthenticated, user, loading, router, pathname]);
 
-  // While loading, show a full-screen spinner.
+  // While loading, show a full-screen spinner to prevent content flashing.
   if (loading) {
     return (
       <div className="flex flex-col justify-center items-center h-screen text-brand-text-muted bg-brand-dark">
@@ -47,11 +49,16 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // If authenticated and profile is complete, render the requested page.
-  if (isAuthenticated && isProfileComplete(user)) {
+  // If authenticated and onboarding is complete (or they are on the onboarding page), render the children.
+  if (isAuthenticated && (user?.onboarding_complete || pathname === '/onboarding')) {
     return <>{children}</>;
   }
 
-  // Otherwise, render nothing while the redirect happens.
+  // If on the login page, render it.
+  if (!isAuthenticated && pathname === '/auth/login') {
+      return <>{children}</>;
+  }
+
+  // Otherwise, render nothing while the redirect is in progress.
   return null;
 }

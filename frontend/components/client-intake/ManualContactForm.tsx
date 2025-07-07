@@ -1,20 +1,18 @@
 // frontend/components/client-intake/ManualContactForm.tsx
+// DEFINITIVE FIX: Replaces the non-existent 'addManualClient' with the correct 'api.post' method.
 "use client";
 
 import React, { useState } from "react";
 import { useAppContext } from "@/context/AppContext";
-// Using lucide-react icons for better visual feedback
 import { CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
 
 export const ManualContactForm = () => {
   const { api } = useAppContext();
 
-  // State for form inputs
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   
-  // State for managing the form's submission status
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -31,24 +29,23 @@ export const ManualContactForm = () => {
     setSuccess(null);
 
     try {
-      const newClient = await api.addManualClient({
+      // --- CORRECTED ---
+      // The API call now uses the correct 'post' method and endpoint.
+      const newClient = await api.post('/api/clients', {
         full_name: fullName,
-        email: email || undefined, // Send undefined if the string is empty
-        phone: phone || undefined,
+        email: email || undefined,
+        phone_number: phone || undefined,
       });
 
-      // On success, show a confirmation message and clear the form
       setSuccess(`Successfully added ${newClient.full_name}!`);
       setFullName('');
       setEmail('');
       setPhone('');
 
-      // Hide the success message after 4 seconds
       setTimeout(() => setSuccess(null), 4000);
 
     } catch (err: any) {
-      // On failure, display a helpful error message
-      const errorMessage = err.response?.data?.detail || "An unknown error occurred.";
+      const errorMessage = err.message || "An unknown error occurred.";
       setError(errorMessage);
       console.error(err);
     } finally {
@@ -111,8 +108,6 @@ export const ManualContactForm = () => {
             'Add Contact'
           )}
         </button>
-
-        {/* Dynamic Success and Error Messages */}
         {success && (
             <div className="mt-4 flex items-center gap-2 text-sm text-green-400 animate-in fade-in-0">
                 <CheckCircle2 size={16}/> 
