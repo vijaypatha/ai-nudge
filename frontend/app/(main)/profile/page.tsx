@@ -1,3 +1,7 @@
+// frontend/app/(main)/profile/page.tsx
+// DEFINITIVE FIX: Replaces the root div with a <main> element and applies
+// correct flexbox and overflow classes to enable vertical scrolling.
+
 "use client";
 
 import { useState, useEffect, ChangeEvent, FC } from "react";
@@ -114,14 +118,11 @@ export default function ProfilePage() {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        // Wait until the main context has finished its initial auth check
         if (isContextLoading) return;
-
         const fetchData = async () => {
             setIsLoading(true);
             setError(null);
             try {
-                // Use the authenticated API client from the context
                 const [userData, faqData] = await Promise.all([
                     api.get('/api/users/me'),
                     api.get('/api/faqs/')
@@ -145,7 +146,6 @@ export default function ProfilePage() {
         if (!profile) return;
         setIsSaving(true);
         setError(null);
-        // Do not send the password if it's empty, to avoid overwriting it with nothing
         const { mls_password, ...rest } = profile;
         const payload = (mls_password && mls_password.trim() !== '') ? profile : rest;
         
@@ -228,8 +228,9 @@ export default function ProfilePage() {
     if (error && !profile) return <div className="p-8 text-center text-red-400 bg-gray-900">{error}</div>;
     if (!profile) return null;
 
+    // --- MODIFIED: The root element is now a <main> tag with overflow classes ---
     return (
-        <div className="min-h-screen bg-gray-900 text-white py-12 px-4">
+        <main className="flex-1 overflow-y-auto bg-gray-900 text-white p-6 md:p-8 lg:p-12">
             <div className="max-w-4xl mx-auto space-y-12">
                 <div className="bg-gray-800/40 rounded-xl border border-white/10 p-8">
                     <div className="flex justify-between items-center mb-6">
@@ -263,6 +264,6 @@ export default function ProfilePage() {
                     </div>
                 </div>
             </div>
-        </div>
+        </main>
     );
 }
