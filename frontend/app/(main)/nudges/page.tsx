@@ -1,6 +1,6 @@
 // frontend/app/(main)/nudges/page.tsx
-// DEFINITIVE FIX: This version meticulously integrates the reusable <MagicSearchBar />
-// into the "Instant Nudge" feature, allowing for dynamic, AI-powered audience creation.
+// DEFINITIVE FIX: This version updates the `handleDraftWithAI` function to correctly
+// parse the new JSON response object from the backend API.
 
 'use client';
 
@@ -11,8 +11,8 @@ import clsx from 'clsx';
 import { useAppContext } from '@/context/AppContext';
 import type { CampaignBriefing, Client } from '@/context/AppContext';
 import { Tabs, TabOption } from '@/components/ui/Tabs';
-import { MagicSearchBar } from '@/components/ui/MagicSearchBar'; // Import the new search bar
-import { ManageAudienceModal } from '@/components/modals/ManageAudienceModal'; // Import the relocated modal
+import { MagicSearchBar } from '@/components/ui/MagicSearchBar';
+import { ManageAudienceModal } from '@/components/modals/ManageAudienceModal';
 
 // --- ICONS ---
 import {
@@ -36,14 +36,12 @@ const NUDGE_TYPE_CONFIG: Record<string, { icon: ReactNode; color: string; title:
 };
 const BRAND_ACCENT_COLOR = '#20D5B3';
 
-// --- HELPER COMPONENTS ---
+// --- HELPER & MODAL COMPONENTS ---
 
 const Avatar = ({ name, className }: { name: string; className?: string }) => {
   const initials = name?.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase() || '';
   return <div className={clsx('flex items-center justify-center rounded-full bg-white/10 text-brand-text-muted font-bold select-none', className)}>{initials}</div>;
 };
-
-// --- CORE UI COMPONENTS ---
 
 const IntelStat: FC<{ icon?: ReactNode; label: string; value: string | number; className?: string }> = ({ icon, label, value, className }) => (
     <div className={`flex items-start gap-3 ${className}`}>
@@ -59,7 +57,6 @@ interface PersuasiveCommandCardProps {
 }
 
 const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBriefingUpdate, onAction }) => {
-    const { clients } = useAppContext();
     const config = NUDGE_TYPE_CONFIG[briefing.campaign_type] || NUDGE_TYPE_CONFIG.price_drop;
     const [draft, setDraft] = useState(briefing.edited_draft || briefing.original_draft || '');
     const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
@@ -124,13 +121,14 @@ const InstantNudgeCreator = () => {
     const [topic, setTopic] = useState('');
     const [isSending, setIsSending] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
+    const [isDrafting, setIsDrafting] = useState(false);
 
     useEffect(() => { setFilteredClients(clients); }, [clients]);
     
     const handleAudienceSearch = useCallback(async (query: string) => {
         setIsSearching(true);
         if (!query.trim()) {
-            setFilteredClients(clients); // Reset to all clients if query is empty
+            setFilteredClients(clients);
             setIsSearching(false);
             return;
         }
@@ -139,7 +137,7 @@ const InstantNudgeCreator = () => {
             setFilteredClients(results);
         } catch (error) {
             console.error("Failed to search for clients:", error);
-            setFilteredClients([]); // Clear results on error
+            setFilteredClients([]);
         } finally {
             setIsSearching(false);
         }
@@ -150,8 +148,26 @@ const InstantNudgeCreator = () => {
     };
     const handleSelectClient = (clientId: string) => {
         const newSelection = new Set(selectedClients);
-        if (newSelection.has(clientId)) { newSelection.delete(clientId); } else { newSelection.add(clientId); }
+        newSelection.has(clientId) ? newSelection.delete(clientId) : newSelection.add(clientId);
         setSelectedClients(newSelection);
+    };
+
+    const handleDraftWithAI = async () => {
+        if (!topic.trim()) {
+            alert("Please provide a topic or goal for the AI to draft a message.");
+            return;
+        }
+        setIsDrafting(true);
+        try {
+            // BUGFIX: The API now returns an object `{ draft: "..." }`.
+            const response = await api.post('/api/campaigns/draft-instant-nudge', { topic });
+            setMessage(response.draft);
+        } catch (error) {
+            console.error("Failed to draft with AI:", error);
+            alert("There was an error generating the AI draft. Please try again.");
+        } finally {
+            setIsDrafting(false);
+        }
     };
 
     const handleSendInstantNudge = async () => {
@@ -184,7 +200,7 @@ const InstantNudgeCreator = () => {
                 <div className="flex items-center gap-3 mb-4"><span className="flex items-center justify-center w-8 h-8 rounded-full bg-brand-accent text-brand-dark font-bold">1</span><h2 className="text-2xl font-bold">Target Your Audience</h2></div>
                 <div className="p-6 bg-brand-primary border border-white/10 rounded-xl space-y-4">
                     <label className="text-sm font-semibold text-brand-text-muted">Natural Language Audience Builder ✨</label>
-                    <MagicSearchBar onSearch={handleAudienceSearch} isLoading={isSearching} placeholder="e.g., My clients who are avid golfers..."/>
+                    <MagicSearchBar onSearch={handleAudienceSearch} isLoading={isSearching} placeholder="e.g., My clients who are avid golfers..." />
                     <div className="border border-white/10 rounded-lg max-h-64 overflow-y-auto">
                         <div className="p-3 border-b border-white/10 sticky top-0 bg-brand-primary/80 backdrop-blur-sm"><label className="flex items-center gap-3 text-sm"><input type="checkbox" className="h-4 w-4 rounded bg-white/10 border-white/20 text-brand-accent focus:ring-brand-accent" checked={selectedClients.size > 0 && selectedClients.size === filteredClients.length} onChange={handleSelectAll} />Select All Filtered ({selectedClients.size}/{filteredClients.length})</label></div>
                         {isSearching ? (
@@ -198,7 +214,15 @@ const InstantNudgeCreator = () => {
                 <div className="p-6 bg-brand-primary border border-white/10 rounded-xl space-y-4">
                     <div><label className="text-sm font-semibold text-brand-text-muted" htmlFor="topic">Topic / Goal (for AI draft)</label><input id="topic" type="text" value={topic} onChange={e => setTopic(e.target.value)} placeholder="e.g., End of quarter market update" className="w-full mt-2 bg-black/20 border border-white/20 rounded-lg p-3"/></div>
                     <div><label className="text-sm font-semibold text-brand-text-muted" htmlFor="message">Message</label><textarea id="message" rows={5} value={message} onChange={e => setMessage(e.target.value)} placeholder="Click 'Draft with AI' or write your own message..." className="w-full mt-2 bg-black/20 border border-white/20 rounded-lg p-3"></textarea></div>
-                    <div className="flex flex-wrap items-center gap-4"><button className="flex items-center gap-2 p-3 bg-white/10 rounded-md font-semibold hover:bg-white/20"><Bot size={18} /> Draft with AI</button><button onClick={handleSendInstantNudge} disabled={isSending || selectedClients.size === 0 || !message.trim()} className="flex items-center gap-2 p-3 bg-primary-action text-brand-dark rounded-md font-semibold hover:brightness-110 disabled:opacity-50">{isSending ? 'Sending...' : <><Send size={18} /> Send to {selectedClients.size} recipients</>}</button></div>
+                    <div className="flex flex-wrap items-center gap-4">
+                        <button onClick={handleDraftWithAI} disabled={isDrafting || !topic.trim()} className="flex items-center gap-2 p-3 bg-white/10 rounded-md font-semibold hover:bg-white/20 disabled:opacity-50">
+                            {isDrafting ? <Loader2 size={18} className="animate-spin" /> : <Bot size={18} />}
+                            {isDrafting ? 'Drafting...' : 'Draft with AI'}
+                        </button>
+                        <button onClick={handleSendInstantNudge} disabled={isSending || selectedClients.size === 0 || !message.trim()} className="flex items-center gap-2 p-3 bg-primary-action text-brand-dark rounded-md font-semibold hover:brightness-110 disabled:opacity-50">
+                            {isSending ? 'Sending...' : <><Send size={18} /> Send to {selectedClients.size} recipients</>}
+                        </button>
+                    </div>
                 </div>
             </section>
         </div>
