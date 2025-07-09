@@ -271,20 +271,20 @@ def get_conversation_summaries(user_id: uuid.UUID) -> List[Dict[str, Any]]:
 # --- Scheduled Message Functions ---
 
 def save_scheduled_message(message: ScheduledMessage):
-    """Saves a single scheduled message to the database."""
     with Session(engine) as session:
         session.add(message)
         session.commit()
-        print(f"CRM: Saved scheduled message for client {message.client_id} at {message.scheduled_at}")
+
+def get_scheduled_message_by_id(message_id: uuid.UUID) -> Optional[ScheduledMessage]:
+    with Session(engine) as session:
+        return session.get(ScheduledMessage, message_id)
 
 def get_all_scheduled_messages(user_id: uuid.UUID) -> List[ScheduledMessage]:
-    """Gets all scheduled messages from the database for a specific user."""
     with Session(engine) as session:
         statement = select(ScheduledMessage).where(ScheduledMessage.user_id == user_id)
         return session.exec(statement).all()
 
 def update_scheduled_message(message_id: uuid.UUID, update_data: Dict[str, Any], user_id: uuid.UUID) -> Optional[ScheduledMessage]:
-    """Updates a scheduled message, typically its content or scheduled time."""
     with Session(engine) as session:
         message = session.exec(select(ScheduledMessage).where(ScheduledMessage.id == message_id, ScheduledMessage.user_id == user_id)).first()
         if not message:
@@ -298,7 +298,6 @@ def update_scheduled_message(message_id: uuid.UUID, update_data: Dict[str, Any],
         return message
 
 def delete_scheduled_message(message_id: uuid.UUID, user_id: uuid.UUID) -> bool:
-    """Deletes a single scheduled message by its ID."""
     with Session(engine) as session:
         message = session.exec(select(ScheduledMessage).where(ScheduledMessage.id == message_id, ScheduledMessage.user_id == user_id)).first()
         if not message:
@@ -308,22 +307,18 @@ def delete_scheduled_message(message_id: uuid.UUID, user_id: uuid.UUID) -> bool:
         return True
 
 def get_scheduled_messages_for_client(client_id: uuid.UUID, user_id: uuid.UUID) -> List[ScheduledMessage]:
-    """Retrieves all scheduled messages for a single client."""
     with Session(engine) as session:
         client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client_check:
             return []
-            
         statement = select(ScheduledMessage).where(ScheduledMessage.client_id == client_id)
         return session.exec(statement).all()
 
 def delete_scheduled_messages_for_client(client_id: uuid.UUID, user_id: uuid.UUID):
-    """Deletes all scheduled messages for a single client. Used by the planner."""
     with Session(engine) as session:
         client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client_check:
             return
-            
         statement = delete(ScheduledMessage).where(ScheduledMessage.client_id == client_id)
         session.exec(statement)
         session.commit()

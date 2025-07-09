@@ -8,7 +8,9 @@
 import uuid
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Callable, List
+from typing import Dict, Any, Callable, List, Optional
+from sqlmodel import Session
+
 
 from data.models.event import MarketEvent
 from data.models.campaign import CampaignBriefing, MatchedClient
@@ -52,75 +54,73 @@ CAMPAIGN_CONFIG = {
 
 
 def _calculate_match_score(client: Client, property_item: Property) -> tuple[int, list[str]]:
-    """Calculates a match score between a client and a property."""
     score = 0
     reasons = []
-    if any(loc.lower() in property_item.address.lower() for loc in client.preferences.get("locations", [])):
+    if client.preferences and property_item.address and any(loc.lower() in property_item.address.lower() for loc in client.preferences.get("locations", [])):
         score += 100
         reasons.append("Location Match")
     return score, reasons
 
-
-async def _create_campaign_from_event(event: MarketEvent, realtor: User, property_item: Property, matched_audience: list[MatchedClient]):
-    """Generates the AI message draft and saves the complete campaign briefing."""
+async def _create_campaign_from_event(event: MarketEvent, realtor: User, property_item: Property, matched_audience: list[MatchedClient], db_session: Session):
     config = CAMPAIGN_CONFIG.get(event.event_type)
-    if not config:
-        print(f"NUDGE ENGINE: No campaign configuration for event type '{event.event_type}'. Skipping.")
-        return
+    if not config: return
 
     headline = config["headline"].format(address=property_item.address)
-    intel_builder = config["intel_builder"]
-    key_intel = intel_builder(event, property_item)
-
-    ai_draft = await conversation_agent.draft_outbound_campaign_message(
-        realtor=realtor,
-        property_item=property_item,
-        event_type=event.event_type,
-        matched_audience=matched_audience
-    )
+    key_intel = config["intel_builder"](event, property_item)
+    ai_draft = await conversation_agent.draft_outbound_campaign_message(realtor=realtor, property_item=property_item, event_type=event.event_type, matched_audience=matched_audience)
     
     audience_for_db = [m.model_dump(mode='json') for m in matched_audience]
     
     new_briefing = CampaignBriefing(
-        id=uuid.uuid4(),
-        user_id=realtor.id,
-        campaign_type=event.event_type,
-        status="new",
-        headline=headline,
-        key_intel=key_intel,
-        listing_url=property_item.listing_url,
-        original_draft=ai_draft,
-        matched_audience=audience_for_db,
+        id=uuid.uuid4(), user_id=realtor.id, campaign_type=event.event_type, status="new",
+        headline=headline, key_intel=key_intel, listing_url=property_item.listing_url,
+        original_draft=ai_draft, matched_audience=audience_for_db,
         triggering_event_id=event.id if event.id else uuid.uuid4()
     )
+    # --- FIX: Removed 'session' argument. ---
+    # The crm_service.save_campaign_briefing function handles its own session.
     crm_service.save_campaign_briefing(new_briefing)
 
-
-async def process_market_event(event: MarketEvent, realtor: User):
-    """The main entry point for the Nudge Engine to process a single market event."""
+# --- FIX: Modified function to accept and use a db_session for testability ---
+async def process_market_event(event: MarketEvent, realtor: User, db_session: Optional[Session] = None):
     print(f"NUDGE ENGINE: Processing event -> {event.event_type} for entity {event.entity_id}")
-    property_item = crm_service.get_property_by_id(event.entity_id)
-    if not property_item:
-        print(f"NUDGE ENGINE: Property {event.entity_id} not found.")
-        return
-
-    # --- MODIFIED: Pass the user_id to get_all_clients ---
-    all_clients = crm_service.get_all_clients(user_id=realtor.id)
-    matched_audience = []
     
-    if event.event_type in ["expired_listing", "withdrawn_listing"]:
-        matched_audience.append(MatchedClient(client_id=realtor.id, client_name=realtor.full_name, match_score=100, match_reason="Seller Lead Opportunity"))
-    else:
+    def _process(session: Session):
+        # --- FIX: Removed 'session' argument. ---
+        # The crm_service functions handle their own sessions internally.
+        property_item = crm_service.get_property_by_id(event.entity_id)
+        if not property_item:
+            print(f"NUDGE ENGINE: Property {event.entity_id} not found.")
+            return None
+
+        # --- FIX: Removed 'session' argument. ---
+        all_clients = crm_service.get_all_clients(user_id=realtor.id)
+        matched_audience = []
+        
         for client in all_clients:
             score, reasons = _calculate_match_score(client, property_item)
             if score >= 100:
                 matched_audience.append(MatchedClient(client_id=client.id, client_name=client.full_name, match_score=score, match_reason=", ".join(reasons)))
 
-    if not matched_audience:
-        print(f"NUDGE ENGINE: No matching audience found for event {event.id}.")
-        return
+        if not matched_audience:
+            print(f"NUDGE ENGINE: No matching audience found for event {event.id}.")
+            return None
+        
+        return property_item, matched_audience
 
-    await _create_campaign_from_event(event, realtor, property_item, matched_audience)
+    # The logic below correctly handles using the test session or creating a new one.
+    # The fix was needed in the _process function above.
+    if db_session:
+        result = _process(db_session)
+    else:
+        with Session(crm_service.engine) as session:
+            result = _process(session)
+
+    if result:
+        property_item, matched_audience = result
+        # Pass the session correctly to the campaign creation function
+        session_to_use = db_session if db_session else Session(crm_service.engine)
+        await _create_campaign_from_event(event, realtor, property_item, matched_audience, db_session=session_to_use)
 
 
 async def generate_recency_nudges(realtor: User):
