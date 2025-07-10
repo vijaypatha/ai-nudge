@@ -1,6 +1,7 @@
 // frontend/context/AppContext.tsx
 // DEFINITIVE FIX: Centralizes post-login redirect logic to fix the new user
 // onboarding flow by inspecting the user's `onboarding_complete` status.
+// ADDED: Exposes the auth token to be used by child components.
 
 'use client';
 
@@ -39,6 +40,8 @@ interface AppContextType {
   loading: boolean;
   isAuthenticated: boolean;
   user: User | null;
+  // --- ADDED: Expose the raw auth token ---
+  token: string | null;
   clients: Client[];
   properties: Property[];
   conversations: Conversation[];
@@ -208,6 +211,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     loading,
     isAuthenticated,
     user,
+    // --- ADDED: Expose token ---
+    token: tokenRef.current,
     clients,
     properties,
     conversations,

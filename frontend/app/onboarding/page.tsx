@@ -1,6 +1,6 @@
 // frontend/app/onboarding/page.tsx
-// DEFINITIVE IMPLEMENTATION V9: Restores the Google Contact Import functionality
-// by adding the onClick handler and API call.
+// DEFINITIVE IMPLEMENTATION V10: Fixes Google Contact Import by passing the
+// auth token as the 'state' parameter, ensuring session persistence.
 'use client';
 
 import { useState, useEffect, FC, Dispatch, SetStateAction } from 'react';
@@ -95,7 +95,8 @@ const Step1RoleSelection: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({
 
 // --- Step 2: Contact Import ---
 const Step2ContactImport: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({ setStep }) => {
-    const { api } = useAppContext();
+    // --- MODIFIED: Get api and token from context ---
+    const { api, token } = useAppContext();
     const [manualContact, setManualContact] = useState({ name: '', email: '', phone: '' });
     const [isLoading, setIsLoading] = useState(false);
     const [contactAdded, setContactAdded] = useState(false);
@@ -117,13 +118,22 @@ const Step2ContactImport: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({
         }
     };
 
-    // --- FIX: Restored Google Import Functionality ---
+    // --- FIX: Restored and corrected Google Import Functionality ---
     const handleGoogleImport = async () => {
         setIsLoading(true);
         setError(null);
+        
+        // Ensure the token exists before proceeding.
+        if (!token) {
+            setError("Authentication token not found. Please log in again.");
+            setIsLoading(false);
+            return;
+        }
+
         try {
-            // This endpoint should return { auth_url: "..." }
-            const response = await api.get('/api/auth/google-oauth-url');
+            // Pass the user's auth token as the 'state' parameter.
+            // The backend will pass this to Google, and Google will return it to our callback URL.
+            const response = await api.get(`/api/auth/google-oauth-url?state=${token}`);
             if (response.auth_url) {
                 // Redirect the user to Google's authentication page
                 window.location.href = response.auth_url;
@@ -142,7 +152,6 @@ const Step2ContactImport: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({
             <p className="text-center text-gray-400 mb-8">Import contacts to let your AI co-pilot find opportunities.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                 <div className="flex flex-col space-y-4">
-                    {/* --- FIX: Added onClick handler back to the Google button --- */}
                     <button onClick={handleGoogleImport} disabled={isLoading} className="flex-1 p-6 text-left border-2 rounded-xl transition-all duration-300 flex flex-col items-center justify-center gap-3 bg-white/5 hover:border-cyan-400/50 border-transparent hover:scale-105 disabled:opacity-50">
                         <Bot className="w-10 h-10 text-cyan-400" />
                         <div>

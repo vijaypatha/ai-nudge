@@ -1,11 +1,12 @@
 // frontend/app/auth/callback/google/page.tsx
-// DEFINITIVE FIX: This version resolves the build error by using the correct
-// api.post method to call the backend, instead of the non-existent
-// handleGoogleCallback function.
+// --- DEFINITIVE FIX V2 ---
+// 1. Added a `useRef` flag (hasProcessedCode) to the `useEffect` hook.
+// 2. This prevents the component from making multiple POST requests to the
+//    backend with the same one-time-use code, fixing the "invalid_grant" error.
 
 "use client";
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, Suspense, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
 import { Loader2 } from 'lucide-react';
@@ -17,6 +18,9 @@ function GoogleCallback() {
   
   const [status, setStatus] = useState("Finalizing authentication...");
   const [error, setError] = useState<string | null>(null);
+
+  // --- ADDED: useRef flag to prevent duplicate API calls ---
+  const hasProcessedCode = useRef(false);
 
   useEffect(() => {
     const code = searchParams.get('code');
@@ -37,15 +41,16 @@ function GoogleCallback() {
                 setStatus("Error");
             }
         });
-        return; // Wait for re-render
+        return; // Wait for re-render after session is restored
     }
 
-    if (isAuthenticated && code) {
+    // --- MODIFIED: Added check for hasProcessedCode.current ---
+    if (isAuthenticated && code && !hasProcessedCode.current) {
+      // Set the flag to true immediately to prevent re-entry
+      hasProcessedCode.current = true;
+      
       setStatus("Session verified. Processing Google sign-in...");
       
-      // --- CORRECTED ---
-      // Changed from api.handleGoogleCallback(code) to the correct API call.
-      // We now POST the code to the backend endpoint defined in auth.py.
       api.post('/api/auth/google-callback', { code })
         .then(result => {
           setStatus("Import successful! Redirecting...");

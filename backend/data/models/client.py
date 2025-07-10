@@ -1,7 +1,7 @@
 # File Path: backend/data/models/client.py
-# --- DEFINITIVE FIX V3 for Dynamic Tagging ---
-# 1. Removed the 'alias' from 'ai_tags' that was causing JSON serialization conflicts.
-# 2. Standardized the 'ClientTagUpdate' model to use 'user_tags' for clarity and consistency.
+# --- DEFINITIVE FIX V4 ---
+# 1. Made the 'email' field optional (nullable) to allow importing contacts
+#    that only have a phone number, preventing database errors.
 
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -15,12 +15,12 @@ class Client(SQLModel, table=True):
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id", index=True)
     full_name: str
-    email: str = Field(unique=True, index=True)
+    
+    # --- MODIFIED: email is now optional ---
+    # The unique constraint only applies to non-NULL values, which is correct.
+    email: Optional[str] = Field(default=None, unique=True, index=True)
     phone: Optional[str] = Field(default=None, index=True)
     
-    # --- DYNAMIC TAGGING FIX ---
-    # REMOVED: `alias="tags"` which caused the serialization error.
-    # The frontend will now correctly receive both `ai_tags` and `user_tags`.
     ai_tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     user_tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     
@@ -49,6 +49,6 @@ class ClientUpdate(SQLModel):
 
 class ClientTagUpdate(SQLModel):
     """
-    (CORRECTED) The key is now 'user_tags' to match the frontend request.
+    The key is 'user_tags' to match the frontend request.
     """
     user_tags: List[str]
