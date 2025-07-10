@@ -1,9 +1,7 @@
-# ---
-# File Path: backend/agent_core/orchestrator.py
-# Purpose: The central AI orchestrator that coordinates agents and tools.
-# DEFINITIVE FIX: The `orchestrate_send_message_now` function is updated to
-# intelligently extract the client's first name for a more personal touch.
-# ---
+# backend/agent_core/orchestrator.py
+# DEFINITIVE FIX: The orchestrator now retrieves the user's specific
+# Twilio number and passes it to the `send_sms` function, ensuring
+# messages are sent from the correct, user-specific number.
 
 from typing import Dict, Any
 import uuid
@@ -32,7 +30,6 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message_content
 
     client_context = {"client_name": client.full_name, "client_tags": client.user_tags + client.ai_tags}
 
-    # Task 1: Generate a standard reply draft
     ai_response_draft = await conversation_agent.generate_response(
         client_id=client_id,
         incoming_message_content=incoming_message_content,
@@ -40,7 +37,6 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message_content
     )
     logging.info("ORCHESTRATOR: AI Conversation Agent generated reply draft.")
 
-    # Task 2: Analyze the message for new intel
     found_intel = await client_insights.extract_intel_from_message(incoming_message_content)
     
     if found_intel:
@@ -60,26 +56,33 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message_content
 
 async def orchestrate_send_message_now(client_id: uuid.UUID, content: str, user_id: uuid.UUID) -> bool:
     """
-    Orchestrates sending a single, immediate message. It personalizes the content
-    by replacing placeholders and updates the client's last_interaction timestamp.
+    Orchestrates sending a single, immediate message from the user's specific
+    Twilio number.
     """
     logging.info(f"ORCHESTRATOR: Orchestrating immediate send for client {client_id} for user {user_id}")
     
+    # --- MODIFIED: Fetch user to get their specific Twilio number ---
+    user = crm_service.get_user_by_id(user_id)
     client = crm_service.get_client_by_id(client_id, user_id=user_id)
+    
+    if not user or not user.twilio_phone_number:
+        logging.error(f"ORCHESTRATOR ERROR: User {user_id} not found or has no Twilio number assigned.")
+        return False
+        
     if not client or not client.phone:
         logging.error(f"ORCHESTRATOR ERROR: Client {client_id} not found for user {user_id} or has no phone number.")
         return False
     
-    # --- ADDED: First Name Extraction Logic ---
-    # Split the full name by spaces and take the first part for a personal touch.
     first_name = client.full_name.strip().split(' ')[0]
-    
-    # --- MODIFIED: Personalization now uses the extracted first name ---
     personalized_content = content.replace("[Client Name]", first_name)
     logging.info(f"ORCHESTRATOR: Personalized message for {first_name} (from {client.full_name}).")
     
-    # Send the personalized message via Twilio
-    was_sent = twilio_outgoing.send_sms(to_number=client.phone, body=personalized_content)
+    # --- MODIFIED: Pass the user's Twilio number as the 'from_number' ---
+    was_sent = twilio_outgoing.send_sms(
+        from_number=user.twilio_phone_number,
+        to_number=client.phone,
+        body=personalized_content
+    )
     
     if was_sent:
         crm_service.update_last_interaction(client_id, user_id=user_id)

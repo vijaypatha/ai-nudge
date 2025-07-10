@@ -86,7 +86,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         const optimisticMessage: Message = { id: `agent-${Date.now()}`, client_id: selectedClient.id, content, direction: 'outbound', status: 'pending', created_at: new Date().toISOString() };
         setCurrentMessages(prev => [...prev, optimisticMessage]);
         try {
-            await api.post(`/conversations/${selectedClient.id}/send_reply`, { content });
+            await api.post(`/api/conversations/${selectedClient.id}/send_reply`, { content });
             const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
             setCurrentMessages(historyData);
         } catch (err) {

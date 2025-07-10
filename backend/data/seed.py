@@ -55,6 +55,7 @@ async def seed_database():
             full_name="Jane Doe",
             email="jane.doe@realty.com",
             phone_number="+15558675309",
+            twilio_phone_number="+14352721987",
             market_focus=["Sunnyvale", "Mountain View"]
         )
 
@@ -71,7 +72,7 @@ async def seed_database():
         clients_data = [
             Client(id=CLIENT_ID_ALEX, user_id=USER_ID_JANE, full_name="Alex Chen (Demo)", email="alex.chen@example.com", phone="+14155551234", user_tags=["investor"], ai_tags=["past_client"], last_interaction=(datetime.now(timezone.utc) - timedelta(days=10)).isoformat(), preferences={"notes": ["Prefers properties with high ROI."], "source": "demo", "locations": ["Sunnyvale"], "budget_max": 2000000, "min_bedrooms": 3}),
             Client(id=CLIENT_ID_SAM, user_id=USER_ID_JANE, full_name="Samantha Miller (Demo)", email="samantha.miller@example.com", phone="+16505555678", user_tags=["first_time_buyer"], ai_tags=[], last_interaction=(datetime.now(timezone.utc) - timedelta(days=45)).isoformat(), preferences={"notes": ["Really wants a large yard for her dog. Loves Yoga", "birthday October 30"], "source": "demo", "min_bedrooms": 3}),
-            Client(id=CLIENT_ID_BEN, user_id=USER_ID_JANE, full_name="Ben Carter (Demo)", email="ben.carter@example.com", phone=None, user_tags=[], ai_tags=[], last_interaction=None, preferences={"notes": ["Wants to buy in the next 12 months."], "source": "demo"})
+            Client(id=CLIENT_ID_BEN, user_id=USER_ID_JANE, full_name="Ben Carter (Demo)", email="ben.carter@example.com", phone=+13856268825, user_tags=[], ai_tags=[], last_interaction=None, preferences={"notes": ["Wants to buy in the next 12 months."], "source": "demo"})
         ]
 
         session.add(realtor_user)

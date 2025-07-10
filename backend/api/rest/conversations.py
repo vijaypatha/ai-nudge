@@ -6,7 +6,7 @@ from typing import List, Optional
 import uuid
 from data.models.user import User
 from api.security import get_current_user_from_token
-from data.models.message import Message
+from data.models.message import Message, MessageDirection, MessageStatus
 from pydantic import BaseModel
 from data import crm as crm_service
 from agent_core import orchestrator
@@ -46,16 +46,16 @@ async def get_conversation_history_by_client_id(
         if not client_id:
             # Return all messages for user if no client_id specified
             return crm_service.get_all_messages_for_user(user_id=current_user.id)
-        
+
         # Verify client exists and belongs to user
         client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
         if not client:
             raise HTTPException(status_code=404, detail="Client not found.")
-        
+
         # Get message history for specific client
         history = crm_service.get_conversation_history(client_id=client_id, user_id=current_user.id)
         return history if history else []
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -74,21 +74,30 @@ async def send_reply(
         client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
         if not client:
             raise HTTPException(status_code=404, detail="Client not found.")
-        
+
         # Send message via orchestrator
         was_sent = await orchestrator.orchestrate_send_message_now(
             client_id=client_id,
             content=payload.content,
             user_id=current_user.id
         )
-        
+
         if not was_sent:
             raise HTTPException(status_code=500, detail="Failed to send message.")
-        
-        # Return the newly created message
-        new_message = crm_service.get_last_message_for_client(client_id, current_user.id)
+
+        # --- ADDED: Save the outbound message to the database ---
+        new_message = Message(
+            client_id=client_id,
+            user_id=current_user.id,
+            content=payload.content,
+            direction=MessageDirection.OUTBOUND,
+            status=MessageStatus.SENT  # Mark as sent since Twilio confirmed it
+        )
+        crm_service.save_message(new_message)  # Save the message
+
+        # Return the newly saved message
         return new_message
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -107,9 +116,9 @@ async def get_scheduled_messages(
             client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
             if not client:
                 raise HTTPException(status_code=404, detail="Client not found.")
-            
+
             return crm_service.get_scheduled_messages_for_client(
-                client_id=client_id, 
+                client_id=client_id,
                 user_id=current_user.id
             )
         else:
