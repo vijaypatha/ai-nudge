@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     TWILIO_PHONE_NUMBER: str
     TWILIO_DEFAULT_MESSAGING_SERVICE_SID: str
     TWILIO_SUPPORT_MESSAGING_SERVICE_SID: Optional[str] = None
+    TWILIO_VERIFY_SERVICE_SID: str
 
     # Database
     DATABASE_URL: str

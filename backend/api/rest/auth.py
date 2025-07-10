@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 
 from data import crm as crm_service
-from integrations import twilio
+from integrations import twilio_otp as twilio
 from api.security import settings, get_current_user_from_token
 from data.models.user import User
 from data.models.client import ClientCreate
