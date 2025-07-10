@@ -1,7 +1,10 @@
-# File Path: backend/api/rest/twilio_numbers.py
-# Purpose: Provides API endpoints for searching and assigning Twilio phone numbers.
+# backend/api/rest/twilio_numbers.py
+# DEFINITIVE FIX: Adds a check for the development environment to simulate
+# the Twilio number purchase, preventing real charges during testing.
 
 import logging
+import os  # Import the 'os' module
+from types import SimpleNamespace  # Import SimpleNamespace for mocking
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from pydantic import BaseModel
@@ -56,8 +59,8 @@ def search_available_numbers(
     search_params = {
         "sms_enabled": True,
         "mms_enabled": True,
-        "voice_enabled": False, # Assuming we only need SMS/MMS
     }
+    
     if area_code:
         search_params["area_code"] = area_code
     if zip_code:
@@ -88,23 +91,29 @@ def assign_phone_number(
 ):
     """
     Assigns a new Twilio phone number to the user's account.
+    In development mode, this simulates the purchase to avoid charges.
     """
     if not twilio_client:
         raise HTTPException(status_code=503, detail="Twilio service is not available.")
 
     try:
-        logger.info(f"Assigning number {payload.phone_number} to user {current_user.id}")
+        logger.info(f"Attempting to assign number {payload.phone_number} to user {current_user.id}")
         
-        # This step "purchases" the number and adds it to your Twilio account.
-        incoming_phone_number = twilio_client.incoming_phone_numbers.create(
-            phone_number=payload.phone_number
-        )
+        # --- MODIFIED: Added check for development environment ---
+        if os.getenv("ENVIRONMENT") == "development":
+            logger.warning("DEVELOPMENT MODE: Simulating Twilio number purchase. No real purchase will be made.")
+            # Create a mock object that mimics the real Twilio response object.
+            # The only attribute we use from it is .phone_number.
+            incoming_phone_number = SimpleNamespace(phone_number=payload.phone_number)
+        else:
+            # This is the original logic that runs in production
+            incoming_phone_number = twilio_client.incoming_phone_numbers.create(
+                phone_number=payload.phone_number
+            )
         
-        # Update the user's profile with their new Twilio number.
-        # NOTE: This assumes you have a 'twilio_phone_number' field on your User model.
-        # If not, you must add it to backend/data/models/user.py
+        # The rest of the function proceeds as normal, using the real or mock object
         update_data = UserUpdate(twilio_phone_number=incoming_phone_number.phone_number)
-        updated_user = crm_service.update_user(user_id=current_user.id, user_data=update_data)
+        updated_user = crm_service.update_user(user_id=current_user.id, update_data=update_data)
         
         logger.info(f"Successfully assigned {updated_user.twilio_phone_number} to user {current_user.id}")
         return updated_user
@@ -115,4 +124,3 @@ def assign_phone_number(
     except Exception as e:
         logger.error(f"Unexpected error during number assignment: {e}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred during assignment.")
-

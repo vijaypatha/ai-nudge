@@ -1,8 +1,8 @@
 // frontend/app/auth/callback/google/page.tsx
-// --- DEFINITIVE FIX V2 ---
-// 1. Added a `useRef` flag (hasProcessedCode) to the `useEffect` hook.
-// 2. This prevents the component from making multiple POST requests to the
-//    backend with the same one-time-use code, fixing the "invalid_grant" error.
+// --- DEFINITIVE FIX V3 ---
+// 1. Calls refreshUser() after a successful import to prevent stale state.
+// 2. Redirects to '/onboarding' instead of '/community' to continue the flow.
+// 3. Adds '?import_success=true' to the URL to trigger a celebration message.
 
 "use client";
 
@@ -12,14 +12,14 @@ import { useAppContext } from '@/context/AppContext';
 import { Loader2 } from 'lucide-react';
 
 function GoogleCallback() {
-  const { api, loginAndRedirect, isAuthenticated } = useAppContext();
+  // --- MODIFIED: Added refreshUser ---
+  const { api, loginAndRedirect, isAuthenticated, refreshUser } = useAppContext();
   const searchParams = useSearchParams();
   const router = useRouter();
   
   const [status, setStatus] = useState("Finalizing authentication...");
   const [error, setError] = useState<string | null>(null);
 
-  // --- ADDED: useRef flag to prevent duplicate API calls ---
   const hasProcessedCode = useRef(false);
 
   useEffect(() => {
@@ -44,19 +44,21 @@ function GoogleCallback() {
         return; // Wait for re-render after session is restored
     }
 
-    // --- MODIFIED: Added check for hasProcessedCode.current ---
     if (isAuthenticated && code && !hasProcessedCode.current) {
-      // Set the flag to true immediately to prevent re-entry
       hasProcessedCode.current = true;
-      
-      setStatus("Session verified. Processing Google sign-in...");
+      setStatus("Session verified. Importing your contacts...");
       
       api.post('/api/auth/google-callback', { code })
+        // --- MODIFIED: Chained promises to refresh user state before redirecting ---
         .then(result => {
+          setStatus("Finalizing import...");
+          // Step 1: Refresh the user object in the context
+          return refreshUser();
+        })
+        .then(() => {
+          // Step 2: Now that user state is fresh, redirect back to onboarding
           setStatus("Import successful! Redirecting...");
-          const { imported_count, merged_count } = result;
-          // Redirect to the community page with query params for the celebration view.
-          router.push(`/community?imported=${imported_count}&merged=${merged_count}`);
+          router.push('/onboarding?import_success=true');
         })
         .catch(err => {
           console.error("Backend callback handler failed:", err);
@@ -66,7 +68,8 @@ function GoogleCallback() {
         });
     }
 
-  }, [isAuthenticated, api, loginAndRedirect, router, searchParams]);
+  // --- MODIFIED: Added refreshUser to dependency array ---
+  }, [isAuthenticated, api, loginAndRedirect, router, searchParams, refreshUser]);
 
   return (
     <div className="flex h-screen w-full flex-col items-center justify-center bg-gray-900 text-white">
@@ -89,6 +92,7 @@ function GoogleCallback() {
   );
 }
 
+// --- MODIFIED: Wrapped in Suspense because useSearchParams requires it ---
 export default function GoogleCallbackPage() {
     return (
         <Suspense>

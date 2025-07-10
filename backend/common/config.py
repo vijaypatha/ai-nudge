@@ -1,7 +1,8 @@
-# ---
-# File Path: backend/common/config.py
-# Purpose: Loads and manages all environment variables for the application using Pydantic.
-# ---
+# backend/common/config.py
+# --- DEFINITIVE FIX ---
+# Adds the 'ENVIRONMENT' field to the Settings model. This tells Pydantic
+# that this environment variable is expected, resolving the ValidationError
+# on startup. A safe default of "production" is included.
 
 from pydantic_settings import BaseSettings
 from functools import lru_cache
@@ -32,7 +33,9 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # --- ADDED: The missing ENVIRONMENT variable ---
     # Application
+    ENVIRONMENT: str = "production" # Defaults to production for safety
     FRONTEND_APP_URL: str = "http://localhost:3000"
     SECRET_KEY: str
 
@@ -45,10 +48,6 @@ class Settings(BaseSettings):
     # --- Live RESO API Credentials ---
     RESO_API_BASE_URL: str
     RESO_API_TOKEN: str
-
-    # --- DEFINITIVE FIX: Added OAuth Credentials ---
-    # These fields are now defined, which will resolve the Pydantic validation error
-    # and allow the backend service to start correctly.
     
     # Google OAuth for Contact Import
     GOOGLE_CLIENT_ID: str

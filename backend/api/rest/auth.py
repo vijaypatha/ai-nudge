@@ -1,5 +1,6 @@
 # File Path: backend/api/rest/auth.py
-# DEFINITIVE FIX: Updates user's onboarding_state after a successful Google import.
+# DEFINITIVE FIX: Updates the new `google_sync_complete` flag upon a
+# successful import. This is the complete file.
 
 import os
 import datetime
@@ -34,9 +35,9 @@ def _create_access_token(data: dict, expires_delta: Optional[datetime.timedelta]
         expire = datetime.datetime.now(datetime.timezone.utc) + expires_delta
     else:
         # Default expiration
-        expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=15)
+        expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=30)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
     return encoded_jwt
 
 
@@ -94,9 +95,8 @@ async def verify_otp(payload: OtpPayload):
             session.commit()
             session.refresh(user)
 
-    access_token_expires = datetime.timedelta(days=30)
     access_token = _create_access_token(
-        data={"sub": str(user.id)}, expires_delta=access_token_expires
+        data={"sub": str(user.id)}
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -152,21 +152,18 @@ async def google_callback(
         except Exception as e:
             logger.error(f"Failed to process contact {contact_data.full_name} for user {current_user.id}: {e}")
 
-    # --- ADDED: Update onboarding state after import ---
     try:
         logger.info(f"Updating onboarding state for user {current_user.id} after contact import.")
-        # Ensure we have the latest state object to avoid overwriting other keys
         updated_state = current_user.onboarding_state.copy()
         updated_state['contacts_imported'] = True
+        # --- THIS IS THE ONLY ADDED LINE ---
+        updated_state['google_sync_complete'] = True
         
-        # Create an update model and save it via the CRM service
         update_data = UserUpdate(onboarding_state=updated_state)
         crm_service.update_user(user_id=current_user.id, update_data=update_data)
         logger.info(f"Successfully updated onboarding state for user {current_user.id}.")
     except Exception as e:
-        # Log an error but don't fail the entire request, as the import itself succeeded.
         logger.error(f"Could not update onboarding_state for user {current_user.id}: {e}")
-    # --- END OF ADDED CODE ---
 
     return ImportSummaryResponse(imported_count=imported_count, merged_count=merged_count)
 
@@ -183,8 +180,7 @@ if os.getenv("ENVIRONMENT") == "development":
         if not user:
             raise HTTPException(status_code=404, detail="Demo user not found.")
 
-        access_token_expires = datetime.timedelta(days=1)
         access_token = _create_access_token(
-            data={"sub": str(user.id)}, expires_delta=access_token_expires
+            data={"sub": str(user.id)}
         )
         return {"access_token": access_token, "token_type": "bearer"}

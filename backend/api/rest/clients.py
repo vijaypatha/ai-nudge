@@ -1,10 +1,13 @@
 # File Path: backend/api/rest/clients.py
+# --- DEFINITIVE FIX: Manual client add now updates onboarding state ---
+
+import logging
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel
 
-from data.models.user import User
+from data.models.user import User, UserUpdate
 from api.security import get_current_user_from_token
 
 from data.models.client import Client, ClientCreate, ClientUpdate, ClientTagUpdate
@@ -18,24 +21,35 @@ class ClientSearchQuery(BaseModel):
     natural_language_query: Optional[str] = None
     tags: Optional[List[str]] = None
 
-# --- DEFINITIVE FIX: ADDED MANUAL CLIENT ENDPOINT ---
-# This was the missing piece. This endpoint now exists to handle the POST
-# request from your manual entry form.
 @router.post("/manual", response_model=Client)
 async def add_manual_client(
     client_data: ClientCreate,
     current_user: User = Depends(get_current_user_from_token)
 ):
     """
-    Creates a single new client or updates an existing one based on deduplication.
+    Creates a single new client and updates the user's onboarding state.
     """
     client, _ = crm_service.create_or_update_client(
         user_id=current_user.id, 
         client_data=client_data
     )
+    
+    # --- ADDED: Update onboarding state after manual add ---
+    try:
+        if not current_user.onboarding_state.get('contacts_imported'):
+            logging.info(f"Updating onboarding state for user {current_user.id} after manual contact add.")
+            updated_state = current_user.onboarding_state.copy()
+            updated_state['contacts_imported'] = True
+            
+            update_data = UserUpdate(onboarding_state=updated_state)
+            crm_service.update_user(user_id=current_user.id, update_data=update_data)
+            logging.info(f"Successfully updated onboarding state for user {current_user.id}.")
+    except Exception as e:
+        # Log an error but don't fail the request, as the client was still added.
+        logging.error(f"Could not update onboarding_state for user {current_user.id} after manual add: {e}")
+    # --- END OF ADDED CODE ---
+    
     return client
-# --- END OF FIX ---
-
 
 @router.post("/search", response_model=List[Client])
 async def search_clients(query: ClientSearchQuery, current_user: User = Depends(get_current_user_from_token)):
