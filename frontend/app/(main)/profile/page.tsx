@@ -1,11 +1,8 @@
 // frontend/app/(main)/profile/page.tsx
-// DEFINITIVE FIX: Replaces the root div with a <main> element and applies
-// correct flexbox and overflow classes to enable vertical scrolling.
-
 "use client";
 
 import { useState, useEffect, ChangeEvent, FC } from "react";
-import { Trash2, Edit3, Save, XCircle, Loader2, User, Briefcase, Bot } from 'lucide-react';
+import { Trash2, Edit3, Save, XCircle, Loader2, User, Briefcase, Bot, LogOut } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { useAppContext } from '@/context/AppContext';
 
@@ -109,7 +106,7 @@ const FaqCard: FC<{
 
 // --- MAIN PAGE COMPONENT ---
 export default function ProfilePage() {
-    const { api, loading: isContextLoading } = useAppContext();
+    const { api, loading: isContextLoading, logout } = useAppContext();
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [faqs, setFaqs] = useState<FaqItem[]>([]);
     const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -228,18 +225,21 @@ export default function ProfilePage() {
     if (error && !profile) return <div className="p-8 text-center text-red-400 bg-gray-900">{error}</div>;
     if (!profile) return null;
 
-    // --- MODIFIED: The root element is now a <main> tag with overflow classes ---
     return (
         <main className="flex-1 overflow-y-auto bg-gray-900 text-white p-6 md:p-8 lg:p-12">
             <div className="max-w-4xl mx-auto space-y-12">
                 <div className="bg-gray-800/40 rounded-xl border border-white/10 p-8">
                     <div className="flex justify-between items-center mb-6">
                         <h1 className="text-2xl font-bold text-white flex items-center gap-3"><User /> My Profile</h1>
-                        <button onClick={isEditingProfile ? handleProfileSave : () => setIsEditingProfile(true)} disabled={isSaving} className="btn-primary px-4 py-2 text-sm font-semibold flex items-center gap-2">
-                            {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving...</> : (isEditingProfile ? <><Save size={16}/>Save Profile</> : <><Edit3 size={16}/>Edit Profile</>)}
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button onClick={logout} className="px-4 py-2 text-sm font-semibold flex items-center gap-2 bg-gray-700/50 hover:bg-gray-700 rounded-md">
+                               <LogOut size={16}/> Logout
+                            </button>
+                            <button onClick={isEditingProfile ? handleProfileSave : () => setIsEditingProfile(true)} disabled={isSaving} className="btn-primary px-4 py-2 text-sm font-semibold flex items-center gap-2">
+                                {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving...</> : (isEditingProfile ? <><Save size={16}/>Save Profile</> : <><Edit3 size={16}/>Edit Profile</>)}
+                            </button>
+                        </div>
                     </div>
-                    {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
                     <div className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-1"><label className="text-sm font-medium text-gray-400">Full Name</label><input name="full_name" value={profile.full_name || ''} onChange={handleProfileChange} disabled={!isEditingProfile} className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white disabled:opacity-50" /></div>

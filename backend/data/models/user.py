@@ -52,6 +52,8 @@ class User(SQLModel, table=True):
     license_number: Optional[str] = Field(default=None)
     specialties: Optional[List[str]] = Field(default_factory=list, sa_column=Column(JSON))
     faq_auto_responder_enabled: bool = Field(default=True)
+    twilio_phone_number: Optional[str] = Field(default=None, index=True) # Add this line
+
     
     # --- Relationships ---
     campaigns: List["CampaignBriefing"] = Relationship(back_populates="user")
@@ -79,3 +81,5 @@ class UserUpdate(SQLModel):
     license_number: Optional[str] = None
     specialties: Optional[List[str]] = None
     faq_auto_responder_enabled: Optional[bool] = None
+    twilio_phone_number: Optional[str] = None # Add this line
+

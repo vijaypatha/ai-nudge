@@ -1,6 +1,6 @@
 // frontend/context/AppContext.tsx
-// DEFINITIVE FIX: Adds the new onboarding fields to the frontend User interface
-// to match the updated backend model.
+// DEFINITIVE FIX: Centralizes post-login redirect logic to fix the new user
+// onboarding flow by inspecting the user's `onboarding_complete` status.
 
 'use client';
 
@@ -50,12 +50,14 @@ interface AppContextType {
     put: (endpoint: string, body: any) => Promise<any>;
     del: (endpoint: string) => Promise<any>;
   };
-  login: (token: string) => Promise<boolean>;
+  // MODIFIED: The login function now returns the User object or null.
+  login: (token: string) => Promise<User | null>;
   loginAndRedirect: (token: string) => Promise<boolean>;
   fetchDashboardData: () => Promise<void>;
   updateClientInList: (updatedClient: Client) => void;
   refetchScheduledMessagesForClient: (clientId: string) => Promise<ScheduledMessage[]>;
-  refreshUser: () => Promise<void>; // Added function to refresh user data
+  refreshUser: () => Promise<void>;
+  
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -117,28 +119,41 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [api, logout]);
 
-  const login = useCallback(async (newToken: string): Promise<boolean> => {
+  // --- MODIFIED FUNCTION ---
+  // The login function now fetches user data, sets state, and returns the
+  // user object on success or null on failure.
+  const login = useCallback(async (newToken: string): Promise<User | null> => {
     Cookies.set('auth_token', newToken, { expires: 7, path: '/' });
     tokenRef.current = newToken;
     try {
-      const userData = await api().get('/api/users/me');
+      const userData: User = await api().get('/api/users/me');
       setUser(userData);
       setIsAuthenticated(true);
-      return true;
+      return userData; // Return the user data on success
     } catch (error) {
       console.error("Authentication failed:", error);
       logout();
-      return false;
+      return null; // Return null on failure
     }
   }, [api, logout]);
 
+  // --- MODIFIED FUNCTION ---
+  // This function now uses the return value from `login` to decide where to
+  // redirect the user, ensuring the correct initial navigation path.
   const loginAndRedirect = async (token: string): Promise<boolean> => {
-      const success = await login(token);
-      if (success) {
-          // The AuthGuard will handle the redirect logic based on onboarding status
-          router.push('/community'); 
+      const loggedInUser = await login(token);
+
+      if (loggedInUser) {
+          if (loggedInUser.onboarding_complete) {
+              router.push('/community');
+          } else {
+              router.push('/onboarding');
+          }
+          return true;
       }
-      return success;
+      
+      // If login fails, the login() function handles the logout/redirect.
+      return false;
   };
 
   const fetchDashboardData = useCallback(async () => {
@@ -167,12 +182,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true);
       const savedToken = Cookies.get('auth_token');
       if (savedToken) {
+        // We only log in here to restore the session. No redirect is needed
+        // as the AuthGuard will handle routing on initial page load.
         await login(savedToken);
       }
       setLoading(false);
     };
     checkUserSession();
-  }, [login]);
+  }, [login]); // The dependency on `login` is now safe.
 
   const updateClientInList = (updatedClient: Client) => {
     setClients(prevClients => prevClients.map(c => c.id === updatedClient.id ? updatedClient : c));

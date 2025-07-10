@@ -1,7 +1,4 @@
 // frontend/app/auth/login/login-form.tsx
-// DEFINITIVE FIX: This is the full 178-line file, updated to use the
-// robust `loginAndRedirect` function from the context.
-
 "use client";
 
 import { useState, useEffect, useRef, ChangeEvent, KeyboardEvent, ClipboardEvent } from 'react';
@@ -98,8 +95,7 @@ export default function LoginForm() {
         }
     };
 
-    const handlePhoneSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const handlePhoneSubmit = async () => {
         setError('');
         setIsLoading(true);
         const cleanedNumber = phoneNumber.replace(/\D/g, '');
@@ -115,8 +111,7 @@ export default function LoginForm() {
         }
     };
 
-    const handleOtpSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const handleOtpSubmit = async () => {
         setError('');
         setIsLoading(true);
         try {
@@ -151,9 +146,19 @@ export default function LoginForm() {
                       <p className="text-gray-400 mt-2">{step === 'phone' ? 'Enter your 10-digit phone number.' : `Enter the code we sent to ${fullPhoneNumber}.`}</p>
                   </div>
                   {step === 'phone' ? (
-                    <form onSubmit={handlePhoneSubmit} className="space-y-6"><MultiBoxInput length={10} onChange={setPhoneNumber} /><button type="submit" disabled={isLoading || phoneNumber.length < 10} className="w-full btn-primary text-lg py-3">{isLoading ? 'Sending...' : 'Continue'}</button></form>
+                    <div key="phone-step" className="space-y-6">
+                        <MultiBoxInput length={10} onChange={setPhoneNumber} />
+                        <button type="button" onClick={handlePhoneSubmit} disabled={isLoading || phoneNumber.length < 10} className="w-full btn-primary text-lg py-3">
+                            {isLoading ? 'Sending...' : 'Continue'}
+                        </button>
+                    </div>
                   ) : (
-                    <form onSubmit={handleOtpSubmit} className="space-y-6"><MultiBoxInput length={6} onChange={setOtp} /><button type="submit" disabled={isLoading || otp.length < 6} className="w-full btn-primary text-lg py-3">{isLoading ? 'Verifying...' : 'Continue'}</button></form>
+                    <div key="otp-step" className="space-y-6">
+                        <MultiBoxInput length={6} onChange={setOtp} />
+                        <button type="button" onClick={handleOtpSubmit} disabled={isLoading || otp.length < 6} className="w-full btn-primary text-lg py-3">
+                            {isLoading ? 'Verifying...' : 'Continue'}
+                        </button>
+                    </div>
                   )}
                   {error && <p className="text-sm text-center text-red-400 mt-4">{error}</p>}
                   {process.env.NODE_ENV === 'development' && (<div className="text-center mt-6"><button onClick={handleDevLogin} className="text-xs text-gray-500 hover:text-teal-400 flex items-center gap-2 mx-auto"><Bot size={14}/> Developer Login</button></div>)}

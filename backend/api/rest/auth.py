@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request # Import Request
 from pydantic import BaseModel
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from data import crm as crm_service
 from integrations import twilio_otp as twilio
@@ -74,14 +74,21 @@ async def verify_otp(payload: OtpPayload):
     if not is_valid:
         raise HTTPException(status_code=400, detail="Invalid OTP code.")
 
-    with crm_service.Session(crm_service.engine) as session:
-        user = crm_service.get_client_by_phone(payload.phone_number, user_id=None)
+    with Session(crm_service.engine) as session:
+        statement = select(User).where(User.phone_number == payload.phone_number)
+        user = session.exec(statement).first()
+
         if not user:
-            new_user = User(phone_number=payload.phone_number, full_name="New User")
-            session.add(new_user)
+            # --- DEFINITIVE FIX ---
+            # When creating a new user, explicitly set onboarding_complete to False.
+            user = User(
+                phone_number=payload.phone_number,
+                full_name="New User",
+                onboarding_complete=False 
+            )
+            session.add(user)
             session.commit()
-            session.refresh(new_user)
-            user = new_user
+            session.refresh(user)
 
     access_token_expires = datetime.timedelta(days=30)
     access_token = _create_access_token(
