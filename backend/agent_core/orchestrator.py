@@ -1,12 +1,11 @@
 # backend/agent_core/orchestrator.py
-# DEFINITIVE FIX: Manages database operations within a single, explicit
-# transaction to ensure data integrity and prevent silent failures.
+# MODIFIED: Accepts the pre-saved message object and removes the redundant save.
 
 from typing import Dict, Any
 import uuid
 import logging
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 from data.database import engine
 
 from agent_core.agents import conversation as conversation_agent
@@ -15,14 +14,15 @@ from integrations import twilio_outgoing
 from data import crm as crm_service
 from data.models.campaign import CampaignBriefing
 from data.models.user import User
-# --- ADDED: Import Message models for creating the incoming message log ---
+# --- MODIFIED: Message object is now passed in, not created here ---
 from data.models.message import Message, MessageDirection, MessageStatus
 
-async def handle_incoming_message(client_id: uuid.UUID, incoming_message_content: str, realtor: User) -> Dict[str, Any]:
+# --- MODIFIED: The function signature now accepts the full 'incoming_message' object ---
+async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Message, realtor: User) -> Dict[str, Any]:
     """
     Processes an incoming client message by generating a reply draft, analyzing
     for intel, and updating the client's last_interaction timestamp.
-    All database operations are wrapped in a single transaction.
+    The incoming message is assumed to be already saved to the database.
     """
     logging.info(f"ORCHESTRATOR: Handling incoming message from client {client_id} for user {realtor.id}...")
     
@@ -32,20 +32,9 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message_content
             logging.error(f"ORCHESTRATOR ERROR: Could not find client with ID {client_id} for user {realtor.id}. Aborting.")
             return {"error": "Client not found"}
         
-        # --- ADDED: First, create and save the inbound message to the universal log ---
-        # This gives us a parent_message_id to link the AI draft to.
-        incoming_message_obj = Message(
-            user_id=realtor.id,
-            client_id=client_id,
-            content=incoming_message_content,
-            direction=MessageDirection.INBOUND,
-            status=MessageStatus.RECEIVED
-        )
-        # Add to the session to get an ID assigned before commit
-        session.add(incoming_message_obj)
-        session.flush() # Flush to assign the ID to incoming_message_obj.id
-        logging.info(f"ORCHESTRATOR: Saved incoming message log with temp ID {incoming_message_obj.id}.")
-
+        # --- REMOVED: The message save operation is no longer needed here. ---
+        # It is now handled by the caller (twilio_incoming.py) for reliability.
+        
         # Perform other write operations using the managed session
         crm_service.update_last_interaction(client_id, user_id=realtor.id, session=session)
 
@@ -53,7 +42,8 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message_content
 
         ai_response_draft = await conversation_agent.generate_response(
             client_id=client_id,
-            incoming_message_content=incoming_message_content,
+            # Use the content from the passed-in message object
+            incoming_message_content=incoming_message.content,
             context=client_context
         )
         logging.info("ORCHESTRATOR: AI Conversation Agent generated reply draft.")
@@ -63,18 +53,18 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message_content
             draft_briefing = CampaignBriefing(
                 user_id=realtor.id,
                 client_id=client_id,
-                # --- MODIFIED: Link the draft to the incoming message we just saved ---
-                parent_message_id=incoming_message_obj.id,
+                # --- MODIFIED: Use the ID from the passed-in message object ---
+                parent_message_id=incoming_message.id,
                 campaign_type="ai_draft_response",
                 headline=f"AI Draft for {client.full_name}",
                 key_intel=ai_response_draft,
                 original_draft=draft_text,
                 matched_audience=[],
-                triggering_event_id=uuid.uuid4() # This can be a more specific ID if available
+                triggering_event_id=uuid.uuid4()
             )
             crm_service.save_campaign_briefing(draft_briefing, session=session)
 
-        found_intel = await client_insights.extract_intel_from_message(incoming_message_content)
+        found_intel = await client_insights.extract_intel_from_message(incoming_message.content)
         
         if found_intel:
             intel_text_for_draft = ""
@@ -99,7 +89,6 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message_content
         session.commit()
         logging.info(f"ORCHESTRATOR: Transaction committed successfully for client {client_id}.")
 
-    # The return value might need to be updated to pass the full draft object to a websocket later
     return { "ai_draft_response": ai_response_draft }
 
 async def orchestrate_send_message_now(client_id: uuid.UUID, content: str, user_id: uuid.UUID) -> bool:

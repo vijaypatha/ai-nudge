@@ -89,9 +89,8 @@ export default function ConversationPage({ params }: ConversationPageProps) {
             try {
                 // Single API call to get messages with their drafts
                 const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
-
+        
                 if (isMounted) {
-                    // Update messages only if they have actually changed
                     setCurrentMessages(prev => JSON.stringify(prev) !== JSON.stringify(historyData) ? historyData : prev);
                 }
             } catch (err) {
