@@ -1,5 +1,5 @@
 # backend/agent_core/orchestrator.py
-# MODIFIED: Accepts the pre-saved message object and removes the redundant save.
+# --- MODIFIED: Fetches recent conversation history and passes it to the conversation agent for context.
 
 from typing import Dict, Any
 import uuid
@@ -14,10 +14,8 @@ from integrations import twilio_outgoing
 from data import crm as crm_service
 from data.models.campaign import CampaignBriefing
 from data.models.user import User
-# --- MODIFIED: Message object is now passed in, not created here ---
 from data.models.message import Message, MessageDirection, MessageStatus
 
-# --- MODIFIED: The function signature now accepts the full 'incoming_message' object ---
 async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Message, realtor: User) -> Dict[str, Any]:
     """
     Processes an incoming client message by generating a reply draft, analyzing
@@ -32,19 +30,28 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
             logging.error(f"ORCHESTRATOR ERROR: Could not find client with ID {client_id} for user {realtor.id}. Aborting.")
             return {"error": "Client not found"}
         
-        # --- REMOVED: The message save operation is no longer needed here. ---
-        # It is now handled by the caller (twilio_incoming.py) for reliability.
-        
         # Perform other write operations using the managed session
         crm_service.update_last_interaction(client_id, user_id=realtor.id, session=session)
 
+        # --- MODIFICATION START: Fetch recent conversation history for context ---
+        # Call the new CRM function to get the last 10 messages. This provides
+        # the AI with memory of the recent back-and-forth.
+        conversation_history = crm_service.get_recent_messages(
+            client_id=client_id, 
+            user_id=realtor.id,
+            limit=10 
+        )
+        logging.info(f"ORCHESTRATOR: Fetched {len(conversation_history)} recent messages for AI context.")
+        # --- MODIFICATION END ---
+
         client_context = {"client_name": client.full_name, "client_tags": client.user_tags + client.ai_tags}
 
+        # --- MODIFIED: Pass the conversation_history to the agent ---
         ai_response_draft = await conversation_agent.generate_response(
             client_id=client_id,
-            # Use the content from the passed-in message object
             incoming_message_content=incoming_message.content,
-            context=client_context
+            context=client_context,
+            conversation_history=conversation_history # Pass the history here
         )
         logging.info("ORCHESTRATOR: AI Conversation Agent generated reply draft.")
 
@@ -53,7 +60,6 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
             draft_briefing = CampaignBriefing(
                 user_id=realtor.id,
                 client_id=client_id,
-                # --- MODIFIED: Use the ID from the passed-in message object ---
                 parent_message_id=incoming_message.id,
                 campaign_type="ai_draft_response",
                 headline=f"AI Draft for {client.full_name}",

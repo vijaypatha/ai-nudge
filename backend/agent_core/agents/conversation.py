@@ -1,9 +1,6 @@
-# ---
-# File Path: backend/agent_core/agents/conversation.py 
-# ---
-# DEFINITIVE FIX: Adds a new function `draft_instant_nudge_message` to handle
-# ad-hoc message drafting, while keeping all original functions intact.
-# ---
+# backend/agent_core/agents/conversation.py
+# --- MODIFIED: `generate_response` now accepts and uses conversation history to provide contextual replies.
+
 from typing import Dict, Any, List
 import uuid
 import json
@@ -12,10 +9,12 @@ import logging
 from data.models.user import User
 from data.models.property import Property
 from data.models.campaign import MatchedClient
+# --- MODIFICATION: Import Message and MessageDirection to process history ---
+from data.models.message import Message, MessageDirection
 from integrations import openai as openai_service
 from data import crm as crm_service
 
-# --- NEW: Function for "Draft with AI" in Instant Nudge ---
+# --- Function for "Draft with AI" in Instant Nudge ---
 async def draft_instant_nudge_message(
     realtor: User,
     topic: str,
@@ -58,14 +57,22 @@ async def draft_instant_nudge_message(
     return ai_draft or f"Hi [Client Name], I was just thinking about you and wanted to reach out regarding {topic}."
 
 
-# --- Function for INBOUND Messages (Original code restored) ---
+# --- MODIFIED: Function updated to accept and process conversation history ---
 async def generate_response(
     client_id: uuid.UUID,
     incoming_message_content: str,
-    context: Dict[str, Any]
+    context: Dict[str, Any],
+    conversation_history: List[Message] | None = None
 ) -> Dict[str, Any]:
     """
-    Generates a draft response for an incoming client message using an LLM.
+    Generates a draft response for an incoming client message using an LLM,
+    now with the context of the recent conversation history.
+    
+    Args:
+        client_id: The ID of the client.
+        incoming_message_content: The new message received from the client.
+        context: Additional context about the client (name, tags, etc.).
+        conversation_history: A list of recent Message objects (optional).
     """
     logging.info(f"CONVERSATION AGENT (INBOUND): Generating response for client {client_id}...")
     
@@ -79,9 +86,39 @@ async def generate_response(
         for i, prop in enumerate(all_properties[:3]):
             property_context_str += (f"- Property {i+1}: {prop.address}, Price: ${prop.price:,.0f}, Status: {prop.status}, Type: {prop.property_type}\n")
 
-    messages = [{"role": "system", "content": (f"You are an AI Nudge assistant... The client's name is {client_name}. Their tags include: {client_tags}.{property_context_str}")}, {"role": "user", "content": incoming_message_content}]
+    # The initial system message that sets the AI's persona.
+    system_prompt = {
+        "role": "system", 
+        "content": (
+            f"You are an AI Nudge assistant for a realtor. Your goal is to provide helpful, concise, and context-aware responses. "
+            f"The client's name is {client_name}. Their tags include: {client_tags}. "
+            "Remember the conversation history and do not ask for information that has already been provided. "
+            f"{property_context_str}"
+        )
+    }
     
-    ai_draft_content = await openai_service.generate_text_completion(prompt_messages=messages, model="gpt-4o-mini")
+    # Initialize the prompt message list with the system persona.
+    prompt_messages = [system_prompt]
+
+    # --- MODIFICATION START: Format and inject conversation history ---
+    # If history is provided, format it into the "user" and "assistant" roles
+    # that the OpenAI API expects. This gives the AI conversational memory.
+    if conversation_history:
+        for message in conversation_history:
+            if message.direction == MessageDirection.INBOUND:
+                # Messages from the client are from the "user"
+                prompt_messages.append({"role": "user", "content": message.content})
+            elif message.direction == MessageDirection.OUTBOUND:
+                # Messages sent by us (the AI/realtor) are from the "assistant"
+                prompt_messages.append({"role": "assistant", "content": message.content})
+        logging.info(f"CONVERSATION AGENT: Injected {len(conversation_history)} messages into the prompt.")
+    # --- MODIFICATION END ---
+    
+    # Add the newest incoming message from the client to the end of the prompt.
+    prompt_messages.append({"role": "user", "content": incoming_message_content})
+    
+    # Generate the AI draft using the full context (system + history + new message).
+    ai_draft_content = await openai_service.generate_text_completion(prompt_messages=prompt_messages, model="gpt-4o-mini")
     
     if ai_draft_content:
         return {"ai_draft": ai_draft_content, "confidence": 0.95, "suggested_action": "send_draft"}
@@ -89,7 +126,7 @@ async def generate_response(
         return {"ai_draft": "I'm sorry, I couldn't generate a smart response right now.", "confidence": 0.1, "suggested_action": "review_manually"}
 
 
-# --- Function for OUTBOUND Campaigns (Original code restored) ---
+# --- Function for OUTBOUND Campaigns ---
 async def draft_outbound_campaign_message(
     realtor: User,
     event_type: str,

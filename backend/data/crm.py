@@ -1,7 +1,5 @@
-# ---
-# File Path: backend/data/crm.py
-# Purpose: Acts as a centralized data access layer (service layer) for the application.
-# ---
+# backend/data/crm.py
+# --- MODIFIED: Added 'get_recent_messages' to fetch conversation history for AI context.
 
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone
@@ -18,7 +16,8 @@ from .models.client import Client, ClientUpdate, ClientCreate
 from .models.user import User, UserUpdate
 from .models.property import Property
 from .models.campaign import CampaignBriefing, CampaignUpdate
-from .models.message import ScheduledMessage, Message, MessageStatus
+# --- MODIFIED: Added MessageDirection to support history formatting ---
+from .models.message import ScheduledMessage, Message, MessageStatus, MessageDirection
 
 
 
@@ -243,23 +242,57 @@ def save_message(message: Message, session: Optional[Session] = None):
 def get_conversation_history(client_id: uuid.UUID, user_id: uuid.UUID) -> List[Message]:
     """
     Retrieves all messages for a given client, ensuring it belongs to the user.
-    --- MODIFIED: Also eagerly loads any associated AI drafts. ---
+    This is used for displaying the full conversation history in the UI.
     """
     with Session(engine) as session:
+        # Security check: Ensure the client belongs to the requesting user.
         client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client_check:
+            logging.warning(f"CRM AUTH: User {user_id} attempted to access messages for client {client_id} without permission.")
             return []
             
-        # --- MODIFIED: Use selectinload to efficiently fetch the related ai_draft ---
-        # This will perform a second query to get all related drafts at once,
-        # which is more efficient than a JOIN for one-to-one relationships.
         statement = (
             select(Message)
             .where(Message.client_id == client_id)
             .options(selectinload(Message.ai_draft))
-            .order_by(Message.created_at)
+            .order_by(Message.created_at) # Returns in chronological order for UI display.
         )
         return session.exec(statement).all()
+
+# --- NEW FUNCTION: To provide recent conversation context to the AI ---
+def get_recent_messages(client_id: uuid.UUID, user_id: uuid.UUID, limit: int = 10) -> List[Message]:
+    """
+    Retrieves the most recent N messages for a client to provide context to the AI.
+    
+    Args:
+        client_id: The ID of the client whose history is being fetched.
+        user_id: The ID of the user making the request (for security).
+        limit: The maximum number of recent messages to retrieve.
+        
+    Returns:
+        A list of Message objects in chronological order (oldest to newest).
+    """
+    with Session(engine) as session:
+        # Security check: Ensure the client belongs to the requesting user.
+        client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
+        if not client_check:
+            logging.warning(f"CRM AUTH: User {user_id} attempted to access messages for client {client_id} without permission.")
+            return []
+
+        # Fetch the most recent messages in descending order from the database.
+        statement = (
+            select(Message)
+            .where(Message.client_id == client_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+        
+        recent_messages = session.exec(statement).all()
+        
+        # The messages are currently newest-to-oldest. Reverse them in Python
+        # to get a chronological list (oldest-to-newest) for the LLM prompt.
+        return recent_messages[::-1]
+
 
 def get_conversation_summaries(user_id: uuid.UUID) -> List[Dict[str, Any]]:
     """Generates a list of conversation summaries for a specific user."""
@@ -379,19 +412,6 @@ def _get_all_clients_for_system_indexing() -> List[Client]:
     with Session(engine) as session:
         statement = select(Client)
         return session.exec(statement).all()
-
-# --- REMOVED: This function is now obsolete. The draft is loaded with the message history. ---
-# def get_latest_ai_draft_briefing(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[CampaignBriefing]:
-#     """
-#     Retrieves the latest AI draft CampaignBriefing for a specific client and user.
-#     """
-#     with Session(engine) as session:
-#         statement = select(CampaignBriefing).where(
-#             CampaignBriefing.client_id == client_id,
-#             CampaignBriefing.user_id == user_id,
-#             CampaignBriefing.campaign_type == "ai_draft_response"
-#         ).order_by(CampaignBriefing.created_at.desc()).limit(1)
-#         return session.exec(statement).first()
 
 # Community 
 
