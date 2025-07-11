@@ -147,13 +147,25 @@ def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uuid.UUID
 def add_client_tags(client_id: uuid.UUID, tags_to_add: List[str], user_id: uuid.UUID) -> Optional[Client]:
     """
     Appends new tags to a client's user_tags list, ensuring no duplicates.
+    
+    Args:
+        client_id: The ID of the client to update.
+        tags_to_add: A list of new tags to add.
+        user_id: The ID of the current user for security.
+
+    Returns:
+        The updated Client object or None if not found.
     """
     with Session(engine) as session:
+        # Retrieve the client, ensuring it belongs to the user.
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         
         if client:
+            # Use sets for efficient duplicate handling
             existing_tags = set(client.user_tags)
             new_tags = set(tags_to_add)
+            
+            # Combine the sets and convert back to a sorted list
             updated_tags = sorted(list(existing_tags.union(new_tags)))
             
             client.user_tags = updated_tags

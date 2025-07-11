@@ -1,5 +1,5 @@
 // frontend/app/(main)/conversations/[clientId]/page.tsx
-// --- FINAL CORRECTED VERSION: Complete, unabbreviated, and renders the new RecommendationActions component.
+// --- MODIFIED: Renders the new RecommendationActions component.
 
 'use client';
 
@@ -19,8 +19,8 @@ import { ChatHistory } from '@/components/conversation/ChatHistory';
 import { MessageComposer } from '@/components/conversation/MessageComposer';
 import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
+// --- ADDED: Import the new component ---
 import { RecommendationActions } from '@/components/conversation/RecommendationActions';
-
 
 import { Users, Menu, Phone, Video } from 'lucide-react';
 
@@ -30,10 +30,9 @@ interface ConversationPageProps {
     };
 }
 
-// Define the shape of the full API response
 interface ConversationData {
     messages: Message[];
-    active_recommendations?: any; // This will hold our recommendation slate
+    active_recommendations?: any;
 }
 
 interface MessageComposerHandle {
@@ -152,14 +151,12 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         setScheduledMessages(prev => prev.map(msg => msg.id === updatedMessage.id ? updatedMessage : msg));
     };
 
-    const handleActionComplete = useCallback(() => {
+    // --- NEW: Callback function to refresh client data after an action ---
+    const handleActionComplete = useCallback(async () => {
         if(selectedClient) {
             console.log("Action complete, refreshing client data...");
-            const refetchClient = async () => {
-                const refreshedClient = await api.get(`/api/clients/${selectedClient.id}`);
-                updateClientInList(refreshedClient);
-            };
-            refetchClient();
+            const refreshedClient = await api.get(`/api/clients/${selectedClient.id}`);
+            updateClientInList(refreshedClient);
         }
     }, [selectedClient, api, updateClientInList]);
 
@@ -215,6 +212,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                        messageComposerRef={messageComposerRef}
                    />
                    
+                   {/* --- ADDED: Render the new RecommendationActions component --- */}
                    {conversationData?.active_recommendations && selectedClient && (
                         <RecommendationActions
                             recommendations={conversationData.active_recommendations}

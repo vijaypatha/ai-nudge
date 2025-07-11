@@ -79,6 +79,33 @@ async def search_clients(query: ClientSearchQuery, current_user: User = Depends(
 
     return [client for client in all_clients if client.id in final_results]
 
+@router.post("/{client_id}/tags", response_model=Client)
+async def add_tags_to_client(
+    client_id: UUID,
+    payload: AddTagsPayload,
+    current_user: User = Depends(get_current_user_from_token),
+):
+    """
+    Appends one or more tags to a client's user_tags list.
+    This is called by the new RecommendationActions UI component.
+    """
+    # First, verify the client exists and belongs to the current user for security.
+    client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found.")
+
+    # Call the new CRM function to add the tags.
+    updated_client = crm_service.add_client_tags(
+        client_id=client_id, 
+        tags_to_add=payload.tags,
+        user_id=current_user.id
+    )
+
+    if not updated_client:
+        raise HTTPException(status_code=500, detail="Failed to update client tags.")
+
+    return updated_client
+
 # --- NEW ENDPOINT: To add one or more tags to a client ---
 @router.post("/{client_id}/tags", response_model=Client)
 async def add_tags_to_client(
