@@ -1,6 +1,6 @@
 // frontend/app/(main)/conversations/[clientId]/page.tsx
-// DEFINITIVE FIX: Implements polling to automatically refresh conversation
-// history and AI drafts, ensuring the UI updates without a manual refresh.
+// MODIFIED: Simplified to use a single data-fetching poll for messages
+// with embedded AI drafts.
 
 'use client';
 
@@ -9,6 +9,7 @@ import { find } from 'lodash';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import clsx from 'clsx';
+// --- MODIFIED: Message type now includes optional ai_draft from your correct AppContext ---
 import { useAppContext, Client, Message, ScheduledMessage } from '@/context/AppContext';
 import { useSidebar } from '@/context/SidebarContext';
 
@@ -20,14 +21,18 @@ import { ChatHistory } from '@/components/conversation/ChatHistory';
 import { MessageComposer } from '@/components/conversation/MessageComposer';
 import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
-import { Button } from '@/components/ui/Button';
 
-import { Users, Menu, Phone, Video, Edit, Send } from 'lucide-react';
+import { Users, Menu, Phone, Video } from 'lucide-react';
 
 interface ConversationPageProps {
     params: {
         clientId: string;
     };
+}
+
+// --- ADDED: Type for the MessageComposer ref handle ---
+interface MessageComposerHandle {
+    setValue: (value: string) => void;
 }
 
 export default function ConversationPage({ params }: ConversationPageProps) {
@@ -42,10 +47,10 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
     const [isSending, setIsSending] = useState(false);
     const [isPlanningCampaign, setIsPlanningCampaign] = useState(false);
-    const [aiDraftResponse, setAiDraftResponse] = useState<string | null>(null);
-
+    
     const [activeTab, setActiveTab] = useState<'messages' | 'intel'>('messages');
-    const messageComposerRef = useRef<{ setValue: (value: string) => void }>(null);
+    // --- MODIFIED: Typed the ref for better access to child component methods ---
+    const messageComposerRef = useRef<MessageComposerHandle>(null);
 
     const tabOptions: TabOption[] = [
         { id: 'messages', label: 'Messages' },
@@ -59,40 +64,35 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         }
     }, [clientId, clients]);
 
-    // --- MODIFIED: This effect now ONLY fetches scheduled messages on load ---
-    useEffect(() => {
-        if (!selectedClient) return;
-        const fetchScheduled = async () => {
-            try {
-                const scheduledData = await refetchScheduledMessagesForClient(selectedClient.id);
-                setScheduledMessages(scheduledData);
-            } catch (err: any) {
-                console.error("Could not load scheduled messages:", err);
-                setError(err.message || "Could not load scheduled messages.");
-            }
-        };
-        fetchScheduled();
-        setActiveTab('messages');
-    }, [selectedClient, refetchScheduledMessagesForClient]);
-
-    // --- ADDED: New effect to poll for conversation history and AI drafts ---
+    const fetchScheduled = useCallback(async (clientId: string) => {
+        try {
+            const scheduledData = await refetchScheduledMessagesForClient(clientId);
+            setScheduledMessages(scheduledData);
+        } catch (err: any) {
+            console.error("Could not load scheduled messages:", err);
+            setError(err.message || "Could not load scheduled messages.");
+        }
+    }, [refetchScheduledMessagesForClient]);
+    
+    // --- MODIFIED: This effect now polls for messages WITH embedded drafts ---
     useEffect(() => {
         if (!selectedClient) return;
 
         let isMounted = true;
+        // Fetch scheduled messages once on load
+        fetchScheduled(selectedClient.id);
+        setActiveTab('messages');
 
         const pollForUpdates = async () => {
             if (!isMounted) return;
-            console.log("Polling for updates...");
+            console.log("Polling for conversation updates...");
             try {
-                const historyPromise = api.get(`/api/messages/?client_id=${selectedClient.id}`);
-                const aiDraftPromise = api.get(`/api/conversations/${selectedClient.id}/ai_draft`);
-
-                const [historyData, aiDraftData] = await Promise.all([historyPromise, aiDraftPromise]);
+                // Single API call to get messages with their drafts
+                const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
 
                 if (isMounted) {
+                    // Update messages only if they have actually changed
                     setCurrentMessages(prev => JSON.stringify(prev) !== JSON.stringify(historyData) ? historyData : prev);
-                    setAiDraftResponse(aiDraftData?.original_draft || null);
                 }
             } catch (err) {
                 console.error("Polling failed:", err);
@@ -106,39 +106,28 @@ export default function ConversationPage({ params }: ConversationPageProps) {
             isMounted = false;
             clearInterval(intervalId);
         };
-    }, [selectedClient, api]);
+    }, [selectedClient, api, fetchScheduled]);
 
     const handleSendMessage = useCallback(async (content: string) => {
         if (!content.trim() || !selectedClient) return;
         setIsSending(true);
+        // Optimistic UI update
         const optimisticMessage: Message = { id: `agent-${Date.now()}`, client_id: selectedClient.id, content, direction: 'outbound', status: 'pending', created_at: new Date().toISOString() };
         setCurrentMessages(prev => [...prev, optimisticMessage]);
         try {
             await api.post(`/api/conversations/${selectedClient.id}/send_reply`, { content });
+            // Refetch history to get the final message state from the server
             const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
             setCurrentMessages(historyData);
-            setAiDraftResponse(null);
         } catch (err) {
             console.error("Failed to send message:", err);
+            // Rollback optimistic update on failure
             setCurrentMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
             alert("Failed to send message.");
         } finally {
             setIsSending(false);
         }
     }, [selectedClient, api]);
-
-    const handleEditAiDraft = useCallback(() => {
-        if (aiDraftResponse && messageComposerRef.current) {
-            messageComposerRef.current.setValue(aiDraftResponse);
-            setAiDraftResponse(null);
-        }
-    }, [aiDraftResponse]);
-
-    const handleSendAiDraft = useCallback(async () => {
-        if (aiDraftResponse) {
-            await handleSendMessage(aiDraftResponse);
-        }
-    }, [aiDraftResponse, handleSendMessage]);
 
     const handlePlanCampaign = useCallback(async () => {
         if (!selectedClient) return;
@@ -204,24 +193,13 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                 </div>
 
                 <div className={clsx("flex flex-col flex-grow min-h-0", activeTab === 'messages' ? 'flex' : 'hidden lg:flex')}>
-                   <ChatHistory messages={currentMessages} selectedClient={selectedClient} />
-
-                   {aiDraftResponse && (
-                       <div className="p-4 bg-brand-dark-blue rounded-lg m-4 shadow-lg">
-                           <h3 className="text-brand-text-main font-semibold mb-2 flex items-center gap-2">
-                               <span className="text-brand-accent">AI Draft:</span>
-                           </h3>
-                           <p className="text-brand-text-muted mb-4 text-sm leading-relaxed">{aiDraftResponse}</p>
-                           <div className="flex gap-2 justify-end">
-                               <Button variant="secondary" onClick={handleEditAiDraft} className="flex items-center gap-1">
-                                   <Edit className="w-4 h-4" /> Edit
-                               </Button>
-                               <Button onClick={handleSendAiDraft} className="flex items-center gap-1">
-                                   <Send className="w-4 h-4" /> Send
-                               </Button>
-                           </div>
-                       </div>
-                   )}
+                   {/* --- MODIFIED: Pass down handlers to the ChatHistory component --- */}
+                   <ChatHistory 
+                       messages={currentMessages} 
+                       selectedClient={selectedClient} 
+                       onSendMessage={handleSendMessage}
+                       messageComposerRef={messageComposerRef}
+                   />
 
                    <MessageComposer onSendMessage={handleSendMessage} isSending={isSending} ref={messageComposerRef} />
                 </div>

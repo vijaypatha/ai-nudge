@@ -6,7 +6,8 @@ from typing import List, Optional
 import uuid
 from data.models.user import User
 from api.security import get_current_user_from_token
-from data.models.message import Message, MessageDirection, MessageStatus
+# --- MODIFIED: Import the new MessageWithDraft response model ---
+from data.models.message import Message, MessageDirection, MessageStatus, MessageWithDraft
 from data.models.campaign import CampaignBriefing
 from pydantic import BaseModel
 from data import crm as crm_service
@@ -36,24 +37,23 @@ async def get_conversation_list(current_user: User = Depends(get_current_user_fr
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch conversations: {str(e)}")
 
-# FIXED: Messages endpoint with proper query parameter handling
-@router.get("/messages/", response_model=List[Message])
+# --- MODIFIED: This endpoint now returns messages with their drafts embedded ---
+@router.get("/messages/", response_model=List[MessageWithDraft])
 async def get_conversation_history_by_client_id(
-    client_id: Optional[uuid.UUID] = Query(None),
+    client_id: uuid.UUID, # Made client_id non-optional as the UI always provides it
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """Retrieves the full message history for a specific client via query parameter."""
+    """
+    Retrieves the full message history for a specific client.
+    Incoming messages will have their 'ai_draft' field populated if a draft exists.
+    """
     try:
-        if not client_id:
-            # Return all messages for user if no client_id specified
-            return crm_service.get_all_messages_for_user(user_id=current_user.id)
-
         # Verify client exists and belongs to user
         client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
         if not client:
             raise HTTPException(status_code=404, detail="Client not found.")
 
-        # Get message history for specific client
+        # Get message history for specific client. The CRM function now handles loading drafts.
         history = crm_service.get_conversation_history(client_id=client_id, user_id=current_user.id)
         return history if history else []
 
@@ -63,7 +63,7 @@ async def get_conversation_history_by_client_id(
         raise HTTPException(status_code=500, detail=f"Failed to fetch messages: {str(e)}")
 
 # FIXED: Send reply endpoint with proper error handling
-@router.post("/conversations/{client_id}/send_reply/", status_code=201)
+@router.post("/conversations/{client_id}/send_reply/", response_model=Message)
 async def send_reply(
     client_id: uuid.UUID,
     payload: SendReplyPayload,
@@ -123,34 +123,34 @@ async def get_scheduled_messages(
                 user_id=current_user.id
             )
         else:
-            return crm_service.get_all_scheduled_messages_for_user(
-                user_id=current_user.id
-            )
+            # Assuming a function get_all_scheduled_messages_for_user exists
+            # If not, you'll need to add it to crm.py
+            return crm_service.get_all_scheduled_messages(user_id=current_user.id)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch scheduled messages: {str(e)}")
     
-# --- ADDED: Endpoint to fetch the latest AI Draft for a client ---
-@router.get("/conversations/{client_id}/ai_draft", response_model=dict)
-async def get_ai_draft(
-    client_id: uuid.UUID,
-    current_user: User = Depends(get_current_user_from_token)
-):
-    """
-    Retrieves the latest AI-generated draft response for a given client.
-    This draft is for UI display and user approval/editing.
-    """
-    try:
-        # Verify client exists and belongs to user
-        client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
-        if not client:
-            raise HTTPException(status_code=404, detail="Client not found.")
+# --- REMOVED: This endpoint is now obsolete. The draft is embedded in the /messages/ response. ---
+# @router.get("/conversations/{client_id}/ai_draft", response_model=dict)
+# async def get_ai_draft(
+#     client_id: uuid.UUID,
+#     current_user: User = Depends(get_current_user_from_token)
+# ):
+#     """
+#     Retrieves the latest AI-generated draft response for a given client.
+#     This draft is for UI display and user approval/editing.
+#     """
+#     try:
+#         # Verify client exists and belongs to user
+#         client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
+#         if not client:
+#             raise HTTPException(status_code=404, detail="Client not found.")
 
-        # Fetch the latest AI draft briefing for this client
-        draft = crm_service.get_latest_ai_draft_briefing(client_id=client_id, user_id=current_user.id)
-        if not draft:
-            return {"ai_draft": None} # Return empty if no draft found
-        return {"ai_draft": draft.original_draft} # Return the draft content
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch AI draft: {str(e)}")
+#         # Fetch the latest AI draft briefing for this client
+#         draft = crm_service.get_latest_ai_draft_briefing(client_id=client_id, user_id=current_user.id)
+#         if not draft:
+#             return {"ai_draft": None} # Return empty if no draft found
+#         return {"original_draft": draft.original_draft} # Return the draft content
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to fetch AI draft: {str(e)}")

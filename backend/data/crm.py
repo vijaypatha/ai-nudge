@@ -7,6 +7,8 @@ from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone
 import uuid
 from sqlmodel import Session, select, delete
+# --- ADDED: Import selectinload for efficient relationship loading ---
+from sqlalchemy.orm import selectinload
 from .database import engine
 import logging
 
@@ -239,13 +241,24 @@ def save_message(message: Message, session: Optional[Session] = None):
 
 
 def get_conversation_history(client_id: uuid.UUID, user_id: uuid.UUID) -> List[Message]:
-    """Retrieves all messages for a given client, ensuring it belongs to the user."""
+    """
+    Retrieves all messages for a given client, ensuring it belongs to the user.
+    --- MODIFIED: Also eagerly loads any associated AI drafts. ---
+    """
     with Session(engine) as session:
         client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client_check:
             return []
             
-        statement = select(Message).where(Message.client_id == client_id).order_by(Message.created_at)
+        # --- MODIFIED: Use selectinload to efficiently fetch the related ai_draft ---
+        # This will perform a second query to get all related drafts at once,
+        # which is more efficient than a JOIN for one-to-one relationships.
+        statement = (
+            select(Message)
+            .where(Message.client_id == client_id)
+            .options(selectinload(Message.ai_draft))
+            .order_by(Message.created_at)
+        )
         return session.exec(statement).all()
 
 def get_conversation_summaries(user_id: uuid.UUID) -> List[Dict[str, Any]]:
@@ -366,18 +379,19 @@ def _get_all_clients_for_system_indexing() -> List[Client]:
     with Session(engine) as session:
         statement = select(Client)
         return session.exec(statement).all()
-    
-def get_latest_ai_draft_briefing(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[CampaignBriefing]:
-    """
-    Retrieves the latest AI draft CampaignBriefing for a specific client and user.
-    """
-    with Session(engine) as session:
-        statement = select(CampaignBriefing).where(
-            CampaignBriefing.client_id == client_id,
-            CampaignBriefing.user_id == user_id,
-            CampaignBriefing.campaign_type == "ai_draft_response"
-        ).order_by(CampaignBriefing.created_at.desc()).limit(1)
-        return session.exec(statement).first()
+
+# --- REMOVED: This function is now obsolete. The draft is loaded with the message history. ---
+# def get_latest_ai_draft_briefing(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[CampaignBriefing]:
+#     """
+#     Retrieves the latest AI draft CampaignBriefing for a specific client and user.
+#     """
+#     with Session(engine) as session:
+#         statement = select(CampaignBriefing).where(
+#             CampaignBriefing.client_id == client_id,
+#             CampaignBriefing.user_id == user_id,
+#             CampaignBriefing.campaign_type == "ai_draft_response"
+#         ).order_by(CampaignBriefing.created_at.desc()).limit(1)
+#         return session.exec(statement).first()
 
 # Community 
 

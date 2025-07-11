@@ -8,9 +8,11 @@ from datetime import datetime, timezone
 from enum import Enum
 from sqlmodel import SQLModel, Field, Relationship
 
+# --- ADDED: Forward reference for CampaignBriefing ---
 if TYPE_CHECKING:
     from .client import Client
     from .user import User
+    from .campaign import CampaignBriefing
 
 class MessageStatus(str, Enum):
     PENDING = "pending"
@@ -41,6 +43,10 @@ class Message(SQLModel, table=True):
     # Defines the many-to-one relationship with the Client table
     client: Optional["Client"] = Relationship(back_populates="messages")
     user: Optional["User"] = Relationship(back_populates="messages")
+    
+    # --- ADDED: One-to-one relationship with CampaignBriefing (AI Draft) ---
+    # This message (if inbound) can have one AI draft associated with it.
+    ai_draft: Optional["CampaignBriefing"] = Relationship(back_populates="parent_message", sa_relationship_kwargs={'uselist': False})
 
 
 class ScheduledMessage(SQLModel, table=True):
@@ -62,6 +68,16 @@ class ScheduledMessage(SQLModel, table=True):
     user: Optional["User"] = Relationship(back_populates="scheduled_messages")
 
 # --- API Schemas ---
+
+# --- ADDED: Forward reference for CampaignBriefing for Pydantic model ---
+# This ensures Pydantic can resolve the type hint at runtime.
+from .campaign import CampaignBriefing
+
+# --- ADDED: New API response schema to embed the draft ---
+class MessageWithDraft(Message):
+    """API model for a Message that includes its optional AI draft."""
+    ai_draft: Optional[CampaignBriefing] = None
+
 class ScheduledMessageCreate(SQLModel):
     client_id: UUID
     content: str

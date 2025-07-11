@@ -30,11 +30,12 @@ export interface User {
 
 export interface Client { id: string; user_id: string; full_name: string; email: string | null; ai_tags: string[]; user_tags: string[]; preferences: { notes?: string[]; [key: string]: any; }; last_interaction: string | null; }
 export interface Property { id: string; address: string; price: number; status: string; image_urls: string[]; }
-export interface Message { id:string; client_id: string; content: string; direction: 'inbound' | 'outbound'; status: string; created_at: string; }
+export interface CampaignBriefing { id: string; user_id: string; campaign_type: string; headline: string; listing_url?: string; key_intel: { [key: string]: string }; original_draft: string; edited_draft?: string; matched_audience: MatchedClient[]; status: 'new' | 'launched' | 'dismissed'; }
+// --- MODIFIED: Added optional 'ai_draft' to support inline drafts ---
+export interface Message { id:string; client_id: string; content: string; direction: 'inbound' | 'outbound'; status: string; created_at: string; ai_draft?: CampaignBriefing; }
 export interface Conversation { id: string; client_id: string; client_name: string; last_message: string; last_message_time: string; unread_count: number; }
 export interface ScheduledMessage { id: string; user_id: string; client_id: string; content: string; scheduled_at: string; status: string; }
 export interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reason: string; }
-export interface CampaignBriefing { id: string; user_id: string; campaign_type: string; headline: string; listing_url?: string; key_intel: { [key: string]: string }; original_draft: string; edited_draft?: string; matched_audience: MatchedClient[]; status: 'new' | 'launched' | 'dismissed'; }
 
 interface AppContextType {
   loading: boolean;

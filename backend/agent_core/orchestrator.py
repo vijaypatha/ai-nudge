@@ -6,7 +6,7 @@ from typing import Dict, Any
 import uuid
 import logging
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 from data.database import engine
 
 from agent_core.agents import conversation as conversation_agent
@@ -15,6 +15,8 @@ from integrations import twilio_outgoing
 from data import crm as crm_service
 from data.models.campaign import CampaignBriefing
 from data.models.user import User
+# --- ADDED: Import Message models for creating the incoming message log ---
+from data.models.message import Message, MessageDirection, MessageStatus
 
 async def handle_incoming_message(client_id: uuid.UUID, incoming_message_content: str, realtor: User) -> Dict[str, Any]:
     """
@@ -24,18 +26,27 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message_content
     """
     logging.info(f"ORCHESTRATOR: Handling incoming message from client {client_id} for user {realtor.id}...")
     
-    # --- DEFINITIVE FIX: Use a single, managed database session for the entire operation ---
-    # This ensures all changes are committed together in one transaction, preventing race conditions
-    # and silent failures.
     with Session(engine) as session:
-        # Note: Read operations like get_client_by_id don't need the session passed in,
-        # but all write operations MUST use the managed session.
         client = crm_service.get_client_by_id(client_id, user_id=realtor.id)
         if not client:
             logging.error(f"ORCHESTRATOR ERROR: Could not find client with ID {client_id} for user {realtor.id}. Aborting.")
             return {"error": "Client not found"}
+        
+        # --- ADDED: First, create and save the inbound message to the universal log ---
+        # This gives us a parent_message_id to link the AI draft to.
+        incoming_message_obj = Message(
+            user_id=realtor.id,
+            client_id=client_id,
+            content=incoming_message_content,
+            direction=MessageDirection.INBOUND,
+            status=MessageStatus.RECEIVED
+        )
+        # Add to the session to get an ID assigned before commit
+        session.add(incoming_message_obj)
+        session.flush() # Flush to assign the ID to incoming_message_obj.id
+        logging.info(f"ORCHESTRATOR: Saved incoming message log with temp ID {incoming_message_obj.id}.")
 
-        # Perform write operations using the managed session
+        # Perform other write operations using the managed session
         crm_service.update_last_interaction(client_id, user_id=realtor.id, session=session)
 
         client_context = {"client_name": client.full_name, "client_tags": client.user_tags + client.ai_tags}
@@ -52,12 +63,14 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message_content
             draft_briefing = CampaignBriefing(
                 user_id=realtor.id,
                 client_id=client_id,
+                # --- MODIFIED: Link the draft to the incoming message we just saved ---
+                parent_message_id=incoming_message_obj.id,
                 campaign_type="ai_draft_response",
                 headline=f"AI Draft for {client.full_name}",
                 key_intel=ai_response_draft,
                 original_draft=draft_text,
                 matched_audience=[],
-                triggering_event_id=uuid.uuid4()
+                triggering_event_id=uuid.uuid4() # This can be a more specific ID if available
             )
             crm_service.save_campaign_briefing(draft_briefing, session=session)
 
@@ -86,6 +99,7 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message_content
         session.commit()
         logging.info(f"ORCHESTRATOR: Transaction committed successfully for client {client_id}.")
 
+    # The return value might need to be updated to pass the full draft object to a websocket later
     return { "ai_draft_response": ai_response_draft }
 
 async def orchestrate_send_message_now(client_id: uuid.UUID, content: str, user_id: uuid.UUID) -> bool:
@@ -117,7 +131,6 @@ async def orchestrate_send_message_now(client_id: uuid.UUID, content: str, user_
     )
     
     if was_sent:
-        # This function can create its own session, which is fine for this simple, single operation.
         crm_service.update_last_interaction(client_id, user_id=user_id)
     
     return was_sent
