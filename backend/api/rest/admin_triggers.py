@@ -1,46 +1,50 @@
 # File Path: backend/api/rest/admin_triggers.py
+# --- CORRECTED: Refactored to use the generic Resource model instead of the deleted Property model.
+
 from fastapi import APIRouter, status, HTTPException, Depends
 from typing import Optional, List
 import uuid
 import asyncio
 
-# --- MODIFIED: Import User model and security dependency ---
 from data.models.user import User
 from api.security import get_current_user_from_token
-
 from data import crm as crm_service
 from agent_core.brain import nudge_engine
 from integrations import twilio_incoming
-
 from data.models.campaign import CampaignBriefing, MatchedClient
 from data.models.event import MarketEvent
-from data.models.property import Property
+# --- MODIFIED: Import Resource instead of Property ---
+from data.models.resource import Resource
 
 router = APIRouter(
     prefix="/admin/triggers",
     tags=["Admin: Triggers"]
 )
 
-# --- MODIFIED: Now accepts a User object, no longer fetches a default realtor ---
-def _get_property(property_id: Optional[uuid.UUID] = None) -> Property:
-    """Helper to fetch a specific or default property."""
-    if property_id:
-        property_item = crm_service.get_property_by_id(property_id)
-        if not property_item:
-            raise HTTPException(status_code=404, detail=f"Property with id {property_id} not found.")
+# --- MODIFIED: Helper function now gets a 'property' type Resource ---
+def _get_resource_for_test(user_id: uuid.UUID, resource_id: Optional[uuid.UUID] = None) -> Resource:
+    """Helper to fetch a specific or default resource of type 'property' for testing."""
+    if resource_id:
+        resource_item = crm_service.get_resource_by_id(resource_id, user_id)
+        if not resource_item:
+            raise HTTPException(status_code=404, detail=f"Resource with id {resource_id} not found.")
+        if resource_item.resource_type != 'property':
+             raise HTTPException(status_code=400, detail=f"Resource {resource_id} is not a 'property' type.")
     else:
-        properties = crm_service.get_all_properties()
-        if not properties:
-            raise HTTPException(status_code=404, detail="No properties found in the database.")
-        property_item = properties[0]
+        resources = crm_service.get_all_resources_for_user(user_id)
+        # Filter for property resources specifically for this test suite
+        property_resources = [r for r in resources if r.resource_type == 'property']
+        if not property_resources:
+            raise HTTPException(status_code=404, detail="No 'property' type resources found in the database for this user.")
+        resource_item = property_resources[0]
     
-    return property_item
+    return resource_item
 
-# --- MODIFIED: Added security dependency and tenant-aware logic ---
+# --- MODIFIED: Uses the new _get_resource_for_test helper ---
 @router.post("/run-comprehensive-test", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_comprehensive_test_suite(current_user: User = Depends(get_current_user_from_token)):
     print(f"--- COMPREHENSIVE TEST SUITE INITIATED FOR USER {current_user.id} ---")
-    property_item = _get_property()
+    resource_item = _get_resource_for_test(user_id=current_user.id)
     clients = crm_service.get_all_clients(user_id=current_user.id)
     if not clients:
         raise HTTPException(status_code=404, detail=f"Cannot run test suite without seeded clients for user {current_user.id}.")
@@ -56,7 +60,7 @@ async def trigger_comprehensive_test_suite(current_user: User = Depends(get_curr
     for event_type in market_event_types:
         print(f"TEST SUITE: Creating '{event_type}' event...")
         payload = {"old_price": 1200000, "new_price": 1150000} if event_type == "price_drop" else {}
-        event = MarketEvent(event_type=event_type, entity_id=property_item.id, payload=payload, market_area="default") # Added market_area
+        event = MarketEvent(event_type=event_type, entity_id=resource_item.id, payload=payload, market_area="default")
         event_creation_tasks.append(nudge_engine.process_market_event(event, current_user))
     
     print("TEST SUITE: Creating 'Recency' nudge...")
@@ -64,8 +68,6 @@ async def trigger_comprehensive_test_suite(current_user: User = Depends(get_curr
 
     if test_client.phone:
         print(f"TEST SUITE: Simulating incoming SMS from {test_client.full_name}...")
-        # Note: The incoming webhook is public, but its internal logic is now secure.
-        # This simulation correctly finds the client and their associated user.
         event_creation_tasks.append(
             twilio_incoming.process_incoming_sms(
                 from_number=test_client.phone, 
@@ -78,13 +80,11 @@ async def trigger_comprehensive_test_suite(current_user: User = Depends(get_curr
     print(f"--- COMPREHENSIVE TEST SUITE COMPLETE FOR USER {current_user.id} ---")
     return {"status": "accepted", "message": "Comprehensive test suite initiated."}
 
-# --- MODIFIED: Added security dependency and tenant-aware logic ---
 @router.post("/run-market-scan", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_market_scan(minutes_ago: int = 60, current_user: User = Depends(get_current_user_from_token)):
     await nudge_engine.scan_for_all_market_events(realtor=current_user, minutes_ago=minutes_ago)
     return {"status": "accepted", "message": f"Full market scan initiated for current user, looking back {minutes_ago} minutes."}
 
-# --- MODIFIED: Added security dependency and tenant-aware logic ---
 @router.post("/run-daily-scan", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_daily_scan(current_user: User = Depends(get_current_user_from_token)):
     await nudge_engine.generate_recency_nudges(realtor=current_user) 

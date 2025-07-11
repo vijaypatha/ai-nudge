@@ -2,7 +2,7 @@
 # File Path: backend/data/seed.py
 # Purpose: Seeds the database with initial data for development and testing.
 # ---
-# MODIFIED: Now creates a wide variety of nudges on startup to populate the UI.
+# CORRECTED: Commits the User object first to satisfy foreign key constraints.
 # ---
 
 import uuid
@@ -13,7 +13,7 @@ from sqlmodel import Session
 from .database import engine
 from .models.client import Client
 from .models.message import Message, ScheduledMessage
-from .models.property import Property
+from .models.resource import Resource
 from .models.user import User, UserType
 from .models.event import MarketEvent
 from .models.campaign import CampaignBriefing
@@ -37,7 +37,7 @@ def clear_demo_data():
         session.query(CampaignBriefing).delete()
         session.query(MarketEvent).delete()
         session.query(Client).delete()
-        session.query(Property).delete()
+        session.query(Resource).delete()
         session.query(User).delete()
         session.commit()
     print("SEEDER: Demo data cleared successfully.")
@@ -48,7 +48,8 @@ async def seed_database():
     clear_demo_data()
 
     with Session(engine) as session:
-        # Step 1: Create base data
+        # --- MODIFIED: Create and commit the User object FIRST ---
+        # This ensures the user exists in the database before any dependent objects are created.
         realtor_user = User(
             id=USER_ID_JANE,
             user_type=UserType.REALTOR,
@@ -58,15 +59,26 @@ async def seed_database():
             twilio_phone_number="+14352721987",
             market_focus=["Sunnyvale", "Mountain View"]
         )
+        session.add(realtor_user)
+        session.commit()
+        print("SEEDER: Base user committed successfully.")
 
-        prop_maple = Property(
+        # --- Now create the dependent objects (Resource and Clients) ---
+        property_attributes = {
+            "address": "123 Maple St, Sunnyvale, CA",
+            "price": 1100000.0,
+            "property_type": "Single Family",
+            "bedrooms": 4,
+            "bathrooms": 3,
+            "square_footage": 2200,
+        }
+        
+        resource_maple = Resource(
             id=PROP_ID_MAPLE,
-            address="123 Maple St, Sunnyvale, CA",
-            price=1100000.0,
-            property_type="Single Family",
-            bedrooms=4,
-            bathrooms=3,
-            square_footage=2200,
+            user_id=USER_ID_JANE, # This user ID is now guaranteed to exist
+            resource_type="property",
+            status="active",
+            attributes=property_attributes
         )
 
         clients_data = [
@@ -75,22 +87,20 @@ async def seed_database():
             Client(id=CLIENT_ID_BEN, user_id=USER_ID_JANE, full_name="Ben Carter (Demo)", email="ben.carter@example.com", phone="+13856268825", user_tags=[], ai_tags=[], last_interaction=None, preferences={"notes": ["Wants to buy in the next 12 months."], "source": "demo"})
         ]
 
-        session.add(realtor_user)
-        session.add(prop_maple)
+        session.add(resource_maple)
         session.add_all(clients_data)
         
         session.commit()
-        print("SEEDER: Base data for users, clients, and properties committed.")
+        print("SEEDER: Dependent resources and clients committed.")
 
+        # Refresh objects to get latest state from DB after commit
         session.refresh(realtor_user)
-        session.refresh(prop_maple)
+        session.refresh(resource_maple)
 
-        # --- MODIFIED: Create a variety of market events to generate nudges ---
         print("SEEDER: Simulating multiple market events to generate a rich set of nudges...")
         
-        market_area_city = prop_maple.address.split(',')[1].strip()
+        market_area_city = resource_maple.attributes.get('address', '').split(',')[1].strip()
         
-        # A list of event types to simulate
         event_types_to_simulate = [
             "price_drop", "new_listing", "sold_listing", "back_on_market",
             "expired_listing", "coming_soon", "withdrawn_listing"
@@ -99,29 +109,25 @@ async def seed_database():
         event_creation_tasks = []
 
         for event_type in event_types_to_simulate:
-            # Create a unique event for each type
             event = MarketEvent(
                 id=uuid.uuid4(),
                 event_type=event_type,
                 market_area=market_area_city,
-                entity_type="PROPERTY",
+                entity_type="RESOURCE",
                 entity_id=PROP_ID_MAPLE,
                 payload={"old_price": 1250000.0, "new_price": 1100000.0} if event_type == "price_drop" else {}
             )
             session.add(event)
-            session.commit() # Commit each event so it has an ID before processing
+            session.commit() 
             
-            # Add the processing of this event to our list of tasks
             event_creation_tasks.append(
                 nudge_engine.process_market_event(event=event, realtor=realtor_user)
             )
             
-        # Also generate the relationship-based "recency" nudge
         event_creation_tasks.append(
             nudge_engine.generate_recency_nudges(realtor=realtor_user)
         )
 
-        # Run all nudge generation tasks concurrently
         await asyncio.gather(*event_creation_tasks)
         
         session.commit()

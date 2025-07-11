@@ -1,4 +1,5 @@
 # File: backend/tests/test_mls_integration.py
+# --- CORRECTED: Refactored to use the generic Resource model instead of the deleted Property model.
 
 import pytest
 import uuid
@@ -8,7 +9,8 @@ from sqlmodel import Session, select
 from data.models.user import User
 from data.models.client import Client
 from data.models.event import MarketEvent
-from data.models.property import Property
+# --- MODIFIED: Import Resource instead of Property ---
+from data.models.resource import Resource
 from data.models.campaign import CampaignBriefing
 from agent_core.brain import nudge_engine
 
@@ -32,21 +34,29 @@ async def test_mls_new_listing_event_creates_campaign(session: Session):
         session.add(realtor)
         session.add(matching_client)
         
-        property_payload = {
+        # --- MODIFIED: This payload is now stored in the 'attributes' field of a Resource ---
+        property_attributes = {
             "address": "123 Main St, Pleasant Grove, UT", "price": 750000.0, "bedrooms": 4,
-            "property_type": "SingleFamily", "status": "Active", "listing_url": "http://example.com/123",
+            "property_type": "SingleFamily", "listing_url": "http://example.com/123",
             "last_updated": "2025-07-07T12:00:00Z"
         }
-        entity_id = uuid.uuid5(uuid.NAMESPACE_DNS, property_payload["address"])
-        property_to_save = Property(id=entity_id, **property_payload)
-        
-        session.add(property_to_save)
+        entity_id = uuid.uuid5(uuid.NAMESPACE_DNS, property_attributes["address"])
+
+        # --- MODIFIED: Create a generic Resource instead of a specific Property ---
+        resource_to_save = Resource(
+            id=entity_id, 
+            user_id=realtor.id,
+            resource_type="property", # Specify the vertical type
+            status="Active",
+            attributes=property_attributes # Store all specific data here
+        )
+        session.add(resource_to_save)
         session.commit()
         
         new_listing_event = MarketEvent(
             id=uuid.uuid4(),
-            event_type="new_listing", market_area="pleasant_grove", entity_type="PROPERTY",
-            entity_id=entity_id, payload=property_payload
+            event_type="new_listing", market_area="pleasant_grove", entity_type="RESOURCE", # entity_type is now generic
+            entity_id=entity_id, payload=property_attributes
         )
 
         # 2. ACT

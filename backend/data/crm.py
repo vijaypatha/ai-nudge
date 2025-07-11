@@ -1,11 +1,10 @@
 # backend/data/crm.py
-# --- MODIFIED: Added 'get_recent_messages' to fetch conversation history for AI context.
+# --- MODIFIED: Added functions to manage the Recommendation Slate lifecycle.
 
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone
 import uuid
 from sqlmodel import Session, select, delete
-# --- ADDED: Import selectinload for efficient relationship loading ---
 from sqlalchemy.orm import selectinload
 from .database import engine
 import logging
@@ -14,9 +13,8 @@ from agent_core.deduplication.deduplication_engine import find_strong_duplicate
 
 from .models.client import Client, ClientUpdate, ClientCreate
 from .models.user import User, UserUpdate
-from .models.property import Property
+from .models.resource import Resource, ResourceCreate, ResourceUpdate
 from .models.campaign import CampaignBriefing, CampaignUpdate
-# --- MODIFIED: Added MessageDirection to support history formatting ---
 from .models.message import ScheduledMessage, Message, MessageStatus, MessageDirection
 
 
@@ -147,41 +145,56 @@ def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uuid.UUID
         return None
 
 
-# --- Property Functions ---
+# --- Resource Functions ---
 
-def get_property_by_id(property_id: uuid.UUID) -> Optional[Property]:
-    """Retrieves a single property by its unique ID."""
+def get_resource_by_id(resource_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Resource]:
+    """Retrieves a single resource by its unique ID, ensuring it belongs to the user."""
     with Session(engine) as session:
-        return session.get(Property, property_id)
+        statement = select(Resource).where(Resource.id == resource_id, Resource.user_id == user_id)
+        return session.exec(statement).first()
 
-def get_all_properties() -> List[Property]:
-    """Retrieves all properties from the database."""
+def get_all_resources_for_user(user_id: uuid.UUID) -> List[Resource]:
+    """Retrieves all resources from the database for a specific user."""
     with Session(engine) as session:
-        return session.exec(select(Property)).all()
+        statement = select(Resource).where(Resource.user_id == user_id)
+        return session.exec(statement).all()
 
-def update_property_price(property_id: uuid.UUID, new_price: float) -> Optional[Property]:
-    """Updates the price for a specific property."""
+def create_resource(user_id: uuid.UUID, resource_data: ResourceCreate) -> Resource:
+    """Creates a new resource for a user."""
     with Session(engine) as session:
-        prop = session.get(Property, property_id)
-        if prop:
-            prop.price = new_price
-            session.add(prop)
-            session.commit()
-            session.refresh(prop)
-            return prop
-        return None
+        new_resource = Resource.model_validate(resource_data, update={"user_id": user_id})
+        session.add(new_resource)
+        session.commit()
+        session.refresh(new_resource)
+        return new_resource
+
+def update_resource(resource_id: uuid.UUID, update_data: ResourceUpdate, user_id: uuid.UUID) -> Optional[Resource]:
+    """Updates a resource's status or attributes."""
+    with Session(engine) as session:
+        resource = session.exec(select(Resource).where(Resource.id == resource_id, Resource.user_id == user_id)).first()
+        if not resource:
+            return None
+        
+        update_dict = update_data.model_dump(exclude_unset=True)
+        for key, value in update_dict.items():
+            setattr(resource, key, value)
+            
+        session.add(resource)
+        session.commit()
+        session.refresh(resource)
+        return resource
         
         
-# --- Campaign Briefing Functions ---
+# --- Campaign Briefing & Recommendation Slate Functions ---
 
 def save_campaign_briefing(briefing: CampaignBriefing, session: Optional[Session] = None):
     """
-    Saves or updates a single CampaignBriefing in the database.
+    Saves or updates a single CampaignBriefing/RecommendationSlate in the database.
     Can operate within a provided session or create its own.
     """
     def _save(db_session: Session):
         db_session.add(briefing)
-        logging.info(f"CRM: Queued save for campaign briefing -> {briefing.headline}")
+        logging.info(f"CRM: Queued save for campaign/slate -> {briefing.headline}")
 
     if session:
         _save(session)
@@ -189,7 +202,7 @@ def save_campaign_briefing(briefing: CampaignBriefing, session: Optional[Session
         with Session(engine) as new_session:
             _save(new_session)
             new_session.commit()
-            logging.info(f"CRM: Committed campaign briefing -> {briefing.headline}")
+            logging.info(f"CRM: Committed campaign/slate -> {briefing.headline}")
 
 
 def get_new_campaign_briefings_for_user(user_id: uuid.UUID) -> List[CampaignBriefing]:
@@ -218,6 +231,40 @@ def update_campaign_briefing(campaign_id: uuid.UUID, update_data: CampaignUpdate
         session.refresh(briefing)
         return briefing
 
+# --- NEW: Function to get the active recommendation slate for the UI ---
+def get_active_recommendation_slate_for_client(client_id: uuid.UUID, user_id: uuid.UUID, session: Session) -> Optional[CampaignBriefing]:
+    """
+    Finds the currently active recommendation slate for a client.
+    This is used by the orchestrator to find slates that need to be marked 'stale'
+    and by the API to deliver the active slate to the UI.
+    Operates within a provided session.
+    """
+    statement = select(CampaignBriefing).where(
+        CampaignBriefing.client_id == client_id,
+        CampaignBriefing.user_id == user_id,
+        CampaignBriefing.status == 'active'
+    )
+    return session.exec(statement).first()
+
+# --- NEW: Function to update the status of a recommendation slate ---
+def update_slate_status(slate_id: uuid.UUID, new_status: str, user_id: uuid.UUID, session: Session) -> Optional[CampaignBriefing]:
+    """
+    Updates the status of a specific recommendation slate (CampaignBriefing).
+    Ensures the slate belongs to the current user for security.
+    Operates within a provided session.
+    """
+    statement = select(CampaignBriefing).where(
+        CampaignBriefing.id == slate_id,
+        CampaignBriefing.user_id == user_id
+    )
+    slate = session.exec(statement).first()
+    
+    if slate:
+        slate.status = new_status
+        session.add(slate)
+        logging.info(f"CRM: Queued status update for slate {slate_id} to '{new_status}'.")
+        return slate
+    return None
 
 # --- Universal Message Log Functions ---
 
@@ -245,7 +292,6 @@ def get_conversation_history(client_id: uuid.UUID, user_id: uuid.UUID) -> List[M
     This is used for displaying the full conversation history in the UI.
     """
     with Session(engine) as session:
-        # Security check: Ensure the client belongs to the requesting user.
         client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client_check:
             logging.warning(f"CRM AUTH: User {user_id} attempted to access messages for client {client_id} without permission.")
@@ -255,31 +301,20 @@ def get_conversation_history(client_id: uuid.UUID, user_id: uuid.UUID) -> List[M
             select(Message)
             .where(Message.client_id == client_id)
             .options(selectinload(Message.ai_draft))
-            .order_by(Message.created_at) # Returns in chronological order for UI display.
+            .order_by(Message.created_at)
         )
         return session.exec(statement).all()
 
-# --- NEW FUNCTION: To provide recent conversation context to the AI ---
 def get_recent_messages(client_id: uuid.UUID, user_id: uuid.UUID, limit: int = 10) -> List[Message]:
     """
     Retrieves the most recent N messages for a client to provide context to the AI.
-    
-    Args:
-        client_id: The ID of the client whose history is being fetched.
-        user_id: The ID of the user making the request (for security).
-        limit: The maximum number of recent messages to retrieve.
-        
-    Returns:
-        A list of Message objects in chronological order (oldest to newest).
     """
     with Session(engine) as session:
-        # Security check: Ensure the client belongs to the requesting user.
         client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client_check:
             logging.warning(f"CRM AUTH: User {user_id} attempted to access messages for client {client_id} without permission.")
             return []
 
-        # Fetch the most recent messages in descending order from the database.
         statement = (
             select(Message)
             .where(Message.client_id == client_id)
@@ -288,9 +323,6 @@ def get_recent_messages(client_id: uuid.UUID, user_id: uuid.UUID, limit: int = 1
         )
         
         recent_messages = session.exec(statement).all()
-        
-        # The messages are currently newest-to-oldest. Reverse them in Python
-        # to get a chronological list (oldest-to-newest) for the LLM prompt.
         return recent_messages[::-1]
 
 

@@ -1,5 +1,5 @@
-# backend/agent_core/agents/conversation.py
-# --- MODIFIED: `generate_response` now accepts and uses conversation history to provide contextual replies.
+# File Path: backend/agent_core/agents/conversation.py
+# --- FINAL CORRECTED VERSION: Complete, unabbreviated, and refactored for Pillar 2.
 
 from typing import Dict, Any, List
 import uuid
@@ -7,14 +7,14 @@ import json
 import logging
 
 from data.models.user import User
-from data.models.property import Property
+# --- MODIFIED: Import the generic Resource model instead of the specific Property model ---
+from data.models.resource import Resource
 from data.models.campaign import MatchedClient
-# --- MODIFICATION: Import Message and MessageDirection to process history ---
 from data.models.message import Message, MessageDirection
 from integrations import openai as openai_service
 from data import crm as crm_service
 
-# --- Function for "Draft with AI" in Instant Nudge ---
+# This function remains unchanged as it serves a different, simpler purpose.
 async def draft_instant_nudge_message(
     realtor: User,
     topic: str,
@@ -24,7 +24,6 @@ async def draft_instant_nudge_message(
     """
     logging.info(f"CONVERSATION AGENT (INSTANT NUDGE): Drafting message for topic '{topic}'...")
 
-    # Create the style guide addition to match the user's voice.
     style_prompt_addition = ""
     if realtor.ai_style_guide:
         try:
@@ -38,9 +37,7 @@ async def draft_instant_nudge_message(
     prompt = f"""
     {base_prompt_intro}
     Your task is to draft a friendly, professional, and engaging SMS message for a client.
-
     The topic or goal of the message is: "{topic}"
-
     Instructions:
     1. Draft a master SMS message. Use the placeholder `[Client Name]` for personalization.
     2. The tone should be warm and helpful.
@@ -57,85 +54,117 @@ async def draft_instant_nudge_message(
     return ai_draft or f"Hi [Client Name], I was just thinking about you and wanted to reach out regarding {topic}."
 
 
-# --- MODIFIED: Function updated to accept and process conversation history ---
-async def generate_response(
+# --- RE-ENGINEERED for Pillar 1, MODIFIED for Pillar 2: Now fetches and uses generic Resources for context ---
+async def generate_recommendation_slate(
+    realtor: User,
     client_id: uuid.UUID,
-    incoming_message_content: str,
-    context: Dict[str, Any],
-    conversation_history: List[Message] | None = None
+    incoming_message: Message,
+    conversation_history: List[Message]
 ) -> Dict[str, Any]:
     """
-    Generates a draft response for an incoming client message using an LLM,
-    now with the context of the recent conversation history.
-    
-    Args:
-        client_id: The ID of the client.
-        incoming_message_content: The new message received from the client.
-        context: Additional context about the client (name, tags, etc.).
-        conversation_history: A list of recent Message objects (optional).
+    Analyzes an incoming message and conversation history to generate a structured
+    "slate of recommendations" for the user to act upon.
     """
-    logging.info(f"CONVERSATION AGENT (INBOUND): Generating response for client {client_id}...")
+    logging.info(f"CO-PILOT AGENT: Generating recommendation slate for client {client_id}...")
     
-    client_name = context.get('client_name', 'client')
-    client_tags = ", ".join(context.get('client_tags', []))
-    
-    all_properties = crm_service.get_all_properties()
-    property_context_str = ""
-    if all_properties:
-        property_context_str = "\n\nAvailable Properties (for context, include only relevant ones in response):\n"
-        for i, prop in enumerate(all_properties[:3]):
-            property_context_str += (f"- Property {i+1}: {prop.address}, Price: ${prop.price:,.0f}, Status: {prop.status}, Type: {prop.property_type}\n")
+    client = crm_service.get_client_by_id(client_id, realtor.id)
+    if not client: return {} 
 
-    # The initial system message that sets the AI's persona.
-    system_prompt = {
-        "role": "system", 
-        "content": (
-            f"You are an AI Nudge assistant for a realtor. Your goal is to provide helpful, concise, and context-aware responses. "
-            f"The client's name is {client_name}. Their tags include: {client_tags}. "
-            "Remember the conversation history and do not ask for information that has already been provided. "
-            f"{property_context_str}"
-        )
+    client_name = client.full_name
+    client_tags = ", ".join(client.user_tags + client.ai_tags)
+
+    all_resources = crm_service.get_all_resources_for_user(user_id=realtor.id)
+    resource_context_str = ""
+    if all_resources:
+        property_resources = [r for r in all_resources if r.resource_type == 'property']
+        if property_resources:
+            resource_context_str = "\n\nAvailable Properties (for context):\n"
+            for i, res in enumerate(property_resources[:3]):
+                attrs = res.attributes
+                address = attrs.get('address', 'N/A')
+                price = attrs.get('price', 0)
+                status = res.status
+                resource_context_str += f"- {address}, Price: ${price:,.0f}, Status: {status}\n"
+
+    json_schema = """
+    {
+      "recommendations": [
+        {
+          "type": "SUGGEST_DRAFT",
+          "payload": { "text": "<The suggested SMS response text>" }
+        },
+        {
+          "type": "UPDATE_CLIENT_INTEL",
+          "payload": {
+            "tags_to_add": ["<tag1>", "<tag2>"],
+            "notes_to_add": "<A concise note summarizing new client intel from the message>"
+          }
+        }
+      ]
     }
-    
-    # Initialize the prompt message list with the system persona.
-    prompt_messages = [system_prompt]
+    """
 
-    # --- MODIFICATION START: Format and inject conversation history ---
-    # If history is provided, format it into the "user" and "assistant" roles
-    # that the OpenAI API expects. This gives the AI conversational memory.
-    if conversation_history:
-        for message in conversation_history:
-            if message.direction == MessageDirection.INBOUND:
-                # Messages from the client are from the "user"
-                prompt_messages.append({"role": "user", "content": message.content})
-            elif message.direction == MessageDirection.OUTBOUND:
-                # Messages sent by us (the AI/realtor) are from the "assistant"
-                prompt_messages.append({"role": "assistant", "content": message.content})
-        logging.info(f"CONVERSATION AGENT: Injected {len(conversation_history)} messages into the prompt.")
-    # --- MODIFICATION END ---
+    prompt = f"""
+    You are an AI Co-Pilot for {realtor.full_name}, an expert in their field.
+    Your task is to analyze the latest incoming message from a client named {client_name} and generate a structured JSON object of recommended actions.
+
+    ## CONTEXT
+    - Client Name: {client_name}
+    - Existing Client Tags: {client_tags}
+    {resource_context_str}
+    - Conversation History (most recent first):
+    """
     
-    # Add the newest incoming message from the client to the end of the prompt.
-    prompt_messages.append({"role": "user", "content": incoming_message_content})
+    for message in reversed(conversation_history):
+        direction = "Client" if message.direction == MessageDirection.INBOUND else "Agent"
+        prompt += f"- {direction}: {message.content}\n"
     
-    # Generate the AI draft using the full context (system + history + new message).
-    ai_draft_content = await openai_service.generate_text_completion(prompt_messages=prompt_messages, model="gpt-4o-mini")
+    prompt += f"\n## LATEST INCOMING MESSAGE FROM {client_name}:\n\"{incoming_message.content}\"\n"
+
+    prompt += f"""
+    ## INSTRUCTIONS
+    1.  **Analyze the LATEST INCOMING MESSAGE** in the context of the history and available resources.
+    2.  **Generate a helpful SMS response draft.**
+    3.  **Identify new, actionable intelligence** (preferences, timelines, etc.).
+    4.  **Format your entire output** as a single, valid JSON object following the schema.
+
+    ## JSON OUTPUT SCHEMA
+    ```json
+    {json_schema}
+    ```
+    Now, generate the JSON output:
+    """
     
-    if ai_draft_content:
-        return {"ai_draft": ai_draft_content, "confidence": 0.95, "suggested_action": "send_draft"}
-    else:
-        return {"ai_draft": "I'm sorry, I couldn't generate a smart response right now.", "confidence": 0.1, "suggested_action": "review_manually"}
+    logging.info(f"CO-PILOT AGENT: Sending prompt to LLM for client {client_id}.")
+    raw_response = await openai_service.generate_text_completion(
+        prompt_messages=[{"role": "user", "content": prompt}],
+        model="gpt-4o-mini",
+        is_json=True
+    )
+
+    if not raw_response:
+        logging.error(f"CO-PILOT AGENT: LLM returned an empty response for client {client_id}.")
+        return {}
+
+    try:
+        recommendation_data = json.loads(raw_response)
+        logging.info(f"CO-PILOT AGENT: Successfully parsed recommendation slate from LLM for client {client_id}.")
+        return recommendation_data
+    except json.JSONDecodeError:
+        logging.error(f"CO-PILOT AGENT: Failed to parse JSON from LLM response. Raw response: {raw_response}")
+        return { "recommendations": [{"type": "SUGGEST_DRAFT", "payload": {"text": raw_response}}] }
 
 
-# --- Function for OUTBOUND Campaigns ---
+# --- MODIFIED: This function now accepts a generic Resource ---
 async def draft_outbound_campaign_message(
     realtor: User,
     event_type: str,
     matched_audience: List[MatchedClient],
-    property_item: Property | None = None,
+    resource: Resource | None = None,
 ) -> str:
     """
-    Uses a live LLM to draft a personalized outbound message, now incorporating
-    the user's learned writing style into the existing prompt structure.
+    Uses a live LLM to draft a personalized outbound message for a campaign.
+    This function is now vertical-agnostic by operating on a generic Resource.
     """
     logging.info(f"CONVERSATION AGENT (OUTBOUND): Drafting message for event '{event_type}'...")
 
@@ -163,13 +192,14 @@ async def draft_outbound_campaign_message(
         4. The goal is simply to restart the conversation. Ask an open-ended question.
         Draft the SMS message now:
         """
-    elif event_type == "sold_listing" and property_item:
+    elif event_type == "sold_listing" and resource:
+        attrs = resource.attributes
         prompt = f"""
         {base_prompt_intro}
         Your task is to draft a compelling, value-driven SMS message about a nearby property that just sold.
         This is for clients who might be thinking of selling their own homes.
         Realtor's Name: {realtor.full_name}
-        Context: The property at {property_item.address} just sold for ${property_item.price:,.0f}.
+        Context: The property at {attrs.get('address', 'N/A')} just sold for ${attrs.get('price', 0):,.0f}.
         Instructions:
         1. Draft a master SMS message. Use `[Client Name]` for personalization.
         2. The tone should be insightful and create urgency/opportunity.
@@ -177,26 +207,28 @@ async def draft_outbound_campaign_message(
         4. Keep it concise for SMS. Do NOT include a listing URL.
         Draft the SMS message now:
         """
-    elif event_type == "back_on_market" and property_item:
+    elif event_type == "back_on_market" and resource:
+        attrs = resource.attributes
         prompt = f"""
         {base_prompt_intro}
         Your task is to draft a helpful, urgent SMS message about a property that's unexpectedly available again.
         This is for clients who previously showed interest in similar homes.
         Realtor's Name: {realtor.full_name}
-        Context: The property at {property_item.address} was pending sale, but just came back on the market.
+        Context: The property at {attrs.get('address', 'N/A')} was pending sale, but just came back on the market.
         Instructions:
         1. Draft a master SMS message. Use `[Client Name]` for personalization.
         2. The tone should be helpful and create a sense of a second chance.
         3. MUST include the property's listing URL at the end.
         4. Keep it concise and clear.
-        Property URL: {property_item.listing_url or "N/A"}
+        Property URL: {attrs.get('listing_url', 'N/A')}
         Draft the SMS message now:
         """
-    elif event_type == "expired_listing" and property_item:
+    elif event_type == "expired_listing" and resource:
+        attrs = resource.attributes
         prompt = f"""
         {base_prompt_intro}
         Your task is to draft a short, direct, and professional outreach message for your agent, {realtor.full_name}, to send to a homeowner whose listing just expired.
-        Context: The property at {property_item.address} was listed with another agent and has now expired without selling. This is a prime opportunity to win a new client.
+        Context: The property at {attrs.get('address', 'N/A')} was listed with another agent and has now expired without selling. This is a prime opportunity to win a new client.
         Instructions:
         1. The message should be from the agent's perspective.
         2. Acknowledge the listing expired and express empathy.
@@ -204,40 +236,43 @@ async def draft_outbound_campaign_message(
         4. End with a clear, low-pressure call to action.
         Draft the outreach message now:
         """
-    elif event_type == "coming_soon" and property_item:
+    elif event_type == "coming_soon" and resource:
+        attrs = resource.attributes
         prompt = f"""
         {base_prompt_intro}
         Your task is to draft an exciting, exclusive-access SMS message for clients.
         Realtor's Name: {realtor.full_name}
-        Context: The property at {property_item.address} is not on the public market yet but will be soon ("Coming Soon").
+        Context: The property at {attrs.get('address', 'N/A')} is not on the public market yet but will be soon ("Coming Soon").
         Instructions:
         1. Draft a master SMS message. Use `[Client Name]` for personalization.
         2. The tone should be exciting and create a sense of exclusivity.
         3. Emphasize that they are getting a "first look" before anyone else.
         Draft the SMS message now:
         """
-    elif event_type == "withdrawn_listing" and property_item:
+    elif event_type == "withdrawn_listing" and resource:
+        attrs = resource.attributes
         prompt = f"""
         {base_prompt_intro}
         Your task is to draft a very gentle, professional message for your agent, {realtor.full_name}, to send to a homeowner who has just withdrawn their property from the market.
-        Context: The property at {property_item.address} was recently withdrawn. The homeowner may be tired of the process. The goal is to be helpful, not pushy.
+        Context: The property at {attrs.get('address', 'N/A')} was recently withdrawn. The homeowner may be tired of the process. The goal is to be helpful, not pushy.
         Instructions:
         1. The message should be from the agent's perspective.
         2. The tone must be low-pressure.
         3. Offer to be a future resource. Do NOT ask for a meeting now.
         Draft the outreach message now:
         """
-    elif property_item:
+    elif resource:
+        attrs = resource.attributes
         prompt = f"""
         {base_prompt_intro}
         Your task is to draft a compelling and slightly informal master SMS message.
         Realtor's Name: {realtor.full_name}
-        Context: A '{event_type}' event occurred for the property at {property_item.address}.
+        Context: A '{event_type}' event occurred for the resource at {attrs.get('address', 'Resource')}.
         Instructions:
         1. Draft a master SMS message. Use `[Client Name]` for personalization.
         2. The tone should be helpful and insightful.
-        3. You MUST include the property's listing URL at the end if it exists.
-        Property URL: {property_item.listing_url or "N/A"}
+        3. You MUST include the resource's URL at the end if it exists.
+        Resource URL: {attrs.get('listing_url', 'N/A')}
         Draft the SMS message now:
         """
 

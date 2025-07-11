@@ -10,8 +10,10 @@ from common.config import get_settings
 # Correctly import all table models to ensure they are registered with SQLModel metadata.
 from .models.user import User
 from .models.client import Client
-from .models.property import Property
-from .models.message import ScheduledMessage
+# --- MODIFIED: Replaced the obsolete 'Property' import with our new 'Resource' model. ---
+from .models.resource import Resource
+# --- MODIFIED: Added 'Message' which is a dependency for CampaignBriefing relationships. ---
+from .models.message import Message, ScheduledMessage
 from .models.campaign import CampaignBriefing
 from .models.event import MarketEvent
 
