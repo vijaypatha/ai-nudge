@@ -1,6 +1,5 @@
 // frontend/app/(main)/conversations/[clientId]/page.tsx
-// MODIFIED: Simplified to use a single data-fetching poll for messages
-// with embedded AI drafts.
+// --- FINAL CORRECTED VERSION: Complete, unabbreviated, and renders the new RecommendationActions component.
 
 'use client';
 
@@ -9,7 +8,6 @@ import { find } from 'lodash';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import clsx from 'clsx';
-// --- MODIFIED: Message type now includes optional ai_draft from your correct AppContext ---
 import { useAppContext, Client, Message, ScheduledMessage } from '@/context/AppContext';
 import { useSidebar } from '@/context/SidebarContext';
 
@@ -21,6 +19,8 @@ import { ChatHistory } from '@/components/conversation/ChatHistory';
 import { MessageComposer } from '@/components/conversation/MessageComposer';
 import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
+import { RecommendationActions } from '@/components/conversation/RecommendationActions';
+
 
 import { Users, Menu, Phone, Video } from 'lucide-react';
 
@@ -30,7 +30,12 @@ interface ConversationPageProps {
     };
 }
 
-// --- ADDED: Type for the MessageComposer ref handle ---
+// Define the shape of the full API response
+interface ConversationData {
+    messages: Message[];
+    active_recommendations?: any; // This will hold our recommendation slate
+}
+
 interface MessageComposerHandle {
     setValue: (value: string) => void;
 }
@@ -39,17 +44,15 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     const { clientId } = params;
     const { loading, api, clients, properties, updateClientInList, refetchScheduledMessagesForClient } = useAppContext();
     const { setIsSidebarOpen } = useSidebar();
-    const router = useRouter();
-
+    
     const [error, setError] = useState<string | null>(null);
     const [selectedClient, setSelectedClient] = useState<Client | undefined>(undefined);
-    const [currentMessages, setCurrentMessages] = useState<Message[]>([]);
+    const [conversationData, setConversationData] = useState<ConversationData | null>(null);
     const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
     const [isSending, setIsSending] = useState(false);
     const [isPlanningCampaign, setIsPlanningCampaign] = useState(false);
     
     const [activeTab, setActiveTab] = useState<'messages' | 'intel'>('messages');
-    // --- MODIFIED: Typed the ref for better access to child component methods ---
     const messageComposerRef = useRef<MessageComposerHandle>(null);
 
     const tabOptions: TabOption[] = [
@@ -74,12 +77,10 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         }
     }, [refetchScheduledMessagesForClient]);
     
-    // --- MODIFIED: This effect now polls for messages WITH embedded drafts ---
     useEffect(() => {
         if (!selectedClient) return;
 
         let isMounted = true;
-        // Fetch scheduled messages once on load
         fetchScheduled(selectedClient.id);
         setActiveTab('messages');
 
@@ -87,19 +88,18 @@ export default function ConversationPage({ params }: ConversationPageProps) {
             if (!isMounted) return;
             console.log("Polling for conversation updates...");
             try {
-                // Single API call to get messages with their drafts
-                const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
+                const historyData: ConversationData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
         
                 if (isMounted) {
-                    setCurrentMessages(prev => JSON.stringify(prev) !== JSON.stringify(historyData) ? historyData : prev);
+                    setConversationData(prev => JSON.stringify(prev) !== JSON.stringify(historyData) ? historyData : prev);
                 }
             } catch (err) {
                 console.error("Polling failed:", err);
             }
         };
 
-        pollForUpdates(); // Initial fetch
-        const intervalId = setInterval(pollForUpdates, 5000); // Poll every 5 seconds
+        pollForUpdates();
+        const intervalId = setInterval(pollForUpdates, 5000);
 
         return () => {
             isMounted = false;
@@ -110,18 +110,23 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     const handleSendMessage = useCallback(async (content: string) => {
         if (!content.trim() || !selectedClient) return;
         setIsSending(true);
-        // Optimistic UI update
+
         const optimisticMessage: Message = { id: `agent-${Date.now()}`, client_id: selectedClient.id, content, direction: 'outbound', status: 'pending', created_at: new Date().toISOString() };
-        setCurrentMessages(prev => [...prev, optimisticMessage]);
+        setConversationData(prevData => {
+            if (!prevData) return { messages: [optimisticMessage], active_recommendations: null };
+            return {
+                ...prevData,
+                messages: [...prevData.messages, optimisticMessage]
+            };
+        });
+
         try {
             await api.post(`/api/conversations/${selectedClient.id}/send_reply`, { content });
-            // Refetch history to get the final message state from the server
             const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
-            setCurrentMessages(historyData);
+            setConversationData(historyData);
         } catch (err) {
             console.error("Failed to send message:", err);
-            // Rollback optimistic update on failure
-            setCurrentMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
+            setConversationData(prev => prev ? { ...prev, messages: prev.messages.filter(m => m.id !== optimisticMessage.id) } : null);
             alert("Failed to send message.");
         } finally {
             setIsSending(false);
@@ -146,6 +151,17 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     const handleUpdateScheduledMessage = (updatedMessage: ScheduledMessage) => {
         setScheduledMessages(prev => prev.map(msg => msg.id === updatedMessage.id ? updatedMessage : msg));
     };
+
+    const handleActionComplete = useCallback(() => {
+        if(selectedClient) {
+            console.log("Action complete, refreshing client data...");
+            const refetchClient = async () => {
+                const refreshedClient = await api.get(`/api/clients/${selectedClient.id}`);
+                updateClientInList(refreshedClient);
+            };
+            refetchClient();
+        }
+    }, [selectedClient, api, updateClientInList]);
 
     if (loading && !selectedClient) {
         return <div className="flex-1 flex items-center justify-center text-brand-text-muted">Loading Client Data...</div>;
@@ -192,13 +208,20 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                 </div>
 
                 <div className={clsx("flex flex-col flex-grow min-h-0", activeTab === 'messages' ? 'flex' : 'hidden lg:flex')}>
-                   {/* --- MODIFIED: Pass down handlers to the ChatHistory component --- */}
                    <ChatHistory 
-                       messages={currentMessages} 
+                       conversationData={conversationData} 
                        selectedClient={selectedClient} 
                        onSendMessage={handleSendMessage}
                        messageComposerRef={messageComposerRef}
                    />
+                   
+                   {conversationData?.active_recommendations && selectedClient && (
+                        <RecommendationActions
+                            recommendations={conversationData.active_recommendations}
+                            client={selectedClient}
+                            onActionComplete={handleActionComplete}
+                        />
+                   )}
 
                    <MessageComposer onSendMessage={handleSendMessage} isSending={isSending} ref={messageComposerRef} />
                 </div>

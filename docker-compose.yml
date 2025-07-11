@@ -1,5 +1,5 @@
 # Docker Compose configuration for AI Nudge application
-# --- FINAL FIX for Celery startup order ---
+# --- DEFINITIVE FIX: Removes conflicting 'environment' block from backend service ---
 
 services:
   # PostgreSQL Database Service
@@ -35,12 +35,13 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8001:8000"
-    environment:
-      - ENVIRONMENT=development
-    volumes:
-      - ./backend:/app
+    # --- MODIFIED: Removed the 'environment' block ---
+    # The 'env_file' directive below is the correct and sufficient way to load
+    # all necessary variables from the .env file. This resolves the override conflict.
     env_file:
       - ./backend/.env
+    volumes:
+      - ./backend:/app
     networks:
       - ai_nudge_net
     depends_on:
@@ -81,8 +82,6 @@ services:
     command: celery -A celery_worker.celery_app worker --loglevel=info
     networks:
       - ai_nudge_net
-    # --- FIX: Added depends_on for Redis ---
-    # This ensures the worker does not start until Redis is ready.
     depends_on:
       db:
         condition: service_healthy
@@ -104,8 +103,6 @@ services:
     command: celery -A celery_worker.celery_app beat --loglevel=info
     networks:
       - ai_nudge_net
-    # --- FIX: Added depends_on for Redis ---
-    # This ensures the scheduler does not start until Redis is ready.
     depends_on:
       db:
         condition: service_healthy

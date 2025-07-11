@@ -136,10 +136,13 @@ async def generate_recommendation_slate(
     """
     
     logging.info(f"CO-PILOT AGENT: Sending prompt to LLM for client {client_id}.")
+    
+    # --- MODIFIED: Replaced the incorrect 'is_json' argument ---
+    # This now uses the correct parameter for enabling OpenAI's JSON mode.
     raw_response = await openai_service.generate_text_completion(
         prompt_messages=[{"role": "user", "content": prompt}],
         model="gpt-4o-mini",
-        is_json=True
+        response_format={"type": "json_object"}
     )
 
     if not raw_response:

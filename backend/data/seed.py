@@ -1,9 +1,5 @@
-# ---
 # File Path: backend/data/seed.py
-# Purpose: Seeds the database with initial data for development and testing.
-# ---
-# CORRECTED: Commits the User object first to satisfy foreign key constraints.
-# ---
+# --- DEFINITIVE FIX: The clear_demo_data function is no longer needed as database.py now handles it.
 
 import uuid
 import asyncio
@@ -28,28 +24,22 @@ CLIENT_ID_SAM = uuid.UUID("d2f3e4a5-6b7a-8c9d-0e1f-2a3b4c5d6e7f")
 CLIENT_ID_BEN = uuid.UUID("e3f4a5b6-7a8b-9c0d-1e2f-3a4b5c6d7e8f")
 
 def clear_demo_data():
-    """Deletes all data from tables in the correct order to respect foreign keys."""
-    print("SEEDER: Clearing all existing demo data...")
-    with Session(engine) as session:
-        # Correct order to avoid foreign key violations
-        session.query(Message).delete()
-        session.query(ScheduledMessage).delete()
-        session.query(CampaignBriefing).delete()
-        session.query(MarketEvent).delete()
-        session.query(Client).delete()
-        session.query(Resource).delete()
-        session.query(User).delete()
-        session.commit()
-    print("SEEDER: Demo data cleared successfully.")
+    """
+    This function is now obsolete. The create_db_and_tables function in database.py
+    handles wiping the database by dropping all tables on startup.
+    """
+    print("SEEDER: Deletion is now handled by database.py's drop_all(). Skipping.")
+    pass
 
 async def seed_database():
     """Populates the database with initial data for development."""
     print("SEEDER: Preparing to seed the database...")
+    # --- NOTE: The database is already clean because of the new drop_all() logic. ---
+    # clear_demo_data() is no longer strictly necessary but we can leave the call.
     clear_demo_data()
 
     with Session(engine) as session:
-        # --- MODIFIED: Create and commit the User object FIRST ---
-        # This ensures the user exists in the database before any dependent objects are created.
+        # Commit the User object FIRST to ensure it exists for foreign key relations.
         realtor_user = User(
             id=USER_ID_JANE,
             user_type=UserType.REALTOR,
@@ -63,7 +53,7 @@ async def seed_database():
         session.commit()
         print("SEEDER: Base user committed successfully.")
 
-        # --- Now create the dependent objects (Resource and Clients) ---
+        # Now create dependent objects that reference the user.
         property_attributes = {
             "address": "123 Maple St, Sunnyvale, CA",
             "price": 1100000.0,
@@ -75,7 +65,7 @@ async def seed_database():
         
         resource_maple = Resource(
             id=PROP_ID_MAPLE,
-            user_id=USER_ID_JANE, # This user ID is now guaranteed to exist
+            user_id=USER_ID_JANE,
             resource_type="property",
             status="active",
             attributes=property_attributes
@@ -93,7 +83,6 @@ async def seed_database():
         session.commit()
         print("SEEDER: Dependent resources and clients committed.")
 
-        # Refresh objects to get latest state from DB after commit
         session.refresh(realtor_user)
         session.refresh(resource_maple)
 

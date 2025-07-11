@@ -1,5 +1,5 @@
 # File Path: backend/api/rest/clients.py
-# --- DEFINITIVE FIX: Manual client add now updates onboarding state ---
+# --- CORRECTED: Adds the new /tags endpoint to the EXISTING file.
 
 import logging
 from fastapi import APIRouter, HTTPException, status, Depends
@@ -21,6 +21,10 @@ class ClientSearchQuery(BaseModel):
     natural_language_query: Optional[str] = None
     tags: Optional[List[str]] = None
 
+# --- NEW: Pydantic model for the 'add tags' request body ---
+class AddTagsPayload(BaseModel):
+    tags: List[str]
+
 @router.post("/manual", response_model=Client)
 async def add_manual_client(
     client_data: ClientCreate,
@@ -34,7 +38,6 @@ async def add_manual_client(
         client_data=client_data
     )
     
-    # --- ADDED: Update onboarding state after manual add ---
     try:
         if not current_user.onboarding_state.get('contacts_imported'):
             logging.info(f"Updating onboarding state for user {current_user.id} after manual contact add.")
@@ -45,9 +48,7 @@ async def add_manual_client(
             crm_service.update_user(user_id=current_user.id, update_data=update_data)
             logging.info(f"Successfully updated onboarding state for user {current_user.id}.")
     except Exception as e:
-        # Log an error but don't fail the request, as the client was still added.
         logging.error(f"Could not update onboarding_state for user {current_user.id} after manual add: {e}")
-    # --- END OF ADDED CODE ---
     
     return client
 
@@ -77,6 +78,32 @@ async def search_clients(query: ClientSearchQuery, current_user: User = Depends(
         return all_clients
 
     return [client for client in all_clients if client.id in final_results]
+
+# --- NEW ENDPOINT: To add one or more tags to a client ---
+@router.post("/{client_id}/tags", response_model=Client)
+async def add_tags_to_client(
+    client_id: UUID,
+    payload: AddTagsPayload,
+    current_user: User = Depends(get_current_user_from_token),
+):
+    """
+    Appends one or more tags to a client's user_tags list.
+    This is called by the new RecommendationActions UI component.
+    """
+    client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found.")
+
+    updated_client = crm_service.add_client_tags(
+        client_id=client_id, 
+        tags_to_add=payload.tags,
+        user_id=current_user.id
+    )
+
+    if not updated_client:
+        raise HTTPException(status_code=500, detail="Failed to update client tags.")
+
+    return updated_client
 
 @router.put("/{client_id}/tags", response_model=Client)
 async def update_client_tags_endpoint(client_id: UUID, tag_data: ClientTagUpdate, current_user: User = Depends(get_current_user_from_token)):

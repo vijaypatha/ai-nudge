@@ -1,44 +1,49 @@
 // frontend/components/conversation/ChatHistory.tsx
-// Purpose: Renders the scrollable list of messages in a conversation.
-// --- MODIFIED: Now renders an inline AI draft component beneath its parent message.
+// --- FINAL CLEANED VERSION ---
 
 'use client';
 
 import React, { useRef, useEffect } from 'react';
 import clsx from 'clsx';
-import type { Message, Client } from '@/context/AppContext';
+import type { Client } from '@/context/AppContext';
 import { Avatar } from '../ui/Avatar';
-// --- ADDED: Import the new AIDraftDisplay component ---
 import { AIDraftDisplay } from './AIDraftDisplay';
 
-// --- ADDED: Ref type for the message composer ---
+// Define the shape of a single message
+interface Message {
+  id: string;
+  content: string;
+  direction: 'inbound' | 'outbound';
+  created_at: string;
+  ai_draft?: any;
+}
+
+// Define the shape of the conversation data object
+interface ConversationData {
+    messages: Message[];
+    active_recommendations?: any;
+}
+
 interface MessageComposerHandle {
     setValue: (value: string) => void;
 }
 
-/**
- * --- MODIFIED: Props for the ChatHistory component now include handlers ---
- * @param messages - An array of messages to display.
- * @param selectedClient - The client participating in the conversation.
- * @param onSendMessage - Callback function to send a message.
- * @param messageComposerRef - Ref to the MessageComposer for editing.
- */
 interface ChatHistoryProps {
-    messages: Message[];
+    // --- MODIFIED: The component now expects a single 'conversationData' prop ---
+    conversationData: ConversationData | null;
     selectedClient: Client;
     onSendMessage: (content: string) => Promise<void>;
     messageComposerRef: React.RefObject<MessageComposerHandle>;
 }
 
-/**
- * Displays a list of chat messages and auto-scrolls to the bottom.
- */
-export const ChatHistory = ({ messages, selectedClient, onSendMessage, messageComposerRef }: ChatHistoryProps) => {
+export const ChatHistory = ({ conversationData, selectedClient, onSendMessage, messageComposerRef }: ChatHistoryProps) => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    // Effect to scroll to the latest message whenever the messages array changes.
+    // Extract the messages array from the conversationData object.
+    // Provide a default empty array to prevent crashes if data is loading or null.
+    const messages = conversationData?.messages || [];
+
     useEffect(() => {
-        // A slight delay can help ensure the DOM has updated before scrolling
         setTimeout(() => {
             messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
         }, 100);
@@ -46,12 +51,11 @@ export const ChatHistory = ({ messages, selectedClient, onSendMessage, messageCo
 
     return (
         <div className="flex-grow overflow-y-auto">
-            <div className="p-6 space-y-2 h-full"> {/* Reduced space-y for tighter grouping */}
+            <div className="p-6 space-y-2 h-full">
+                {/* The .map() function now safely operates on the extracted messages array */}
                 {messages.map(msg => (
                     <div key={msg.id} className="flex flex-col">
-                        {/* Message Bubble */}
                         <div className={clsx("flex items-end gap-3", msg.direction === 'inbound' ? 'justify-start' : 'justify-end')}>
-                            {/* Show avatar only for inbound messages */}
                             {msg.direction === 'inbound' && <Avatar name={selectedClient.full_name} className="w-8 h-8 text-xs" />}
 
                             <div className={clsx("p-3 px-4 rounded-t-xl max-w-lg", {
@@ -64,9 +68,7 @@ export const ChatHistory = ({ messages, selectedClient, onSendMessage, messageCo
                                 </p>
                             </div>
                         </div>
-
-                        {/* --- ADDED: Inline AI Draft Component --- */}
-                        {/* If the message is inbound and has an associated draft, display it here. */}
+                        
                         {msg.direction === 'inbound' && msg.ai_draft && (
                             <AIDraftDisplay
                                 draft={msg.ai_draft}
@@ -76,7 +78,6 @@ export const ChatHistory = ({ messages, selectedClient, onSendMessage, messageCo
                         )}
                     </div>
                 ))}
-                {/* Empty div to act as a scroll target */}
                 <div ref={messagesEndRef} />
             </div>
         </div>

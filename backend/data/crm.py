@@ -143,6 +143,27 @@ def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uuid.UUID
             session.refresh(client)
             return client
         return None
+    
+def add_client_tags(client_id: uuid.UUID, tags_to_add: List[str], user_id: uuid.UUID) -> Optional[Client]:
+    """
+    Appends new tags to a client's user_tags list, ensuring no duplicates.
+    """
+    with Session(engine) as session:
+        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
+        
+        if client:
+            existing_tags = set(client.user_tags)
+            new_tags = set(tags_to_add)
+            updated_tags = sorted(list(existing_tags.union(new_tags)))
+            
+            client.user_tags = updated_tags
+            session.add(client)
+            session.commit()
+            session.refresh(client)
+            logging.info(f"CRM: Added tags {tags_to_add} to client {client_id}. New tags: {updated_tags}")
+            return client
+            
+        return None
 
 
 # --- Resource Functions ---
