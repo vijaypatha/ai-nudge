@@ -4,17 +4,20 @@
 
 import logging
 import os  # Import the 'os' module
+from urllib.parse import parse_qs
 from types import SimpleNamespace  # Import SimpleNamespace for mocking
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from typing import List, Optional
 from pydantic import BaseModel
 from twilio.rest import Client
+from twilio.twiml.messaging_response import MessagingResponse
 from twilio.base.exceptions import TwilioRestException
 
 from common.config import get_settings
 from data.models.user import User, UserUpdate
 from api.security import get_current_user_from_token
 from data import crm as crm_service
+from integrations import twilio_incoming # Import the processing logic
 
 # --- Router and Logger Setup ---
 router = APIRouter(prefix="/twilio", tags=["Twilio"])
@@ -124,3 +127,38 @@ def assign_phone_number(
     except Exception as e:
         logger.error(f"Unexpected error during number assignment: {e}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred during assignment.")
+    
+@router.post("/incoming-sms", response_class=Response, status_code=200)
+async def handle_incoming_sms(request: Request):
+    """
+    Receives incoming SMS messages from Twilio via webhook.
+    Parses the Twilio POST request and triggers message processing.
+    """
+    logger.info("Received incoming SMS webhook from Twilio.")
+    try:
+        # Twilio sends data as application/x-www-form-urlencoded
+        body = await request.body()
+        form_data = parse_qs(body.decode('utf-8'))
+
+        from_number = form_data.get('From', [None])[0]
+        to_number = form_data.get('To', [None])[0]
+        message_body = form_data.get('Body', [None])[0]
+
+        if not all([from_number, to_number, message_body]):
+            logger.error(f"Missing required Twilio parameters. From: {from_number}, To: {to_number}, Body: {message_body}")
+            # Return an empty TwiML response even on error, so Twilio doesn't retry endlessly
+            return Response(content=str(MessagingResponse()), media_type="application/xml")
+
+        logger.info(f"Incoming SMS from {from_number} to {to_number}: '{message_body}'")
+
+        # Hand off to the core processing logic
+        await twilio_incoming.process_incoming_sms(from_number=from_number, body=message_body)
+
+        # Return an empty TwiML response to Twilio to acknowledge receipt
+        # This prevents Twilio from retrying the webhook due to an HTTP error.
+        return Response(content=str(MessagingResponse()), media_type="application/xml")
+
+    except Exception as e:
+        logger.error(f"Error processing incoming Twilio SMS: {e}")
+        # Always return a 200 OK with empty TwiML to Twilio to prevent retries
+        return Response(content=str(MessagingResponse()), media_type="application/xml")

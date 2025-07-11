@@ -10,6 +10,7 @@ from sqlmodel import SQLModel, Field, Relationship, Column, JSON
 
 if TYPE_CHECKING:
     from .user import User
+    from .client import Client # Import Client model for type hinting
 
 # This remains a Pydantic model for validating API data structures.
 class MatchedClient(BaseModel):
@@ -24,6 +25,7 @@ class CampaignBriefing(SQLModel, table=True):
     """
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id")
+    client_id: Optional[UUID] = Field(default=None, foreign_key="client.id", index=True) # ADDED: Link to client
     campaign_type: str = Field(index=True)
     headline: str
     key_intel: Dict[str, Any] = Field(sa_column=Column(JSON))
@@ -39,6 +41,7 @@ class CampaignBriefing(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
     user: Optional["User"] = Relationship(back_populates="campaigns")
+    client: Optional["Client"] = Relationship(back_populates="campaign_briefings") # ADDED: Relationship to client
 
 class CampaignUpdate(SQLModel):
     """Model for updating campaign briefings."""

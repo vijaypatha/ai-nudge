@@ -1,24 +1,17 @@
 # ---
 # File Path: backend/data/crm.py
 # Purpose: Acts as a centralized data access layer (service layer) for the application.
-# All database queries and transactions are handled exclusively by the functions in this file.
-# This keeps the business logic in the API endpoints and agents clean and database-agnostic.
 # ---
 
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone
 import uuid
-from datetime import datetime, timezone
 from sqlmodel import Session, select, delete
 from .database import engine
 import logging
 
-# --- DEFINITIVE FIX ---
-# Corrected the import path to be absolute from the project root (`/app` in Docker).
-# This resolves the ModuleNotFoundError.
 from agent_core.deduplication.deduplication_engine import find_strong_duplicate
 
-# Import all necessary models
 from .models.client import Client, ClientUpdate, ClientCreate
 from .models.user import User, UserUpdate
 from .models.property import Property
@@ -41,7 +34,6 @@ def update_user(user_id: uuid.UUID, update_data: UserUpdate) -> Optional[User]:
         if not user:
             return None
         
-        # Safely update the user object with non-None values from the update_data model
         update_dict = update_data.model_dump(exclude_unset=True)
         for key, value in update_dict.items():
             setattr(user, key, value)
@@ -75,69 +67,59 @@ def get_all_clients(user_id: uuid.UUID) -> List[Client]:
 def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tuple[Client, bool]:
     """
     Creates a new client or updates an existing one based on deduplication logic.
-    This function orchestrates the check for duplicates and performs a "merge by enrichment" strategy.
-
-    Args:
-        user_id: The UUID of the user.
-        client_data: The data for the new client to be imported.
-
-    Returns:
-        A tuple containing the final Client object and a boolean, where True indicates
-        a new client was created and False indicates an existing client was updated.
     """
     with Session(engine) as session:
         logging.info(f"CRM: Processing contact '{client_data.full_name}' for user {user_id}")
 
-        # 1. Find potential duplicates using the deduplication engine
         existing_client = find_strong_duplicate(db=session, user_id=user_id, new_contact=client_data)
 
         if existing_client:
-            # 2. A strong duplicate was found, merge by enrichment
             logging.info(f"CRM: Found duplicate. Merging '{client_data.full_name}' into existing client ID {existing_client.id}")
-
             is_updated = False
-
             if not existing_client.email and client_data.email:
                 existing_client.email = client_data.email
                 is_updated = True
-
             if not existing_client.phone and client_data.phone:
                 existing_client.phone = client_data.phone
                 is_updated = True
-
             if is_updated:
                 session.add(existing_client)
                 session.commit()
                 session.refresh(existing_client)
                 logging.info(f"CRM: Successfully enriched client ID {existing_client.id}.")
-
             return existing_client, False
         else:
-            # 3. No duplicate found, create a new client record
             logging.info(f"CRM: No duplicate found. Creating new client '{client_data.full_name}' for user {user_id}.")
-
             new_client_data = client_data.model_dump()
             new_client = Client(**new_client_data, user_id=user_id)
-
             session.add(new_client)
             session.commit()
             session.refresh(new_client)
             logging.info(f"CRM: Successfully created new client with ID {new_client.id}")
-
             return new_client, True
 
-def update_last_interaction(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Client]:
-    """Updates the last_interaction timestamp for a client to the current time."""
-    with Session(engine) as session:
-        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
+def update_last_interaction(client_id: uuid.UUID, user_id: uuid.UUID, session: Optional[Session] = None) -> Optional[Client]:
+    """
+    Updates the last_interaction timestamp for a client to the current time.
+    Can operate within a provided session or create its own.
+    """
+    def _update(db_session: Session):
+        client = db_session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if client:
             client.last_interaction = datetime.now(timezone.utc).isoformat()
-            session.add(client)
-            session.commit()
-            session.refresh(client)
-            print(f"CRM: Updated last_interaction for client_id: {client_id}")
+            db_session.add(client)
+            logging.info(f"CRM: Queued last_interaction update for client_id: {client_id}")
+        return client
+
+    if session:
+        return _update(session)
+    else:
+        with Session(engine) as new_session:
+            client = _update(new_session)
+            if client:
+                new_session.commit()
+                new_session.refresh(client)
             return client
-        return None
 
 def update_client_preferences(client_id: uuid.UUID, preferences: Dict[str, Any], user_id: uuid.UUID) -> Optional[Client]:
     """Overwrites the entire 'preferences' JSON object for a specific client."""
@@ -164,7 +146,7 @@ def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uuid.UUID
         return None
 
 
-# --- Property Functions (No changes needed, properties are shared data) ---
+# --- Property Functions ---
 
 def get_property_by_id(property_id: uuid.UUID) -> Optional[Property]:
     """Retrieves a single property by its unique ID."""
@@ -191,12 +173,23 @@ def update_property_price(property_id: uuid.UUID, new_price: float) -> Optional[
         
 # --- Campaign Briefing Functions ---
 
-def save_campaign_briefing(briefing: CampaignBriefing):
-    """Saves or updates a single CampaignBriefing in the database."""
-    with Session(engine) as session:
-        session.merge(briefing)
-        session.commit()
-        print(f"CRM: Saved campaign briefing -> {briefing.headline}")
+def save_campaign_briefing(briefing: CampaignBriefing, session: Optional[Session] = None):
+    """
+    Saves or updates a single CampaignBriefing in the database.
+    Can operate within a provided session or create its own.
+    """
+    def _save(db_session: Session):
+        db_session.add(briefing)
+        logging.info(f"CRM: Queued save for campaign briefing -> {briefing.headline}")
+
+    if session:
+        _save(session)
+    else:
+        with Session(engine) as new_session:
+            _save(new_session)
+            new_session.commit()
+            logging.info(f"CRM: Committed campaign briefing -> {briefing.headline}")
+
 
 def get_new_campaign_briefings_for_user(user_id: uuid.UUID) -> List[CampaignBriefing]:
     """Retrieves all 'new' or 'insight' campaign briefings for a specific user."""
@@ -227,13 +220,23 @@ def update_campaign_briefing(campaign_id: uuid.UUID, update_data: CampaignUpdate
 
 # --- Universal Message Log Functions ---
 
-def save_message(message: Message):
-    """Saves a single inbound or outbound message to the universal log."""
-    with Session(engine) as session:
-        session.add(message)
-        session.commit()
-        session.refresh(message)
-        print(f"CRM: Saved '{message.direction}' message for client_id: {message.client_id}")
+def save_message(message: Message, session: Optional[Session] = None):
+    """
+    Saves a single inbound or outbound message to the universal log.
+    Can operate within a provided session or create its own.
+    """
+    def _save(db_session: Session):
+        db_session.add(message)
+        logging.info(f"CRM: Queued save for '{message.direction}' message for client_id: {message.client_id}")
+
+    if session:
+        _save(session)
+    else:
+        with Session(engine) as new_session:
+            _save(new_session)
+            new_session.commit()
+            logging.info(f"CRM: Committed '{message.direction}' message for client_id: {message.client_id}")
+
 
 def get_conversation_history(client_id: uuid.UUID, user_id: uuid.UUID) -> List[Message]:
     """Retrieves all messages for a given client, ensuring it belongs to the user."""
@@ -328,7 +331,6 @@ def delete_scheduled_messages_for_client(client_id: uuid.UUID, user_id: uuid.UUI
 def get_all_sent_recurring_messages() -> List[ScheduledMessage]:
     """
     Retrieves all messages that have been sent and are marked as recurring.
-    This function remains global as the background task iterates through all users.
     """
     with Session(engine) as session:
         statement = select(ScheduledMessage).where(
@@ -340,8 +342,7 @@ def get_all_sent_recurring_messages() -> List[ScheduledMessage]:
 def has_future_recurring_message(client_id: uuid.UUID, playbook_touchpoint_id: str) -> bool:
     """
     Checks if a recurring message from a specific playbook rule is already
-    pending for a client. This prevents the daily task from creating duplicates.
-    (No user_id needed as client_id is globally unique and this is an internal check)
+    pending for a client.
     """
     with Session(engine) as session:
         statement = select(ScheduledMessage).where(
@@ -357,27 +358,32 @@ def get_all_users() -> List[User]:
     with Session(engine) as session:
         return session.exec(select(User)).all()
 
-# --- ADDED: New function for system-level indexing tasks ---
 def _get_all_clients_for_system_indexing() -> List[Client]:
     """
     Retrieves ALL clients from the database, across all users.
-    USE WITH CAUTION: This is only for system-level processes like building a
-    search index at startup. Do NOT use this in user-facing API endpoints.
+    USE WITH CAUTION.
     """
     with Session(engine) as session:
         statement = select(Client)
         return session.exec(statement).all()
+    
+def get_latest_ai_draft_briefing(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[CampaignBriefing]:
+    """
+    Retrieves the latest AI draft CampaignBriefing for a specific client and user.
+    """
+    with Session(engine) as session:
+        statement = select(CampaignBriefing).where(
+            CampaignBriefing.client_id == client_id,
+            CampaignBriefing.user_id == user_id,
+            CampaignBriefing.campaign_type == "ai_draft_response"
+        ).order_by(CampaignBriefing.created_at.desc()).limit(1)
+        return session.exec(statement).first()
 
 # Community 
 
 def get_community_overview(user_id: uuid.UUID) -> List[Dict[str, Any]]:
     """
     Retrieves all clients for a user and calculates health metrics for each.
-    
-    Health Score is a simple heuristic based on:
-    - Last interaction time (recency is good)
-    - Profile completeness (phone/email is good)
-    - Tagging (more tags is good)
     """
     logging.info(f"CRM: Calculating community overview for user_id: {user_id}")
     
@@ -389,7 +395,6 @@ def get_community_overview(user_id: uuid.UUID) -> List[Dict[str, Any]]:
         for client in clients:
             health_score = 0
             
-            # 1. Last Interaction Score (up to 50 points)
             last_interaction_days = None
             if client.last_interaction:
                 try:
@@ -405,13 +410,11 @@ def get_community_overview(user_id: uuid.UUID) -> List[Dict[str, Any]]:
                 except (ValueError, TypeError):
                     logging.warning(f"CRM: Could not parse last_interaction for client {client.id}: {client.last_interaction}")
 
-            # 2. Profile Completeness Score (up to 30 points)
             if client.email and client.phone:
                 health_score += 30
             elif client.email or client.phone:
                 health_score += 15
 
-            # 3. Tagging Score (up to 20 points)
             tag_count = len(client.user_tags) + len(client.ai_tags)
             if tag_count > 5:
                 health_score += 20
@@ -426,10 +429,9 @@ def get_community_overview(user_id: uuid.UUID) -> List[Dict[str, Any]]:
                 "user_tags": client.user_tags,
                 "ai_tags": client.ai_tags,
                 "last_interaction_days": last_interaction_days,
-                "health_score": min(health_score, 100) # Cap score at 100
+                "health_score": min(health_score, 100)
             }
             community_list.append(member_data)
             
-        # Sort by health score descending
         community_list.sort(key=lambda x: x['health_score'], reverse=True)
         return community_list

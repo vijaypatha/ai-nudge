@@ -1,9 +1,10 @@
 // frontend/components/conversation/MessageComposer.tsx
 // Purpose: Renders the text input and send button for composing messages.
+// MODIFIED: Added React.forwardRef and useImperativeHandle to expose a setValue function.
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useImperativeHandle, forwardRef } from 'react'; // Import forwardRef and useImperativeHandle
 import { Paperclip, Send } from 'lucide-react';
 
 /**
@@ -18,9 +19,20 @@ interface MessageComposerProps {
 
 /**
  * A controlled component for the message input field and send controls.
+ * Uses forwardRef to allow parent components to imperatively set the input value.
  */
-export const MessageComposer = ({ onSendMessage, isSending }: MessageComposerProps) => {
+export const MessageComposer = forwardRef<
+    { setValue: (value: string) => void }, // The type of the ref handle
+    MessageComposerProps // The props of the component
+>(({ onSendMessage, isSending }, ref) => { // Receive ref as the second argument
     const [content, setContent] = useState('');
+
+    // Expose a setValue function to the parent component via the ref
+    useImperativeHandle(ref, () => ({
+        setValue: (value: string) => {
+            setContent(value);
+        },
+    }));
 
     const handleSend = async () => {
         if (!content.trim() || isSending) return;
@@ -55,4 +67,7 @@ export const MessageComposer = ({ onSendMessage, isSending }: MessageComposerPro
             </div>
         </div>
     );
-};
+});
+
+// Add a display name for better debugging in React DevTools
+MessageComposer.displayName = 'MessageComposer';

@@ -10,6 +10,7 @@ from sqlmodel import SQLModel, Field, Relationship, Column, JSON
 if TYPE_CHECKING:
     from .message import ScheduledMessage, Message
     from .user import User
+    from .campaign import CampaignBriefing # Import CampaignBriefing model
 
 class Client(SQLModel, table=True):
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
@@ -31,6 +32,7 @@ class Client(SQLModel, table=True):
     
     scheduled_messages: List["ScheduledMessage"] = Relationship(back_populates="client")
     messages: List["Message"] = Relationship(back_populates="client")
+    campaign_briefings: List["CampaignBriefing"] = Relationship(back_populates="client") # ADDED: Relationship to CampaignBriefing
 
 
 class ClientCreate(SQLModel):

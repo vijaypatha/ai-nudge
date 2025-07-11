@@ -1,10 +1,10 @@
 // frontend/app/(main)/conversations/[clientId]/page.tsx
-// DEFINITIVE FIX: Replaces the old tab style with the new reusable <Tabs /> component
-// to ensure a consistent, modern look and feel.
+// DEFINITIVE FIX: Implements polling to automatically refresh conversation
+// history and AI drafts, ensuring the UI updates without a manual refresh.
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { find } from 'lodash';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
@@ -12,10 +12,7 @@ import clsx from 'clsx';
 import { useAppContext, Client, Message, ScheduledMessage } from '@/context/AppContext';
 import { useSidebar } from '@/context/SidebarContext';
 
-// Import the reusable Tabs component
 import { Tabs, TabOption } from '@/components/ui/Tabs';
-
-// Import the page-specific components
 import { DynamicTaggingCard } from '@/components/conversation/DynamicTaggingCard';
 import { ClientIntelCard } from '@/components/conversation/ClientIntelCard';
 import { RelationshipCampaignCard } from '@/components/conversation/RelationshipCampaignCard';
@@ -23,9 +20,9 @@ import { ChatHistory } from '@/components/conversation/ChatHistory';
 import { MessageComposer } from '@/components/conversation/MessageComposer';
 import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
+import { Button } from '@/components/ui/Button';
 
-// Import icons
-import { Users, Menu, Phone, Video } from 'lucide-react';
+import { Users, Menu, Phone, Video, Edit, Send } from 'lucide-react';
 
 interface ConversationPageProps {
     params: {
@@ -45,10 +42,11 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
     const [isSending, setIsSending] = useState(false);
     const [isPlanningCampaign, setIsPlanningCampaign] = useState(false);
-    
-    const [activeTab, setActiveTab] = useState<'messages' | 'intel'>('messages');
+    const [aiDraftResponse, setAiDraftResponse] = useState<string | null>(null);
 
-    // Define the options for the reusable Tabs component
+    const [activeTab, setActiveTab] = useState<'messages' | 'intel'>('messages');
+    const messageComposerRef = useRef<{ setValue: (value: string) => void }>(null);
+
     const tabOptions: TabOption[] = [
         { id: 'messages', label: 'Messages' },
         { id: 'intel', label: 'Intel' }
@@ -61,24 +59,54 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         }
     }, [clientId, clients]);
 
+    // --- MODIFIED: This effect now ONLY fetches scheduled messages on load ---
     useEffect(() => {
         if (!selectedClient) return;
-        const fetchConversationDetails = async () => {
-            setError(null);
+        const fetchScheduled = async () => {
             try {
-                const historyPromise = api.get(`/api/messages/?client_id=${selectedClient.id}`);
-                const scheduledPromise = refetchScheduledMessagesForClient(selectedClient.id);
-                const [historyData, scheduledData] = await Promise.all([historyPromise, scheduledPromise]);
-                setCurrentMessages(historyData);
+                const scheduledData = await refetchScheduledMessagesForClient(selectedClient.id);
                 setScheduledMessages(scheduledData);
             } catch (err: any) {
-                console.error("Could not load conversation details:", err);
-                setError(err.message || "Could not load conversation details.");
+                console.error("Could not load scheduled messages:", err);
+                setError(err.message || "Could not load scheduled messages.");
             }
         };
-        fetchConversationDetails();
+        fetchScheduled();
         setActiveTab('messages');
-    }, [selectedClient, api, refetchScheduledMessagesForClient]);
+    }, [selectedClient, refetchScheduledMessagesForClient]);
+
+    // --- ADDED: New effect to poll for conversation history and AI drafts ---
+    useEffect(() => {
+        if (!selectedClient) return;
+
+        let isMounted = true;
+
+        const pollForUpdates = async () => {
+            if (!isMounted) return;
+            console.log("Polling for updates...");
+            try {
+                const historyPromise = api.get(`/api/messages/?client_id=${selectedClient.id}`);
+                const aiDraftPromise = api.get(`/api/conversations/${selectedClient.id}/ai_draft`);
+
+                const [historyData, aiDraftData] = await Promise.all([historyPromise, aiDraftPromise]);
+
+                if (isMounted) {
+                    setCurrentMessages(prev => JSON.stringify(prev) !== JSON.stringify(historyData) ? historyData : prev);
+                    setAiDraftResponse(aiDraftData?.original_draft || null);
+                }
+            } catch (err) {
+                console.error("Polling failed:", err);
+            }
+        };
+
+        pollForUpdates(); // Initial fetch
+        const intervalId = setInterval(pollForUpdates, 5000); // Poll every 5 seconds
+
+        return () => {
+            isMounted = false;
+            clearInterval(intervalId);
+        };
+    }, [selectedClient, api]);
 
     const handleSendMessage = useCallback(async (content: string) => {
         if (!content.trim() || !selectedClient) return;
@@ -89,6 +117,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
             await api.post(`/api/conversations/${selectedClient.id}/send_reply`, { content });
             const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
             setCurrentMessages(historyData);
+            setAiDraftResponse(null);
         } catch (err) {
             console.error("Failed to send message:", err);
             setCurrentMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
@@ -97,6 +126,19 @@ export default function ConversationPage({ params }: ConversationPageProps) {
             setIsSending(false);
         }
     }, [selectedClient, api]);
+
+    const handleEditAiDraft = useCallback(() => {
+        if (aiDraftResponse && messageComposerRef.current) {
+            messageComposerRef.current.setValue(aiDraftResponse);
+            setAiDraftResponse(null);
+        }
+    }, [aiDraftResponse]);
+
+    const handleSendAiDraft = useCallback(async () => {
+        if (aiDraftResponse) {
+            await handleSendMessage(aiDraftResponse);
+        }
+    }, [aiDraftResponse, handleSendMessage]);
 
     const handlePlanCampaign = useCallback(async () => {
         if (!selectedClient) return;
@@ -153,7 +195,6 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                     </div>
                 </header>
 
-                {/* MODIFIED: Replaced the old nav with the new Tabs component for mobile */}
                 <div className="flex-shrink-0 p-2 border-b border-white/10 lg:hidden">
                     <Tabs
                         options={tabOptions}
@@ -164,7 +205,25 @@ export default function ConversationPage({ params }: ConversationPageProps) {
 
                 <div className={clsx("flex flex-col flex-grow min-h-0", activeTab === 'messages' ? 'flex' : 'hidden lg:flex')}>
                    <ChatHistory messages={currentMessages} selectedClient={selectedClient} />
-                   <MessageComposer onSendMessage={handleSendMessage} isSending={isSending} />
+
+                   {aiDraftResponse && (
+                       <div className="p-4 bg-brand-dark-blue rounded-lg m-4 shadow-lg">
+                           <h3 className="text-brand-text-main font-semibold mb-2 flex items-center gap-2">
+                               <span className="text-brand-accent">AI Draft:</span>
+                           </h3>
+                           <p className="text-brand-text-muted mb-4 text-sm leading-relaxed">{aiDraftResponse}</p>
+                           <div className="flex gap-2 justify-end">
+                               <Button variant="secondary" onClick={handleEditAiDraft} className="flex items-center gap-1">
+                                   <Edit className="w-4 h-4" /> Edit
+                               </Button>
+                               <Button onClick={handleSendAiDraft} className="flex items-center gap-1">
+                                   <Send className="w-4 h-4" /> Send
+                               </Button>
+                           </div>
+                       </div>
+                   )}
+
+                   <MessageComposer onSendMessage={handleSendMessage} isSending={isSending} ref={messageComposerRef} />
                 </div>
 
                 <div className={clsx("p-6 space-y-6 overflow-y-auto", activeTab === 'intel' ? 'block lg:hidden' : 'hidden')}>

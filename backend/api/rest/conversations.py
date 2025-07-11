@@ -7,6 +7,7 @@ import uuid
 from data.models.user import User
 from api.security import get_current_user_from_token
 from data.models.message import Message, MessageDirection, MessageStatus
+from data.models.campaign import CampaignBriefing
 from pydantic import BaseModel
 from data import crm as crm_service
 from agent_core import orchestrator
@@ -129,3 +130,27 @@ async def get_scheduled_messages(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch scheduled messages: {str(e)}")
+    
+# --- ADDED: Endpoint to fetch the latest AI Draft for a client ---
+@router.get("/conversations/{client_id}/ai_draft", response_model=dict)
+async def get_ai_draft(
+    client_id: uuid.UUID,
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Retrieves the latest AI-generated draft response for a given client.
+    This draft is for UI display and user approval/editing.
+    """
+    try:
+        # Verify client exists and belongs to user
+        client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found.")
+
+        # Fetch the latest AI draft briefing for this client
+        draft = crm_service.get_latest_ai_draft_briefing(client_id=client_id, user_id=current_user.id)
+        if not draft:
+            return {"ai_draft": None} # Return empty if no draft found
+        return {"ai_draft": draft.original_draft} # Return the draft content
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch AI draft: {str(e)}")
