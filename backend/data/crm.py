@@ -18,7 +18,6 @@ from .models.campaign import CampaignBriefing, CampaignUpdate
 from .models.message import ScheduledMessage, Message, MessageStatus, MessageDirection
 from uuid import UUID
 
-
 # --- User Functions ---
 
 def get_user_by_id(user_id: uuid.UUID) -> Optional[User]:
@@ -100,7 +99,6 @@ def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tu
 def update_last_interaction(client_id: uuid.UUID, user_id: uuid.UUID, session: Optional[Session] = None) -> Optional[Client]:
     """
     Updates the last_interaction timestamp for a client to the current time.
-    Can operate within a provided session or create its own.
     """
     def _update(db_session: Session):
         client = db_session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
@@ -143,8 +141,25 @@ def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uuid.UUID
             session.refresh(client)
             return client
         return None
-
-# --- NEW FUNCTION: To handle adding tags and notes in a single transaction ---
+# --- NEW FUNCTION START ---
+# This new function correctly handles saving notes from the user-facing "Client Intel" card.
+def update_client_notes(client_id: UUID, notes: str, user_id: UUID) -> Optional[Client]:
+    """
+    Overwrites the entire 'notes' field for a specific client.
+    This is intended for manual user edits from the UI.
+    """
+    with Session(engine) as session:
+        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
+        if client:
+            client.notes = notes
+            session.add(client)
+            session.commit()
+            session.refresh(client)
+            logging.info(f"CRM: Manually updated notes for client {client.id}")
+            return client
+        return None
+# --- NEW FUNCTION END ---
+    
 def update_client_intel(
     client_id: UUID, 
     user_id: UUID,
@@ -153,7 +168,7 @@ def update_client_intel(
 ) -> Optional[Client]:
     """
     Updates a client with new tags and/or notes in a single transaction.
-    This is called by the new consolidated API endpoint.
+    This is the single source of truth for updating client intel from AI suggestions.
     """
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
@@ -161,14 +176,12 @@ def update_client_intel(
             logging.error(f"CRM: update_client_intel failed. Client {client_id} not found for user {user_id}.")
             return None
         
-        # Update tags if provided
         if tags_to_add:
-            existing_tags = set(client.user_tags)
+            existing_tags = set(client.user_tags or [])
             new_tags = set(tags_to_add)
             client.user_tags = sorted(list(existing_tags.union(new_tags)))
             logging.info(f"CRM: Updating tags for client {client_id}: {client.user_tags}")
 
-        # Update notes if provided
         if notes_to_add:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             new_note_entry = f"Note from AI ({timestamp}):\n{notes_to_add}"
@@ -182,39 +195,10 @@ def update_client_intel(
         session.commit()
         session.refresh(client)
         return client
-    
-def add_client_tags(client_id: uuid.UUID, tags_to_add: List[str], user_id: uuid.UUID) -> Optional[Client]:
-    """
-    Appends new tags to a client's user_tags list, ensuring no duplicates.
-    
-    Args:
-        client_id: The ID of the client to update.
-        tags_to_add: A list of new tags to add.
-        user_id: The ID of the current user for security.
 
-    Returns:
-        The updated Client object or None if not found.
-    """
-    with Session(engine) as session:
-        # Retrieve the client, ensuring it belongs to the user.
-        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
-        
-        if client:
-            # Use sets for efficient duplicate handling
-            existing_tags = set(client.user_tags)
-            new_tags = set(tags_to_add)
-            
-            # Combine the sets and convert back to a sorted list
-            updated_tags = sorted(list(existing_tags.union(new_tags)))
-            
-            client.user_tags = updated_tags
-            session.add(client)
-            session.commit()
-            session.refresh(client)
-            logging.info(f"CRM: Added tags {tags_to_add} to client {client_id}. New tags: {updated_tags}")
-            return client
-            
-        return None
+def add_client_tags(client_id: uuid.UUID, tags_to_add: List[str], user_id: uuid.UUID) -> Optional[Client]:
+    """This function now calls the main intel updater for consistency."""
+    return update_client_intel(client_id=client_id, user_id=user_id, tags_to_add=tags_to_add)
 
 
 # --- Resource Functions ---
@@ -322,9 +306,24 @@ def get_active_recommendation_slate_for_client(client_id: uuid.UUID, user_id: uu
 def update_slate_status(slate_id: uuid.UUID, new_status: str, user_id: uuid.UUID, session: Session) -> Optional[CampaignBriefing]:
     """
     Updates the status of a specific recommendation slate (CampaignBriefing).
-    Ensures the slate belongs to the current user for security.
-    Operates within a provided session.
+    This function explicitly PREVENTS direct setting of 'completed' or 'stale' status
+    to enforce the correct application logic (e.g., using clear_active_recommendations).
     """
+    # --- DEFINITIVE FIX START ---
+    # Enforce correct state transition. Slates should only be marked 'completed'
+    # by the orchestrator when the conversation progresses. A direct API call
+    # from the frontend to do this is incorrect and is now blocked at the data layer.
+    if new_status in ['completed', 'stale']:
+        logging.warning(
+            f"CRM: BLOCKED an attempt to directly set slate {slate_id} status to '{new_status}'. "
+            "This action should be handled by the system orchestrator."
+        )
+        # Return the slate without changing it to prevent breaking the frontend.
+        return session.exec(
+            select(CampaignBriefing).where(CampaignBriefing.id == slate_id, CampaignBriefing.user_id == user_id)
+        ).first()
+    # --- DEFINITIVE FIX END ---
+    
     statement = select(CampaignBriefing).where(
         CampaignBriefing.id == slate_id,
         CampaignBriefing.user_id == user_id
@@ -576,19 +575,11 @@ def get_community_overview(user_id: uuid.UUID) -> List[Dict[str, Any]]:
 
 def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
     """
-    Clears active recommendations for a specific client by updating the status
-    of any active recommendation slates to 'completed'.
-    
-    Args:
-        client_id: The ID of the client whose recommendations should be cleared
-        user_id: The ID of the current user for security validation
-        
-    Returns:
-        bool: True if recommendations were cleared successfully, False otherwise
+    Clears active recommendations and the last AI draft for a specific client.
+    This is called when the conversation progresses.
     """
     try:
         with Session(engine) as session:
-            # First, verify the client belongs to the user
             client_check = session.exec(
                 select(Client.id).where(Client.id == client_id, Client.user_id == user_id)
             ).first()
@@ -597,7 +588,7 @@ def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
                 logging.warning(f"CRM AUTH: User {user_id} attempted to clear recommendations for client {client_id} without permission.")
                 return False
             
-            # Find all active recommendation slates for this client
+            # --- Part 1: Clear active recommendation slates ---
             active_slates = session.exec(
                 select(CampaignBriefing).where(
                     CampaignBriefing.client_id == client_id,
@@ -606,18 +597,30 @@ def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
                 )
             ).all()
             
-            # Update their status to 'completed'
             for slate in active_slates:
                 slate.status = 'completed'
                 session.add(slate)
-                logging.info(f"CRM: Marked recommendation slate {slate.id} as completed for client {client_id}")
+            
+            if active_slates:
+                logging.info(f"CRM: Marked {len(active_slates)} recommendation slates as completed for client {client_id}")
+
+            # --- Part 2: Clear the last AI Draft from the message history ---
+            last_message_with_draft = session.exec(
+                select(Message)
+                .where(Message.client_id == client_id, Message.ai_draft != None)
+                .order_by(Message.created_at.desc())
+            ).first()
+
+            if last_message_with_draft:
+                last_message_with_draft.ai_draft = None
+                session.add(last_message_with_draft)
+                logging.info(f"CRM: Cleared stale AI draft from message {last_message_with_draft.id} for client {client_id}")
             
             session.commit()
-            logging.info(f"CRM: Successfully cleared {len(active_slates)} active recommendations for client {client_id}")
             return True
             
     except Exception as e:
-        logging.error(f"CRM: Error clearing recommendations for client {client_id}: {e}", exc_info=True)
+        logging.error(f"CRM: Error clearing recommendations/drafts for client {client_id}: {e}", exc_info=True)
         return False
 
 def add_client_notes(client_id: UUID, notes_to_add: str, user_id: UUID) -> Optional[Client]:

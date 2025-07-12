@@ -1,20 +1,20 @@
 # File Path: backend/agent_core/agents/conversation.py
-# --- FINAL CORRECTED VERSION: Complete, unabbreviated, and refactored for Pillar 2.
+# --- FINAL CORRECTED VERSION: Enhanced with date awareness and better instructions for personal intel.
 
 from typing import Dict, Any, List
 import uuid
 import json
 import logging
+from datetime import datetime, timezone
 
 from data.models.user import User
-# --- MODIFIED: Import the generic Resource model instead of the specific Property model ---
 from data.models.resource import Resource
 from data.models.campaign import MatchedClient
 from data.models.message import Message, MessageDirection
 from integrations import openai as openai_service
 from data import crm as crm_service
 
-# This function remains unchanged as it serves a different, simpler purpose.
+# This function remains unchanged.
 async def draft_instant_nudge_message(
     realtor: User,
     topic: str,
@@ -54,7 +54,7 @@ async def draft_instant_nudge_message(
     return ai_draft or f"Hi [Client Name], I was just thinking about you and wanted to reach out regarding {topic}."
 
 
-# --- RE-ENGINEERED for Pillar 1, MODIFIED for Pillar 2: Now fetches and uses generic Resources for context ---
+# --- MODIFIED: Prompt is enhanced with date context and more detailed instructions ---
 async def generate_recommendation_slate(
     realtor: User,
     client_id: uuid.UUID,
@@ -71,7 +71,7 @@ async def generate_recommendation_slate(
     if not client: return {} 
 
     client_name = client.full_name
-    client_tags = ", ".join(client.user_tags + client.ai_tags)
+    client_tags = ", ".join(client.user_tags + client.ai_tags) if (client.user_tags or client.ai_tags) else "None"
 
     all_resources = crm_service.get_all_resources_for_user(user_id=realtor.id)
     resource_context_str = ""
@@ -104,11 +104,16 @@ async def generate_recommendation_slate(
     }
     """
 
+    # --- MODIFICATION START ---
+    # Added Current Date context and enhanced instructions for the AI.
+    current_date_str = datetime.now(timezone.utc).strftime('%B %d, %Y')
+
     prompt = f"""
     You are an AI Co-Pilot for {realtor.full_name}, an expert in their field.
     Your task is to analyze the latest incoming message from a client named {client_name} and generate a structured JSON object of recommended actions.
 
     ## CONTEXT
+    - Current Date: {current_date_str}
     - Client Name: {client_name}
     - Existing Client Tags: {client_tags}
     {resource_context_str}
@@ -123,10 +128,15 @@ async def generate_recommendation_slate(
 
     prompt += f"""
     ## INSTRUCTIONS
-    1.  **Analyze the LATEST INCOMING MESSAGE** in the context of the history and available resources.
-    2.  **Generate a helpful SMS response draft.**
-    3.  **Identify new, actionable intelligence** (preferences, timelines, etc.).
-    4.  **Format your entire output** as a single, valid JSON object following the schema.
+    1.  **Analyze the LATEST INCOMING MESSAGE** in the context of the history, available resources, and the Current Date.
+    2.  **Generate a helpful SMS response draft.** Use the Current Date to ensure your response is timely (e.g., if a client's birthday has passed, say "hope you had a great birthday" instead of "happy early birthday").
+    3.  **Identify new, actionable intelligence.**
+        - This includes real estate preferences (budget, location, features).
+        - **Crucially, also identify important personal details like birthdays, anniversaries, or other life events.**
+    4.  **Suggest Actions based on new intel.**
+        - If the client mentions a personal date like a birthday, suggest an `UPDATE_CLIENT_INTEL` action to add a corresponding tag (e.g., "birthday-june-30") and a note (e.g., "Birthday is on June 30.").
+        - Do NOT suggest adding tags that are already present in the 'Existing Client Tags' list.
+    5.  **Format your entire output** as a single, valid JSON object following the schema below. If no new intel is found, the `UPDATE_CLIENT_INTEL` recommendation can be omitted.
 
     ## JSON OUTPUT SCHEMA
     ```json
@@ -134,11 +144,10 @@ async def generate_recommendation_slate(
     ```
     Now, generate the JSON output:
     """
+    # --- MODIFICATION END ---
     
     logging.info(f"CO-PILOT AGENT: Sending prompt to LLM for client {client_id}.")
     
-    # --- MODIFIED: Replaced the incorrect 'is_json' argument ---
-    # This now uses the correct parameter for enabling OpenAI's JSON mode.
     raw_response = await openai_service.generate_text_completion(
         prompt_messages=[{"role": "user", "content": prompt}],
         model="gpt-4o-mini",
@@ -158,7 +167,7 @@ async def generate_recommendation_slate(
         return { "recommendations": [{"type": "SUGGEST_DRAFT", "payload": {"text": raw_response}}] }
 
 
-# --- MODIFIED: This function now accepts a generic Resource ---
+# This function remains unchanged.
 async def draft_outbound_campaign_message(
     realtor: User,
     event_type: str,

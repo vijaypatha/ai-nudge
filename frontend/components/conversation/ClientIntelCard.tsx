@@ -1,5 +1,5 @@
 // frontend/components/conversation/ClientIntelCard.tsx
-// Purpose: A specific implementation of InfoCard for managing client notes and preferences.
+// --- DEFINITIVE FIX: Simplified rendering logic to resolve TypeScript errors permanently.
 
 'use client';
 
@@ -8,46 +8,32 @@ import { Info, Sparkles } from 'lucide-react';
 import { useAppContext, Client } from '@/context/AppContext';
 import { InfoCard } from '../ui/InfoCard';
 
-/**
- * Props for the ClientIntelCard.
- * @param client - The client object whose intel is being displayed.
- * @param onUpdate - Callback to update the client list after a change.
- * @param onReplan - Callback to trigger a campaign replan after intel changes.
- */
 interface ClientIntelCardProps {
     client: Client | undefined;
     onUpdate: (updatedClient: Client) => void;
     onReplan: () => void;
 }
 
-/**
- * Displays and allows editing of client "intel" (notes and preferences).
- * Prompts the user to replan the relationship campaign if intel is updated.
- */
 export const ClientIntelCard = ({ client, onUpdate, onReplan }: ClientIntelCardProps) => {
     const { api } = useAppContext();
     const [isEditing, setIsEditing] = useState(false);
     const [notes, setNotes] = useState('');
     const [showReplanPrompt, setShowReplanPrompt] = useState(false);
 
-    // Effect to reset notes when the client changes or editing is cancelled.
     useEffect(() => {
         if (client) {
-            setNotes(client.preferences?.notes?.join('\n') || '');
+            setNotes(client.notes || '');
         }
     }, [client]);
 
-    if (!client) return null; // Don't render if no client is selected
+    if (!client) return null;
 
     const handleSave = async () => {
-        // Prepare the updated preferences object.
-        const updatedPreferences = { ...client.preferences, notes: notes.split('\n').filter(n => n.trim()) };
         try {
-            // API call to update the client's preferences.
-            const updatedClient = await api.put(`/clients/${client.id}`, { preferences: updatedPreferences });
-            onUpdate(updatedClient); // Update client in the global context.
-            setIsEditing(false); // Exit editing mode.
-            setShowReplanPrompt(true); // Show prompt to update campaign.
+            const updatedClient = await api.put(`/api/clients/${client.id}/notes`, { notes: notes });
+            onUpdate(updatedClient);
+            setIsEditing(false);
+            setShowReplanPrompt(true);
             console.log(`Successfully saved intel for client: ${client.id}`);
         } catch(err) {
             console.error("Failed to save client intel:", err);
@@ -59,6 +45,26 @@ export const ClientIntelCard = ({ client, onUpdate, onReplan }: ClientIntelCardP
         onReplan();
         setShowReplanPrompt(false);
     };
+
+    const renderNotes = (text: string | null | undefined) => {
+        if (!text) return null;
+        
+        return text.split('\n').map((line, index) => (
+            line.trim() && (
+                <li key={index} className="flex items-start gap-3 text-sm">
+                    <Sparkles size={14} className="flex-shrink-0 mt-0.5 text-brand-accent" />
+                    {line}
+                </li>
+            )
+        ));
+    };
+
+    // --- NEW LOGIC START ---
+    // Pre-calculate the notes content and whether it has visible items.
+    // This simplifies the JSX and resolves the TypeScript error.
+    const renderedNotesContent = renderNotes(client?.notes);
+    const hasVisibleNotes = renderedNotesContent && renderedNotesContent.some(item => item);
+    // --- NEW LOGIC END ---
 
     return (
         <InfoCard title="Client Intel" icon={<Info size={14}/>} onEdit={!isEditing ? () => setIsEditing(true) : undefined}>
@@ -73,22 +79,20 @@ export const ClientIntelCard = ({ client, onUpdate, onReplan }: ClientIntelCardP
                             className="w-full bg-black/20 border border-white/10 rounded-lg p-2 text-sm"
                         />
                         <div className="flex gap-2 justify-end">
-                            <button onClick={() => { setIsEditing(false); setNotes(client.preferences?.notes?.join('\n') || ''); }} className="px-3 py-1 text-xs font-semibold bg-white/10 rounded-md">Cancel</button>
+                            <button onClick={() => { setIsEditing(false); setNotes(client.notes || ''); }} className="px-3 py-1 text-xs font-semibold bg-white/10 rounded-md">Cancel</button>
                             <button onClick={handleSave} className="px-3 py-1 text-xs font-semibold bg-primary-action text-brand-dark rounded-md">Save Intel</button>
                         </div>
                     </div>
                 ) : (
                     <ul className="space-y-2">
-                        {(client.preferences?.notes || []).length > 0 ? (
-                            (client.preferences?.notes || []).map((note: string, index: number) => (
-                                <li key={index} className="flex items-start gap-3 text-sm">
-                                    <Sparkles size={14} className="flex-shrink-0 mt-0.5 text-brand-accent" />
-                                    {note}
-                                </li>
-                            ))
+                        {/* --- MODIFIED JSX START --- */}
+                        {/* This logic is now much cleaner and uses the pre-calculated variables. */}
+                        {hasVisibleNotes ? (
+                            renderedNotesContent
                         ) : (
                             <p className="text-xs text-brand-text-muted text-center py-2">No intel added. Click the edit icon to add notes.</p>
                         )}
+                        {/* --- MODIFIED JSX END --- */}
                     </ul>
                 )}
                 {showReplanPrompt && (

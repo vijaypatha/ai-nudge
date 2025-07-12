@@ -1,5 +1,5 @@
 # File Path: backend/api/rest/clients.py
-# --- CORRECTED: Adds the new /tags endpoint to the EXISTING file.
+# --- DEFINITIVE FIX: The /intel endpoint no longer clears the recommendation slate, allowing multiple actions.
 
 import logging
 from fastapi import APIRouter, HTTPException, status, Depends
@@ -22,14 +22,18 @@ class ClientSearchQuery(BaseModel):
     natural_language_query: Optional[str] = None
     tags: Optional[List[str]] = None
 
-# --- NEW: Pydantic model for the 'add tags' request body ---
 class AddTagsPayload(BaseModel):
     tags: List[str]
 
+# --- NEW: Pydantic model for the consolidated intel update payload ---
 class UpdateIntelPayload(BaseModel):
     tags_to_add: Optional[List[str]] = None
     notes_to_add: Optional[str] = None
-    active_recommendation_id: Optional[UUID] = None # To clear the slate
+    active_recommendation_id: Optional[UUID] = None
+
+# --- NEW: Pydantic model for the manual notes update payload ---
+class UpdateNotesPayload(BaseModel):
+    notes: str
 
 @router.post("/manual", response_model=Client)
 async def add_manual_client(
@@ -85,7 +89,6 @@ async def search_clients(query: ClientSearchQuery, current_user: User = Depends(
 
     return [client for client in all_clients if client.id in final_results]
 
-# --- NEW ENDPOINT: To handle adding tags and/or notes, and clearing recommendations ---
 @router.post("/{client_id}/intel", response_model=Client)
 async def update_client_intel_endpoint(
     client_id: UUID,
@@ -94,8 +97,11 @@ async def update_client_intel_endpoint(
 ):
     """
     A single, powerful endpoint to update client intel based on AI recommendations.
-    It can add tags, add notes, and clear the active recommendation slate.
+    It can add tags and add notes. The recommendation slate itself is cleared
+    separately when the conversation progresses (e.g., a message is sent).
     """
+    # --- MODIFICATION START ---
+    # This call now only updates the client's data (tags, notes).
     updated_client = crm_service.update_client_intel(
         client_id=client_id,
         user_id=current_user.id,
@@ -106,48 +112,53 @@ async def update_client_intel_endpoint(
     if not updated_client:
         raise HTTPException(status_code=404, detail="Client not found or failed to update.")
 
-    # If an action was taken, clear the recommendation slate that prompted it.
+    # REMOVED: The logic to mark the slate as 'completed' has been removed.
+    # This is the key change to prevent the UI from disappearing prematurely.
+    # The slate is now cleared only when a message is sent or received,
+    # handled by a different process.
     if payload.active_recommendation_id:
-        with Session(crm_service.engine) as session:
-            crm_service.update_slate_status(
-                slate_id=payload.active_recommendation_id,
-                new_status='completed',
-                user_id=current_user.id,
-                session=session
-            )
-            session.commit()
-            logging.info(f"API: Marked slate {payload.active_recommendation_id} as completed.")
+        logging.info(f"API: Processed intel action for client {client_id} from slate {payload.active_recommendation_id}. Slate status was not changed.")
 
     return updated_client
 
-@router.post("/{client_id}/tags", response_model=Client)
-async def add_tags_to_client(
+@router.put("/{client_id}/notes", response_model=Client)
+async def update_client_notes_endpoint(
     client_id: UUID,
-    payload: AddTagsPayload,
-    current_user: User = Depends(get_current_user_from_token),
+    payload: UpdateNotesPayload,
+    current_user: User = Depends(get_current_user_from_token)
 ):
     """
-    Appends one or more tags to a client's user_tags list.
-    This is called by the new RecommendationActions UI component.
+    Updates the client's notes from a manual user edit. This overwrites the notes.
     """
-    # First, verify the client exists and belongs to the current user for security.
-    client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found.")
-
-    # Call the new CRM function to add the tags.
-    updated_client = crm_service.add_client_tags(
-        client_id=client_id, 
-        tags_to_add=payload.tags,
+    updated_client = crm_service.update_client_notes(
+        client_id=client_id,
+        notes=payload.notes,
         user_id=current_user.id
     )
-
     if not updated_client:
-        raise HTTPException(status_code=500, detail="Failed to update client tags.")
-
+        raise HTTPException(status_code=404, detail="Client not found.")
     return updated_client
 
-# --- NEW ENDPOINT: To add one or more tags to a client ---
+
+@router.post("/{client_id}/recommendations/clear", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_client_recommendations_endpoint(
+    client_id: UUID,
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Clears all 'active' recommendation slates for a given client.
+    This is called by the frontend when new messages arrive to prevent stale suggestions.
+    """
+    success = crm_service.clear_active_recommendations(
+        client_id=client_id,
+        user_id=current_user.id
+    )
+    if not success:
+        # Note: We don't raise 404 here to avoid frontend errors if the client exists but has no slates.
+        logging.warning(f"API: Call to clear recommendations for client {client_id} completed. Success: {success}")
+    return None
+
+
 @router.post("/{client_id}/tags", response_model=Client)
 async def add_tags_to_client(
     client_id: UUID,
@@ -156,7 +167,8 @@ async def add_tags_to_client(
 ):
     """
     Appends one or more tags to a client's user_tags list.
-    This is called by the new RecommendationActions UI component.
+    NOTE: This endpoint is now superseded by the more powerful /intel endpoint,
+    but is kept for potential direct use.
     """
     client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
     if not client:

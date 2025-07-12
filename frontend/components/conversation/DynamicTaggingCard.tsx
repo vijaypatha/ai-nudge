@@ -30,7 +30,7 @@ export const DynamicTaggingCard = ({ client, onUpdate }: DynamicTaggingCardProps
     const handleUpdateTags = async (updatedUserTags: string[]) => {
         setIsSaving(true);
         try {
-            const updatedClient = await api.put(`/clients/${client.id}/tags`, { user_tags: updatedUserTags });
+            const updatedClient = await api.put(`/api/clients/${client.id}/tags`, { user_tags: updatedUserTags });
             onUpdate(updatedClient); // Update client in the global context.
             console.log(`Successfully updated tags for client: ${client.id}`);
         } catch (err) {
