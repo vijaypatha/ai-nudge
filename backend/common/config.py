@@ -1,9 +1,4 @@
 # backend/common/config.py
-# --- DEFINITIVE FIX ---
-# Adds the 'ENVIRONMENT' field to the Settings model. This tells Pydantic
-# that this environment variable is expected, resolving the ValidationError
-# on startup. A safe default of "production" is included.
-
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import Optional
@@ -33,24 +28,21 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # --- ADDED: The missing ENVIRONMENT variable ---
     # Application
-    ENVIRONMENT: str = "production" # Defaults to production for safety
+    ENVIRONMENT: str = "production"
     FRONTEND_APP_URL: str = "http://localhost:3000"
     SECRET_KEY: str
 
-    # FAQ Auto-Reply
-    FAQ_AUTO_REPLY_ENABLED: bool = True        # Global kill-switch for automatic FAQ replies
-    FAQ_SIMILARITY_THRESHOLD: float = 0.70     # Cosine similarity (0–1). Raise to silence, lower to loosen
-    FAQ_MAX_AUTO_REPLIES_PER_CLIENT: int = 3   # Daily safety cap per client
+    # FAQ Auto-Reply - Simplified for JSON blob approach
+    FAQ_AUTO_REPLY_ENABLED: bool = True
 
     # MLS Providers
-    MLS_PROVIDER: str # e.g., "flexmls_spark" or "flexmls_reso"
+    MLS_PROVIDER: str
 
-    # --- Demo Spark API Credentials ---
+    # Demo Spark API Credentials
     SPARK_API_DEMO_TOKEN: str
 
-    # --- Live RESO API Credentials ---
+    # Live RESO API Credentials
     RESO_API_BASE_URL: str
     RESO_API_TOKEN: str
 
@@ -59,11 +51,10 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str
     GOOGLE_REDIRECT_URI: str
 
-    # Microsoft OAuth (placeholders for future implementation)
+    # Microsoft OAuth
     MICROSOFT_CLIENT_ID: str
     MICROSOFT_CLIENT_SECRET: str
     MICROSOFT_REDIRECT_URI: str
-
 
     class Config:
         env_file = ".env"

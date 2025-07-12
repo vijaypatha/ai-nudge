@@ -1,100 +1,129 @@
-# ---
-# File Path: backend/integrations/twilio_incoming.py
-# Purpose: Handles the business logic for processing incoming SMS from Twilio.
-# ---
-import uuid
-import logging # Use logging instead of print for production code
+# backend/integrations/twilio_incoming.py
+import logging
+from typing import List
 
 from agent_core import orchestrator
+from common.config import get_settings
 from data import crm as crm_service
-from data.models.message import Message, MessageDirection, MessageStatus
+from data.database import engine
 from data.models.client import Client
+from data.models.faq import Faq
+from data.models.message import Message, MessageDirection, MessageStatus
 from data.models.user import User
-from agent_core.tools.faq_matcher import match_faqs      
-from integrations import twilio_outgoing 
-from common.config import get_settings 
+from integrations import twilio_outgoing
+from integrations.gemini import match_faq_with_gemini
+from sqlmodel import Session, select
 
-settings = get_settings() 
+settings = get_settings()
+
+
+async def get_user_faqs(user_id: str) -> List[dict]:
+    """Get all enabled FAQs for a user as simple dict list"""
+    with Session(engine) as session:
+        faqs = session.exec(
+            select(Faq).where(Faq.user_id == user_id, Faq.is_enabled == True)
+        ).all()
+
+        return [
+            {
+                "question": faq.question,
+                "answer": faq.answer,
+            }
+            for faq in faqs
+        ]
 
 
 async def process_incoming_sms(from_number: str, body: str):
     """
-    Core logic to process an incoming SMS message.
-    
-    This function finds the client, logs the message, and triggers the AI
-    orchestrator to generate a response. It's called by the API endpoint.
-
-    Args:
-        from_number (str): The phone number the message came from.
-        body (str): The content of the SMS message.
+    Process incoming SMS with simplified FAQ matching using Gemini
     """
-    logging.info(f"TWILIO INTEGRATION: Processing SMS from {from_number}: '{body}'")
-    
-    # 1. Get all users from the system.
+    logging.info(f"TWILIO: Processing SMS from {from_number}: '{body}'")
+
+    # 1. Find client
     all_users: list[User] = crm_service.get_all_users()
     found_client: Client | None = None
-    
-    # 2. Check each user's contact list for the phone number.
+
     for user in all_users:
-        client_for_user = crm_service.get_client_by_phone(phone_number=from_number, user_id=user.id)
+        client_for_user = crm_service.get_client_by_phone(
+            phone_number=from_number, user_id=user.id
+        )
         if client_for_user:
             found_client = client_for_user
-            break # Stop searching once we find the client
+            break
 
     if not found_client:
-        logging.error(f"TWILIO INTEGRATION: No client found for phone number {from_number}. Message will be ignored.")
+        logging.error(f"TWILIO: No client found for {from_number}")
         return
 
-    # 3. Now that we have the client, we know the user/realtor.
+    # 2. Get realtor
     realtor = crm_service.get_user_by_id(found_client.user_id)
     if not realtor:
-        logging.error(f"TWILIO INTEGRATION: Could not find the user owner for client {found_client.id}.")
+        logging.error(f"TWILIO: No realtor found for client {found_client.id}")
         return
 
-    # 4. Log the incoming message to our universal conversation log. THIS IS KEPT FOR RELIABILITY.
+    # 3. Log incoming message
     incoming_message = Message(
         client_id=found_client.id,
         user_id=realtor.id,
         content=body,
         direction=MessageDirection.INBOUND,
-        status=MessageStatus.RECEIVED
+        status=MessageStatus.RECEIVED,
     )
+
     try:
-        # The save_message function creates its own session and commits immediately.
         crm_service.save_message(incoming_message)
-        logging.info(f"TWILIO INTEGRATION: Logged incoming message from client {found_client.id}")
+        logging.info(f"TWILIO: Logged incoming message from client {found_client.id}")
     except Exception as e:
-        logging.error(f"TWILIO INTEGRATION: Failed to save message to database: {e}")
+        logging.error(f"TWILIO: Failed to save incoming message: {e}")
         return
-    
-    # --- FAQ AUTO-REPLY (sends and exits if match found) ----------------
-    try:
-        faq_answers = await match_faqs(realtor.id, body)
-    except Exception as e:
-        logging.error(f"FAQ matcher error: {e}")
-        faq_answers = []
 
-    # ↓ UPDATED — feature flag (and optional cap)
-    if faq_answers and settings.FAQ_AUTO_REPLY_ENABLED:
-        reply_text = " ".join(faq_answers)[:320] # Truncate to avoid hitting Twilio limits
-        logging.info(f"TWILIO INTEGRATION: Sending FAQ auto-reply to {from_number}: '{reply_text}'")
-        await twilio_outgoing.send_sms(
-            to_number=from_number,
-            body=reply_text,
-            # Optionally, you can log this outgoing message as well
-        )
-        # Important: Return early to bypass the AI orchestrator
-        return
-    # --------------------------------------------------------------------
+    # 4. FAQ AUTO-REPLY with Gemini
+    if settings.FAQ_AUTO_REPLY_ENABLED:
+        try:
+            user_faqs = await get_user_faqs(realtor.id)
+            if user_faqs:
+                logging.info(f"TWILIO: Checking {len(user_faqs)} FAQs for user {realtor.id}")
+                faq_response = await match_faq_with_gemini(body, user_faqs)
+                
+                if faq_response:
+                    logging.info(f"TWILIO: FAQ matched, sending response: '{faq_response}'")
+                    
+                    # --- FIX 1: REMOVED 'await' from the synchronous function call ---
+                    sms_sent_successfully = twilio_outgoing.send_sms(
+                        to_number=from_number,
+                        body=faq_response[:320], # Truncate to 320 characters
+                        from_number=settings.TWILIO_PHONE_NUMBER,
+                    )
 
-    # 5. Trigger the AI orchestrator, NOW PASSING THE SAVED MESSAGE OBJECT.
+                    # Only proceed if the SMS was confirmed as sent
+                    if sms_sent_successfully:
+                        # --- FIX 2: ADDED logic to log the outgoing message ---
+                        outgoing_message = Message(
+                            client_id=found_client.id,
+                            user_id=realtor.id,
+                            content=faq_response[:320], # Log the same truncated content
+                            direction=MessageDirection.OUTBOUND,
+                            status=MessageStatus.SENT,
+                        )
+                        try:
+                            crm_service.save_message(outgoing_message)
+                            logging.info(
+                                f"TWILIO: Logged outgoing FAQ response for client {found_client.id}"
+                            )
+                        except Exception as e:
+                            logging.error(f"TWILIO: Failed to save outgoing FAQ message: {e}")
+                    
+                    # --- FIX 3: CRITICAL early return to prevent orchestrator ---
+                    return
+
+        except Exception as e:
+            logging.error(f"TWILIO: FAQ processing error: {e}")
+            # Don't return here - let it fall through to orchestrator only on a true failure
+    # 5. Fallback to AI orchestrator
     try:
         await orchestrator.handle_incoming_message(
-            client_id=found_client.id,
-            # --- MODIFIED: Pass the full message object to the orchestrator ---
-            incoming_message=incoming_message,
-            realtor=realtor
+            client_id=found_client.id, incoming_message=incoming_message, realtor=realtor
         )
-        logging.info(f"TWILIO INTEGRATION: AI orchestrator triggered for client {found_client.id}")
+        logging.info(f"TWILIO: AI orchestrator triggered for client {found_client.id}")
     except Exception as e:
-        logging.error(f"TWILIO INTEGRATION: AI orchestrator failed for client {found_client.id}: {e}")
+        logging.error(f"TWILIO: AI orchestrator failed: {e}")
