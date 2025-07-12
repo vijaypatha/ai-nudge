@@ -13,7 +13,8 @@ from data.models.campaign import MatchedClient
 from data.models.message import Message, MessageDirection
 from integrations import openai as openai_service
 from data import crm as crm_service
-from workflow.relationship_playbooks import IntentType 
+from workflow.relationship_playbooks import IntentType
+from data.models.client import Client
 
 # This function remains unchanged.
 async def draft_instant_nudge_message(
@@ -65,6 +66,7 @@ async def generate_recommendation_slate(
     """
     Analyzes an incoming message and conversation history to generate a structured
     "slate of recommendations" for the user to act upon.
+    --- MODIFIED: Prompt now explicitly requires a draft to fix reliability issue. ---
     """
     logging.info(f"CO-PILOT AGENT: Generating recommendation slate for client {client_id}...")
     
@@ -73,26 +75,13 @@ async def generate_recommendation_slate(
 
     client_name = client.full_name
     client_tags = ", ".join(client.user_tags + client.ai_tags) if (client.user_tags or client.ai_tags) else "None"
-
-    all_resources = crm_service.get_all_resources_for_user(user_id=realtor.id)
-    resource_context_str = ""
-    if all_resources:
-        property_resources = [r for r in all_resources if r.resource_type == 'property']
-        if property_resources:
-            resource_context_str = "\n\nAvailable Properties (for context):\n"
-            for i, res in enumerate(property_resources[:3]):
-                attrs = res.attributes
-                address = attrs.get('address', 'N/A')
-                price = attrs.get('price', 0)
-                status = res.status
-                resource_context_str += f"- {address}, Price: ${price:,.0f}, Status: {status}\n"
-
+    
     json_schema = """
     {
       "recommendations": [
         {
           "type": "SUGGEST_DRAFT",
-          "payload": { "text": "<The suggested SMS response text>" }
+          "payload": { "text": "<The suggested SMS response text. This is a required field.>" }
         },
         {
           "type": "UPDATE_CLIENT_INTEL",
@@ -105,39 +94,26 @@ async def generate_recommendation_slate(
     }
     """
 
-    # --- MODIFICATION START ---
-    # Added Current Date context and enhanced instructions for the AI.
-    current_date_str = datetime.now(timezone.utc).strftime('%B %d, %Y')
-
     prompt = f"""
     You are an AI Co-Pilot for {realtor.full_name}, an expert in their field.
-    Your task is to analyze the latest incoming message from a client named {client_name} and generate a structured JSON object of recommended actions.
+    Analyze the latest incoming message from a client named {client_name} and generate a structured JSON object of recommended actions.
 
     ## CONTEXT
-    - Current Date: {current_date_str}
     - Client Name: {client_name}
     - Existing Client Tags: {client_tags}
-    {resource_context_str}
     - Conversation History (most recent first):
     """
-    
     for message in reversed(conversation_history):
-        direction = "Client" if message.direction == MessageDirection.INBOUND else "Agent"
+        direction = "Client" if message.direction == "inbound" else "Agent"
         prompt += f"- {direction}: {message.content}\n"
-    
     prompt += f"\n## LATEST INCOMING MESSAGE FROM {client_name}:\n\"{incoming_message.content}\"\n"
-
     prompt += f"""
     ## INSTRUCTIONS
-    1.  **Analyze the LATEST INCOMING MESSAGE** in the context of the history and the Current Date.
-    2.  **Generate a helpful SMS response draft.** Use the Current Date to ensure your response is timely (e.g., if a birthday has passed, say "hope you had a great birthday").
-    3.  **Identify new, actionable intelligence,** including real estate needs AND personal details like birthdays.
-    4.  **Suggest Actions (Client Intel):**
-        - If new intel is found, generate an `UPDATE_CLIENT_INTEL` recommendation.
-        - **Tag Formatting Rule:** Tags MUST be short (2-3 words max) and human-readable. For example, if a client mentions needing a 3-car garage in St. George, suggest separate tags like "3-Car Garage" and "St. George". Do NOT create long, hyphenated tags like "house-hunting-st-george".
-        - If the client mentions a personal date, suggest a tag (e.g., "birthday-june-30") and a note.
-        - Do NOT suggest adding tags that are already present in the 'Existing Client Tags' list.
-    5.  **Format your entire output** as a single, valid JSON object following the schema. If no new intel is found, you can omit the `UPDATE_CLIENT_INTEL` recommendation.
+    1.  **Analyze the LATEST INCOMING MESSAGE** in the context of the history.
+    2.  **Generate a helpful SMS response draft.** This is mandatory. Your response should be encouraging and move the conversation forward.
+    3.  **Identify new, actionable intelligence.** If new intel is found (needs, timeline, personal details), generate an `UPDATE_CLIENT_INTEL` recommendation.
+    4.  **Tag Formatting:** Tags MUST be short (2-3 words max). Do NOT suggest adding tags that already exist.
+    5.  **Format your entire output** as a single, valid JSON object following the schema. The `SUGGEST_DRAFT` recommendation is always required.
 
     ## JSON OUTPUT SCHEMA
     ```json
@@ -145,20 +121,16 @@ async def generate_recommendation_slate(
     ```
     Now, generate the JSON output:
     """
-    # --- MODIFICATION END ---
     
     logging.info(f"CO-PILOT AGENT: Sending prompt to LLM for client {client_id}.")
-    
     raw_response = await openai_service.generate_text_completion(
         prompt_messages=[{"role": "user", "content": prompt}],
         model="gpt-4o-mini",
         response_format={"type": "json_object"}
     )
-
     if not raw_response:
         logging.error(f"CO-PILOT AGENT: LLM returned an empty response for client {client_id}.")
         return {}
-
     try:
         recommendation_data = json.loads(raw_response)
         logging.info(f"CO-PILOT AGENT: Successfully parsed recommendation slate from LLM for client {client_id}.")
@@ -370,3 +342,39 @@ Do NOT add explanation, punctuation, or other text. Response must be a single ke
     except Exception as e:
         logging.error(f"CONVERSATION AGENT (INTENT): Error detecting intent: {e}", exc_info=True)
         return None
+
+async def draft_campaign_step_message(realtor: User, client: Client, prompt: str, delay_days: int) -> tuple[str, int]:
+    """
+    Uses an LLM to generate the full message content for a single step in a campaign playbook.
+    """
+    logging.info(f"CONVERSATION AGENT (CAMPAIGN STEP): Drafting message for client {client.id} with prompt: '{prompt[:50]}...'")
+
+    style_prompt_addition = ""
+    if realtor.ai_style_guide:
+        try:
+            style_rules = json.dumps(realtor.ai_style_guide, indent=2)
+            style_prompt_addition = f"\n\nIMPORTANT: You MUST follow these style rules to match the user's voice:\n{style_rules}"
+        except Exception as e:
+            logging.error(f"CONVERSATION AGENT: Could not apply style guide. Error: {e}")
+
+    full_prompt = f"""
+    You are an AI assistant for a real estate agent named {realtor.full_name}.
+    Your task is to draft a personalized, ready-to-send SMS message to a client named {client.full_name}.
+    Use the client's first name, {client.full_name.split(' ')[0]}, for personalization.
+    {style_prompt_addition}
+
+    Instructions for this message: {prompt}
+
+    Draft the complete SMS message now:
+    """
+
+    ai_draft = await openai_service.generate_text_completion(
+        prompt_messages=[{"role": "user", "content": full_prompt}],
+        model="gpt-4o-mini"
+    )
+
+    if not ai_draft:
+        ai_draft = f"Hi {client.full_name.split(' ')[0]}, just checking in."
+    
+    # Return the generated content and the original delay_days for scheduling
+    return ai_draft, delay_days

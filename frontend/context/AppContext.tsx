@@ -1,7 +1,4 @@
 // frontend/context/AppContext.tsx
-// DEFINITIVE FIX: Centralizes post-login redirect logic to fix the new user
-// onboarding flow by inspecting the user's `onboarding_complete` status.
-// ADDED: Exposes the auth token to be used by child components.
 
 'use client';
 
@@ -9,15 +6,12 @@ import { createContext, useContext, useState, ReactNode, useEffect, useCallback,
 import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
 
-// --- Type Definitions ---
-
-// MODIFIED: Added onboarding_complete and onboarding_state to the User interface
 export interface User {
   id: string;
   full_name: string;
   email?: string;
   phone_number: string;
-  user_type: string | null; // Can be null before onboarding
+  user_type: string | null;
   onboarding_complete: boolean;
   onboarding_state: {
       phone_verified: boolean;
@@ -37,21 +31,33 @@ export interface Client {
     user_tags: string[]; 
     preferences: { notes?: string[]; [key: string]: any; }; 
     last_interaction: string | null; 
-    notes?: string; // Add this line
+    notes?: string;
 }
 export interface Property { id: string; address: string; price: number; status: string; image_urls: string[]; }
-export interface CampaignBriefing { id: string; user_id: string; campaign_type: string; headline: string; listing_url?: string; key_intel: { [key: string]: string }; original_draft: string; edited_draft?: string; matched_audience: MatchedClient[]; status: 'new' | 'launched' | 'dismissed'; }
-// --- MODIFIED: Added optional 'ai_draft' to support inline drafts ---
+export interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reason: string; }
+
+export interface CampaignBriefing { 
+    id: string; 
+    user_id: string; 
+    campaign_type: string; 
+    headline: string; 
+    listing_url?: string; 
+    key_intel: { [key: string]: any }; 
+    original_draft: string; 
+    edited_draft?: string; 
+    matched_audience: MatchedClient[]; 
+    status: string;
+    is_plan: boolean;
+}
+
 export interface Message { id:string; client_id: string; content: string; direction: 'inbound' | 'outbound'; status: string; created_at: string; ai_draft?: CampaignBriefing; }
 export interface Conversation { id: string; client_id: string; client_name: string; last_message: string; last_message_time: string; unread_count: number; }
 export interface ScheduledMessage { id: string; user_id: string; client_id: string; content: string; scheduled_at: string; status: string; }
-export interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reason: string; }
 
 interface AppContextType {
   loading: boolean;
   isAuthenticated: boolean;
   user: User | null;
-  // --- ADDED: Expose the raw auth token ---
   token: string | null;
   clients: Client[];
   properties: Property[];
@@ -64,14 +70,12 @@ interface AppContextType {
     put: (endpoint: string, body: any) => Promise<any>;
     del: (endpoint: string) => Promise<any>;
   };
-  // MODIFIED: The login function now returns the User object or null.
   login: (token: string) => Promise<User | null>;
   loginAndRedirect: (token: string) => Promise<boolean>;
   fetchDashboardData: () => Promise<void>;
   updateClientInList: (updatedClient: Client) => void;
   refetchScheduledMessagesForClient: (clientId: string) => Promise<ScheduledMessage[]>;
   refreshUser: () => Promise<void>;
-  
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -129,13 +133,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         setUser(userData);
     } catch (error) {
         console.error("Failed to refresh user data:", error);
-        logout(); // If we can't get user data, log out
+        logout();
     }
   }, [api, logout]);
 
-  // --- MODIFIED FUNCTION ---
-  // The login function now fetches user data, sets state, and returns the
-  // user object on success or null on failure.
   const login = useCallback(async (newToken: string): Promise<User | null> => {
     Cookies.set('auth_token', newToken, { expires: 7, path: '/' });
     tokenRef.current = newToken;
@@ -143,20 +144,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const userData: User = await api().get('/api/users/me');
       setUser(userData);
       setIsAuthenticated(true);
-      return userData; // Return the user data on success
+      return userData;
     } catch (error) {
       console.error("Authentication failed:", error);
       logout();
-      return null; // Return null on failure
+      return null;
     }
   }, [api, logout]);
 
-  // --- MODIFIED FUNCTION ---
-  // This function now uses the return value from `login` to decide where to
-  // redirect the user, ensuring the correct initial navigation path.
   const loginAndRedirect = async (token: string): Promise<boolean> => {
       const loggedInUser = await login(token);
-
       if (loggedInUser) {
           if (loggedInUser.onboarding_complete) {
               router.push('/community');
@@ -165,8 +162,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           }
           return true;
       }
-      
-      // If login fails, the login() function handles the logout/redirect.
       return false;
   };
 
@@ -196,14 +191,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true);
       const savedToken = Cookies.get('auth_token');
       if (savedToken) {
-        // We only log in here to restore the session. No redirect is needed
-        // as the AuthGuard will handle routing on initial page load.
         await login(savedToken);
       }
       setLoading(false);
     };
     checkUserSession();
-  }, [login]); // The dependency on `login` is now safe.
+  }, [login]);
 
   const updateClientInList = (updatedClient: Client) => {
     setClients(prevClients => prevClients.map(c => c.id === updatedClient.id ? updatedClient : c));
@@ -222,7 +215,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     loading,
     isAuthenticated,
     user,
-    // --- ADDED: Expose token ---
     token: tokenRef.current,
     clients,
     properties,

@@ -8,9 +8,9 @@ import uuid
 from sqlmodel import Session
 from data.models.user import User
 from api.security import get_current_user_from_token
-from data.models.message import Message, MessageDirection, MessageStatus, MessageWithDraft
-# --- MODIFIED: Import the new RecommendationSlateResponse model ---
-from data.models.campaign import CampaignBriefing, RecommendationSlateResponse
+from data.models.message import Message, MessageWithDraft, MessageDirection, MessageStatus
+# --- MODIFIED: Use the base Pydantic model for the response ---
+from data.models.campaign import RecommendationSlateResponse
 from pydantic import BaseModel
 from data import crm as crm_service
 from agent_core import orchestrator
@@ -28,7 +28,8 @@ class ConversationSummary(BaseModel):
 # --- MODIFIED: The response model now uses the safe Pydantic schema for recommendations ---
 class ConversationDetailResponse(BaseModel):
     messages: List[MessageWithDraft]
-    active_recommendations: Optional[RecommendationSlateResponse] = None
+    immediate_recommendations: Optional[RecommendationSlateResponse] = None
+    active_plan: Optional[RecommendationSlateResponse] = None
     
     class Config:
         from_attributes = True
@@ -53,35 +54,30 @@ async def get_conversation_history_by_client_id(
     current_user: User = Depends(get_current_user_from_token)
 ):
     """
-    Retrieves the full message history and any active AI recommendations
-    for a specific client, providing all necessary data for the conversation UI.
+    Retrieves message history and separates active AI recommendations into an immediate
+    slate and a long-term plan.
     """
     try:
-        client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
-        if not client:
-            raise HTTPException(status_code=404, detail="Client not found.")
-
-        # --- The logic here remains the same, but the response_model now handles the conversion safely ---
         with Session(crm_service.engine) as session:
             history = crm_service.get_conversation_history(client_id=client_id, user_id=current_user.id)
             
-            active_slate = crm_service.get_active_recommendation_slate_for_client(
-                client_id=client_id, 
-                user_id=current_user.id, 
-                session=session
+            # --- MODIFIED: Fetch ALL active slates and separate them ---
+            all_active_slates = crm_service.get_all_active_slates_for_client(
+                client_id=client_id, user_id=current_user.id, session=session
             )
+            
+            immediate_rec_slate = next((s for s in all_active_slates if not s.is_plan), None)
+            active_plan_slate = next((s for s in all_active_slates if s.is_plan), None)
 
         return ConversationDetailResponse(
             messages=history if history else [],
-            active_recommendations=active_slate
+            immediate_recommendations=immediate_rec_slate,
+            active_plan=active_plan_slate
         )
-
-    except HTTPException:
-        raise
     except Exception as e:
-        # Log the full error for better debugging
         logging.error(f"Error fetching messages for client {client_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch messages: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch messages.")
+
 
 
 @router.post("/conversations/{client_id}/send_reply/", response_model=Message)

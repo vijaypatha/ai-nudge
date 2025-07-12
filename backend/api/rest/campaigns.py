@@ -22,6 +22,7 @@ from agent_core.agents import conversation as conversation_agent
 from data import crm as crm_service
 from workflow import outbound as outbound_workflow
 from agent_core.brain import relationship_planner
+from workflow import campaigns as campaign_workflow
 
 router = APIRouter(
     prefix="/campaigns",
@@ -194,3 +195,23 @@ async def trigger_send_campaign(campaign_id: UUID, background_tasks: BackgroundT
         raise HTTPException(status_code=404, detail="Campaign not found.")
     background_tasks.add_task(outbound_workflow.send_campaign_to_audience, campaign_id, current_user.id)
     return {"message": "Campaign sending process started."}
+
+@router.post("/{campaign_id}/approve", response_model=CampaignBriefing)
+async def approve_campaign_plan(
+    campaign_id: UUID,
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Approves a campaign plan, triggering the generation and scheduling of its messages.
+    """
+    try:
+        updated_plan = await campaign_workflow.approve_and_generate_campaign_messages(
+            plan_id=campaign_id,
+            user_id=current_user.id
+        )
+        return updated_plan
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error(f"Failed to approve campaign {campaign_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to approve campaign plan.")

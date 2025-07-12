@@ -1,27 +1,20 @@
 // frontend/components/conversation/RelationshipCampaignCard.tsx
-// --- DEFINITIVE FIX: No major logic changes needed, but refined for UI consistency.
+// --- DEFINITIVE FIX: Imports the shared CampaignBriefing type to resolve type errors.
 
 'use client';
 
 import { useState } from 'react';
 import { Zap, Gift, Star, Sparkles, Calendar, Edit2, Loader2, Check, X, PauseCircle, BrainCircuit } from 'lucide-react';
-import { useAppContext, ScheduledMessage } from '@/context/AppContext';
+// --- MODIFICATION: Importing the single source of truth for types.
+import { useAppContext, ScheduledMessage, CampaignBriefing } from '@/context/AppContext';
 import { InfoCard } from '../ui/InfoCard';
 import { EditMessageModal } from './EditMessageModal';
 
-interface PlanBriefing {
-  id: string;
-  is_plan: boolean;
-  headline: string;
-  status: 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
-  key_intel: {
-    playbook_name?: string;
-    steps?: { delay_days: number; name: string; prompt: string }[];
-  };
-}
+// --- MODIFICATION: This local, incorrect interface has been removed. ---
 
 interface RelationshipCampaignCardProps {
-  plan: PlanBriefing | null;
+  // MODIFICATION: The 'plan' prop now uses the correct, imported CampaignBriefing type.
+  plan: CampaignBriefing | null;
   messages: ScheduledMessage[];
   onApprovePlan: (planId: string) => Promise<void>;
   onDismissPlan: (planId: string) => Promise<void>;
@@ -46,7 +39,8 @@ export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDism
     COMPLETED: <Check className="h-4 w-4 text-gray-500" />,
     CANCELLED: <X className="h-4 w-4 text-gray-500" />,
   };
-  const statusIcon = plan ? statusIcons[plan.status.toUpperCase() as keyof typeof statusIcons] : <BrainCircuit className="h-4 w-4 text-gray-400" />;
+  // The 'status' property exists on the imported CampaignBriefing type.
+  const statusIcon = plan ? statusIcons[plan.status.toUpperCase() as keyof typeof statusIcons] || <BrainCircuit className="h-4 w-4 text-gray-400" /> : <BrainCircuit className="h-4 w-4 text-gray-400" />;
 
   const hasContent = plan || messages.length > 0;
 
@@ -62,12 +56,10 @@ export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDism
         />
       )}
       
-      {/* FIX: Title changed to "Relationship Campaign" to match screenshot */}
       <InfoCard title="Relationship Campaign" icon={statusIcon}>
         {!hasContent && (
           <div className="text-center py-4">
             <p className="text-sm text-gray-400 mb-3">No campaign planned for this client.</p>
-            {/* This button's functionality would be wired up separately */}
             <button className="w-full bg-green-600/20 text-green-300 text-sm font-semibold py-2 rounded-md hover:bg-green-600/30 transition-colors">
               + Plan Relationship Campaign
             </button>
@@ -80,8 +72,9 @@ export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDism
               <h3 className="font-semibold text-white">{plan.headline}</h3>
               <span className="text-xs font-medium uppercase text-gray-400 bg-gray-700 px-2 py-0.5 rounded">{plan.status}</span>
             </div>
+            {/* The 'key_intel.steps' property exists on the imported CampaignBriefing type. */}
             <ul className="space-y-2.5 pl-1 border-l border-gray-700 ml-1">
-              {plan.key_intel.steps?.map((step, index) => (
+              {plan.key_intel.steps?.map((step: any, index: number) => (
                 <li key={index} className="text-sm text-gray-300 flex items-start gap-3 pl-3 relative">
                    <div className="absolute -left-1.5 top-1.5 w-3 h-3 bg-gray-700 rounded-full border-2 border-gray-900"></div>
                   <span className="font-semibold text-gray-500 w-16 text-right">Day {step.delay_days}</span>

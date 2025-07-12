@@ -1,14 +1,12 @@
 // frontend/app/(main)/conversations/[clientId]/page.tsx
-// DEFINITIVE FIX: Resolves all build errors and correctly displays all recommendation types.
 
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { find } from 'lodash';
-import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import clsx from 'clsx';
-import { useAppContext, Client, Message, ScheduledMessage } from '@/context/AppContext';
+import { useAppContext, Client, Message, ScheduledMessage, CampaignBriefing } from '@/context/AppContext';
 import { useSidebar } from '@/context/SidebarContext';
 
 import { Tabs, TabOption } from '@/components/ui/Tabs';
@@ -21,8 +19,8 @@ import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
 import { RecommendationActions } from '@/components/conversation/RecommendationActions';
 import { AIDraftDisplay } from '@/components/conversation/AIDraftDisplay';
+import { CoPilotBriefingCard } from '@/components/conversation/CoPilotBriefingCard';
 import { Users, Menu, Phone, Video } from 'lucide-react';
-
 
 interface ConversationPageProps {
     params: {
@@ -32,19 +30,9 @@ interface ConversationPageProps {
 
 interface ConversationData {
     messages: Message[];
-    active_plan: {
-        id: string;
-        is_plan: boolean;
-        headline: string;
-        status: 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
-        key_intel: {
-            playbook_name?: string;
-            steps?: { delay_days: number; name: string; prompt: string }[];
-        };
-    } | null;
-    active_recommendations?: any;
+    immediate_recommendations: CampaignBriefing | null;
+    active_plan: CampaignBriefing | null;
 }
-
 
 interface MessageComposerHandle {
     setValue: (value: string) => void;
@@ -87,6 +75,16 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         }
     }, [refetchScheduledMessagesForClient]);
     
+    const fetchConversationData = useCallback(async () => {
+        if (!selectedClient) return;
+        try {
+            const historyData: ConversationData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
+            setConversationData(prev => JSON.stringify(prev) !== JSON.stringify(historyData) ? historyData : prev);
+        } catch (err) {
+            console.error("Polling failed:", err);
+        }
+    }, [selectedClient, api]);
+
     useEffect(() => {
         if (!selectedClient) return;
 
@@ -94,15 +92,9 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         fetchScheduled(selectedClient.id);
         setActiveTab('messages');
 
-        const pollForUpdates = async () => {
-            if (!isMounted) return;
-            try {
-                const historyData: ConversationData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
-                if (isMounted) {
-                    setConversationData(prev => JSON.stringify(prev) !== JSON.stringify(historyData) ? historyData : prev);
-                }
-            } catch (err) {
-                console.error("Polling failed:", err);
+        const pollForUpdates = () => {
+            if (isMounted) {
+                fetchConversationData();
             }
         };
 
@@ -113,7 +105,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
             isMounted = false;
             clearInterval(intervalId);
         };
-    }, [selectedClient, api, fetchScheduled]);
+    }, [selectedClient, fetchScheduled, fetchConversationData]);
 
     const handleSendMessage = useCallback(async (content: string) => {
         if (!content.trim() || !selectedClient) return;
@@ -121,21 +113,15 @@ export default function ConversationPage({ params }: ConversationPageProps) {
 
         const optimisticMessage: Message = { id: `agent-${Date.now()}`, client_id: selectedClient.id, content, direction: 'outbound', status: 'pending', created_at: new Date().toISOString() };
         
-        // FIX: This logic is now fully type-safe and handles the null case correctly.
-        setConversationData(prevData => {
-            return {
-                messages: [...(prevData?.messages || []), optimisticMessage],
-                active_plan: prevData?.active_plan || null,
-                active_recommendations: null
-            };
-        });
+        setConversationData(prevData => ({
+            messages: [...(prevData?.messages || []), optimisticMessage],
+            immediate_recommendations: null, // Clear immediate recs upon sending
+            active_plan: prevData?.active_plan || null
+        }));
 
         try {
             await api.post(`/api/conversations/${selectedClient.id}/send_reply`, { content });
-            setTimeout(async () => {
-                const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
-                setConversationData(historyData);
-            }, 1000);
+            setTimeout(fetchConversationData, 1000);
         } catch (err) {
             console.error("Failed to send message:", err);
             setConversationData(prev => {
@@ -147,50 +133,33 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         } finally {
             setIsSending(false);
         }
-    }, [selectedClient, api]);
+    }, [selectedClient, api, fetchConversationData]);
 
-    const handleApprovePlan = useCallback(async (planId: string) => {
+    const handlePlanAction = useCallback(async (action: 'approve' | 'dismiss', planId: string) => {
         if (!selectedClient) return;
         setIsProcessingPlan(true);
         try {
-            await api.post(`/api/campaigns/${planId}/approve`, {});
-            const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
-            setConversationData(historyData);
-            await fetchScheduled(selectedClient.id);
+            if (action === 'approve') {
+                // --- MODIFICATION: Call the new dedicated approval endpoint ---
+                await api.post(`/api/campaigns/${planId}/approve`, {});
+            } else {
+                await api.put(`/api/campaigns/${planId}`, { status: 'cancelled' });
+            }
+            // Refetch all data to get the latest state
+            fetchConversationData();
+            fetchScheduled(selectedClient.id);
         } catch (error) {
-            console.error("Failed to approve plan:", error);
-            alert("Failed to approve the plan.");
+            console.error(`Failed to ${action} plan:`, error);
+            alert(`Failed to ${action} the plan.`);
         } finally {
             setIsProcessingPlan(false);
         }
-    }, [selectedClient, api, fetchScheduled]);
-
-    const handleDismissPlan = useCallback(async (planId: string) => {
-        if (!selectedClient) return;
-        setIsProcessingPlan(true);
-        try {
-            await api.put(`/api/campaigns/briefings/${planId}`, { status: 'cancelled' });
-            const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
-            setConversationData(historyData);
-        } catch (error) {
-            console.error("Failed to dismiss plan:", error);
-            alert("Failed to dismiss the plan.");
-        } finally {
-            setIsProcessingPlan(false);
-        }
-    }, [selectedClient, api]);
-
-    const handlePlanCampaign = useCallback(async () => {
-        if(!selectedClient) return;
-        alert(`Planning campaign for ${selectedClient.full_name}`);
-    }, [selectedClient, api, refetchScheduledMessagesForClient]);
+    }, [selectedClient, api, fetchConversationData, fetchScheduled]);
 
     const handleActionComplete = useCallback((updatedClient: Client) => {
         updateClientInList(updatedClient);
-        if (selectedClient) {
-            api.get(`/api/messages/?client_id=${selectedClient.id}`).then(setConversationData);
-        }
-    }, [updateClientInList, selectedClient, api]);
+        fetchConversationData();
+    }, [updateClientInList, fetchConversationData]);
 
     if (loading && !selectedClient) {
         return <div className="flex-1 flex items-center justify-center text-brand-text-muted">Loading Client Data...</div>;
@@ -208,8 +177,10 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         );
     }
     
-    const showImmediateRecommendations = conversationData?.active_recommendations && !conversationData?.active_plan;
-
+    const immediateRecs = conversationData?.immediate_recommendations;
+    const activePlan = conversationData?.active_plan;
+    const isCoPilotBriefing = immediateRecs?.campaign_type === 'co_pilot_briefing';
+    
     return (
         <div className="flex-1 flex min-w-0">
             {/* Center Panel */}
@@ -246,33 +217,37 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                    />
                    
                    <div className="px-4 pb-2 space-y-2">
-                    {showImmediateRecommendations && conversationData.active_recommendations.original_draft && (
-                        <AIDraftDisplay
-                            draft={conversationData.active_recommendations}
-                            onSendMessage={handleSendMessage}
-                            messageComposerRef={messageComposerRef}
-                        />
-                    )}
-                    {showImmediateRecommendations && (
-                        <RecommendationActions
-                            recommendations={conversationData.active_recommendations}
-                            client={selectedClient}
-                            onActionComplete={handleActionComplete}
-                        />
-                    )}
+                        {isCoPilotBriefing && immediateRecs && (
+                            <CoPilotBriefingCard briefing={immediateRecs} />
+                        )}
+                        {!isCoPilotBriefing && immediateRecs && (
+                            <>
+                                {immediateRecs.original_draft && (
+                                    <AIDraftDisplay
+                                        draft={immediateRecs}
+                                        onSendMessage={handleSendMessage}
+                                        messageComposerRef={messageComposerRef}
+                                    />
+                                )}
+                                <RecommendationActions
+                                    recommendations={immediateRecs}
+                                    client={selectedClient}
+                                    onActionComplete={handleActionComplete}
+                                />
+                            </>
+                        )}
                    </div>
-
                    <MessageComposer onSendMessage={handleSendMessage} isSending={isSending} ref={messageComposerRef} />
                 </div>
 
                 <div className={clsx("p-6 space-y-6 overflow-y-auto", activeTab === 'intel' ? 'flex flex-col flex-grow' : 'hidden')}>
                     <DynamicTaggingCard client={selectedClient} onUpdate={updateClientInList} />
-                    <ClientIntelCard client={selectedClient} onUpdate={updateClientInList} onReplan={handlePlanCampaign} />
+                    <ClientIntelCard client={selectedClient} onUpdate={updateClientInList} onReplan={() => {}} />
                     <RelationshipCampaignCard 
-                        plan={conversationData?.active_plan || null}
+                        plan={activePlan || null}
                         messages={scheduledMessages}
-                        onApprovePlan={handleApprovePlan}
-                        onDismissPlan={handleDismissPlan}
+                        onApprovePlan={(planId) => handlePlanAction('approve', planId)}
+                        onDismissPlan={(planId) => handlePlanAction('dismiss', planId)}
                         isProcessing={isProcessingPlan}
                     />
                 </div>
@@ -281,12 +256,12 @@ export default function ConversationPage({ params }: ConversationPageProps) {
             {/* Right-hand Info Panel */}
             <aside className="bg-white/5 p-6 flex-col gap-6 overflow-y-auto w-96 flex-shrink-0 hidden lg:flex">
                 <DynamicTaggingCard client={selectedClient} onUpdate={updateClientInList} />
-                <ClientIntelCard client={selectedClient} onUpdate={updateClientInList} onReplan={handlePlanCampaign} />
+                <ClientIntelCard client={selectedClient} onUpdate={updateClientInList} onReplan={() => {}} />
                 <RelationshipCampaignCard 
-                    plan={conversationData?.active_plan || null}
+                    plan={activePlan || null}
                     messages={scheduledMessages}
-                    onApprovePlan={handleApprovePlan}
-                    onDismissPlan={handleDismissPlan}
+                    onApprovePlan={(planId) => handlePlanAction('approve', planId)}
+                    onDismissPlan={(planId) => handlePlanAction('dismiss', planId)}
                     isProcessing={isProcessingPlan}
                 />
                 <InfoCard title="Properties">

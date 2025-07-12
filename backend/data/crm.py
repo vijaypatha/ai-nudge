@@ -329,18 +329,19 @@ def cancel_scheduled_messages_for_plan(plan_id: UUID, user_id: UUID, session: Se
     return count
 
 # --- DEFINITIVE FIX IS HERE ---
-def get_active_recommendation_slate_for_client(client_id: uuid.UUID, user_id: uuid.UUID, session: Session) -> Optional[CampaignBriefing]:
+
+def get_all_active_slates_for_client(client_id: uuid.UUID, user_id: uuid.UUID, session: Session) -> List[CampaignBriefing]:
     """
-    Finds the currently active recommendation slate OR an active plan for a client.
+    Finds ALL currently active recommendation slates and/or plans for a client.
     A slate is considered "active" for the UI if it is in the DRAFT state, awaiting user action.
     """
     statement = select(CampaignBriefing).where(
         CampaignBriefing.client_id == client_id,
         CampaignBriefing.user_id == user_id,
-        # FIX: Look for DRAFT status, not ACTIVE, to find newly created plans.
-        CampaignBriefing.status == CampaignStatus.DRAFT 
+        CampaignBriefing.status == CampaignStatus.DRAFT
     )
-    return session.exec(statement).first()
+    return session.exec(statement).all()
+
 
 
 def update_slate_status(slate_id: uuid.UUID, new_status: CampaignStatus, user_id: uuid.UUID, session: Session) -> Optional[CampaignBriefing]:
