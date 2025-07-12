@@ -1,7 +1,7 @@
 # File Path: backend/agent_core/agents/conversation.py
 # --- FINAL CORRECTED VERSION: Enhanced with date awareness and better instructions for personal intel.
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import uuid
 import json
 import logging
@@ -13,6 +13,7 @@ from data.models.campaign import MatchedClient
 from data.models.message import Message, MessageDirection
 from integrations import openai as openai_service
 from data import crm as crm_service
+from workflow.relationship_playbooks import IntentType 
 
 # This function remains unchanged.
 async def draft_instant_nudge_message(
@@ -300,3 +301,72 @@ async def draft_outbound_campaign_message(
         ai_draft = f"Hi [Client Name], just wanted to share a quick update with you!"
 
     return ai_draft
+
+# --- NEW FUNCTION START ---
+async def detect_conversational_intent(message_content: str) -> Optional[IntentType]:
+    """
+    Analyzes the content of a message to detect specific user intents
+    that could trigger a multi-step relationship playbook.
+    """
+    logging.info("CONVERSATION AGENT (INTENT): Analyzing message for strategic intent...")
+
+    # Enhanced system prompt with explicit strategic focus
+    system_prompt = """
+You are a strategic relationship intelligence system for real estate professionals. 
+Your ONLY job is to identify HIGH-VALUE opportunities that require multi-step nurturing campaigns.
+
+You MUST respond with EXACTLY ONE of these classifications:
+
+- "LONG_TERM_NURTURE": Client expresses future intent with timeline 2+ months OR shows buying/selling signals but not immediate urgency
+- "SHORT_TERM_LEAD": Client shows immediate urgency (under 2 months) OR requests immediate action  
+- "NONE": Casual conversation with no strategic opportunity
+
+LONG_TERM_NURTURE Examples:
+- "thinking about selling in 6 months"
+- "maybe next year we'll look for something bigger" 
+- "not ready now but interested in the market"
+- "our lease is up in the fall"
+- "when the kids graduate we might downsize"
+- "not ready for about 6 months"
+- "planning to move next spring"
+- "considering our options for later this year"
+
+SHORT_TERM_LEAD Examples:
+- "looking to buy ASAP"
+- "need to sell before we move next month"
+- "can we see this property this weekend?"
+- "ready to start looking now"
+- "want to list within the next few weeks"
+
+NONE Examples:
+- "thanks for the birthday wishes"
+- "how's the weather?"
+- "got your message"
+- "happy holidays"
+
+CRITICAL: Focus on STRATEGIC OPPORTUNITY and TIMELINE, not just casual mentions.
+If a client mentions ANY future timeline (2+ months), classify as LONG_TERM_NURTURE.
+Do NOT add explanation, punctuation, or other text. Response must be a single keyword only.
+"""
+
+    prompt = f"Client message: '{message_content}'"
+
+    try:
+        response = await openai_service.generate_text_completion(
+            prompt_messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            model="gpt-4o-mini"
+        )
+
+        detected_intent = response.strip().upper()
+        logging.info(f"CONVERSATION AGENT (INTENT): Raw LLM response: '{response}'. Parsed intent: '{detected_intent}'")
+
+        if detected_intent in ["LONG_TERM_NURTURE", "SHORT_TERM_LEAD"]:
+            return detected_intent
+        return None
+
+    except Exception as e:
+        logging.error(f"CONVERSATION AGENT (INTENT): Error detecting intent: {e}", exc_info=True)
+        return None

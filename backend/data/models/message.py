@@ -1,20 +1,17 @@
 # File Path: backend/data/models/message.py
-# Purpose: Defines data models for all messages.
-# --- UPDATED with a fix for Pydantic schema generation ---
+# --- MODIFIED ---
 
 from typing import Optional, TYPE_CHECKING, List
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 from enum import Enum
 from sqlmodel import SQLModel, Field, Relationship
-# --- ADDED: Import Pydantic's BaseModel for a clean API model ---
 from pydantic import BaseModel
 
-# Forward references for database relationships
 if TYPE_CHECKING:
     from .client import Client
     from .user import User
-    from .campaign import CampaignBriefing
+    from .campaign import CampaignBriefing, RecommendationSlateResponse
 
 class MessageStatus(str, Enum):
     PENDING = "pending"
@@ -27,11 +24,7 @@ class MessageDirection(str, Enum):
     INBOUND = "inbound"
     OUTBOUND = "outbound"
 
-# This is the pure DATABASE model.
 class Message(SQLModel, table=True):
-    """
-    (Database Table) A log of every single message sent or received.
-    """
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id", index=True)
     client_id: UUID = Field(foreign_key="client.id", index=True)
@@ -39,21 +32,19 @@ class Message(SQLModel, table=True):
     direction: MessageDirection = Field(index=True)
     status: MessageStatus
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
-    
-    # SQLAlchemy relationships for internal ORM use. Pydantic struggles with these.
     client: Optional["Client"] = Relationship(back_populates="messages")
     user: Optional["User"] = Relationship(back_populates="messages")
+    # --- MODIFIED: ai_draft now relates to CampaignBriefing instead of RecommendationSlateResponse ---
     ai_draft: Optional["CampaignBriefing"] = Relationship(back_populates="parent_message", sa_relationship_kwargs={'uselist': False})
 
-
-# This is the pure DATABASE model.
 class ScheduledMessage(SQLModel, table=True):
-    """
-    (Database Table) Stores messages scheduled to be sent in the future.
-    """
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id", index=True)
     client_id: UUID = Field(foreign_key="client.id")
+
+    # --- ADDED: Foreign key to link this scheduled message to an overarching plan. ---
+    parent_plan_id: Optional[UUID] = Field(default=None, foreign_key="campaignbriefing.id", index=True)
+
     content: str
     scheduled_at: datetime = Field(index=True)
     status: MessageStatus = Field(default=MessageStatus.PENDING, index=True)
@@ -61,18 +52,16 @@ class ScheduledMessage(SQLModel, table=True):
     error_message: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     playbook_touchpoint_id: Optional[str] = Field(default=None, index=True)
-    is_recurring: bool = Field(default=False, index=True)    
+    is_recurring: bool = Field(default=False, index=True)
+
     client: Optional["Client"] = Relationship(back_populates="scheduled_messages")
     user: Optional["User"] = Relationship(back_populates="scheduled_messages")
 
+    # --- ADDED: Relationship to the parent CampaignBriefing (the plan). ---
+    parent_plan: Optional["CampaignBriefing"] = Relationship(back_populates="scheduled_messages")
 
-# --- API Schemas ---
-# Import CampaignBriefing here for the Pydantic model to use.
-from .campaign import CampaignBriefing
 
-# --- MODIFIED: Redefined MessageWithDraft as a pure Pydantic model ---
-# This fixes the error by creating a separate, clean model for the API response.
-# It does NOT inherit from the Message SQLModel, preventing the relationship error.
+# --- MODIFIED: MessageWithDraft now expects ai_draft to be a RecommendationSlateResponse ---
 class MessageWithDraft(BaseModel):
     """API model for a Message that includes its optional AI draft."""
     id: UUID
@@ -82,9 +71,8 @@ class MessageWithDraft(BaseModel):
     direction: MessageDirection
     status: MessageStatus
     created_at: datetime
-    ai_draft: Optional[CampaignBriefing] = None
+    ai_draft: Optional["RecommendationSlateResponse"] = None
 
-    # This allows the Pydantic model to be created from the ORM/database model
     class Config:
         from_attributes = True
 

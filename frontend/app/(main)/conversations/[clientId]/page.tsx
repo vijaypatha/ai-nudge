@@ -1,5 +1,5 @@
 // frontend/app/(main)/conversations/[clientId]/page.tsx
-// --- DEFINITIVE FIX: Removes all frontend clearing logic to prevent race conditions.
+// --- DEFINITIVE FIX 11: Removes incorrect props from RelationshipCampaignCard to resolve the final build error.
 
 'use client';
 
@@ -31,8 +31,19 @@ interface ConversationPageProps {
 
 interface ConversationData {
     messages: Message[];
+    active_plan: {
+        id: string;
+        is_plan: boolean;
+        headline: string;
+        status: 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
+        key_intel: {
+            playbook_name?: string;
+            steps?: { delay_days: number; name: string; prompt: string }[];
+        };
+    } | null;
     active_recommendations?: any;
 }
+
 
 interface MessageComposerHandle {
     setValue: (value: string) => void;
@@ -48,7 +59,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     const [conversationData, setConversationData] = useState<ConversationData | null>(null);
     const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
     const [isSending, setIsSending] = useState(false);
-    const [isPlanningCampaign, setIsPlanningCampaign] = useState(false);
+    const [isProcessingPlan, setIsProcessingPlan] = useState(false);
     
     const [activeTab, setActiveTab] = useState<'messages' | 'intel'>('messages');
     const messageComposerRef = useRef<MessageComposerHandle>(null);
@@ -86,9 +97,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
             if (!isMounted) return;
             try {
                 const historyData: ConversationData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
-        
                 if (isMounted) {
-                    // This simple update logic prevents the frontend from interfering with the backend.
                     setConversationData(prev => JSON.stringify(prev) !== JSON.stringify(historyData) ? historyData : prev);
                 }
             } catch (err) {
@@ -97,7 +106,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         };
 
         pollForUpdates();
-        const intervalId = setInterval(pollForUpdates, 5000);
+        const intervalId = setInterval(pollForUpdates, 3000);
 
         return () => {
             isMounted = false;
@@ -110,43 +119,83 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         setIsSending(true);
 
         const optimisticMessage: Message = { id: `agent-${Date.now()}`, client_id: selectedClient.id, content, direction: 'outbound', status: 'pending', created_at: new Date().toISOString() };
+        
         setConversationData(prevData => {
-            if (!prevData) return { messages: [optimisticMessage], active_recommendations: null };
+            const newMessages = [...(prevData?.messages || []), optimisticMessage];
+            if (!prevData) {
+                return { 
+                    messages: newMessages, 
+                    active_plan: null, 
+                    active_recommendations: null 
+                };
+            }
             return {
                 ...prevData,
-                messages: [...prevData.messages, optimisticMessage]
+                messages: newMessages,
+                active_recommendations: null
             };
         });
 
         try {
             await api.post(`/api/conversations/${selectedClient.id}/send_reply`, { content });
-            
-                // NEW ─ retire any stale AI draft & recommendation slate
-                await api.post(
-                  `/api/clients/${selectedClient.id}/recommendations/clear`,
-                  {}
-                );
-            const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
-            setConversationData(historyData);
+            setTimeout(async () => {
+                const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
+                setConversationData(historyData);
+            }, 1000);
         } catch (err) {
             console.error("Failed to send message:", err);
-            setConversationData(prev => prev ? { ...prev, messages: prev.messages.filter(m => m.id !== optimisticMessage.id) } : null);
+            setConversationData(prev => {
+                if (!prev) return null;
+                return { ...prev, messages: prev.messages.filter(m => m.id !== optimisticMessage.id) };
+            });
             alert("Failed to send message.");
         } finally {
             setIsSending(false);
         }
     }, [selectedClient, api]);
 
+    const handleApprovePlan = useCallback(async (planId: string) => {
+        if (!selectedClient) return;
+        setIsProcessingPlan(true);
+        try {
+            await api.post(`/api/campaigns/${planId}/approve`, {});
+            const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
+            setConversationData(historyData);
+            await fetchScheduled(selectedClient.id);
+        } catch (error) {
+            console.error("Failed to approve plan:", error);
+            alert("Failed to approve the plan.");
+        } finally {
+            setIsProcessingPlan(false);
+        }
+    }, [selectedClient, api, fetchScheduled]);
+
+    const handleDismissPlan = useCallback(async (planId: string) => {
+        if (!selectedClient) return;
+        setIsProcessingPlan(true);
+        try {
+            await api.put(`/api/campaigns/briefings/${planId}`, { status: 'cancelled' });
+            const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
+            setConversationData(historyData);
+        } catch (error) {
+            console.error("Failed to dismiss plan:", error);
+            alert("Failed to dismiss the plan.");
+        } finally {
+            setIsProcessingPlan(false);
+        }
+    }, [selectedClient, api]);
+
     const handlePlanCampaign = useCallback(async () => {
+        if(!selectedClient) return;
+        alert(`Planning campaign for ${selectedClient.full_name}`);
     }, [selectedClient, api, refetchScheduledMessagesForClient]);
 
-    const handleUpdateScheduledMessage = (updatedMessage: ScheduledMessage) => {
-    };
-
     const handleActionComplete = useCallback((updatedClient: Client) => {
-        console.log("Action complete, refreshing client data in the UI...");
         updateClientInList(updatedClient);
-    }, [updateClientInList]);
+        if (selectedClient) {
+            api.get(`/api/messages/?client_id=${selectedClient.id}`).then(setConversationData);
+        }
+    }, [updateClientInList, selectedClient, api]);
 
     if (loading && !selectedClient) {
         return <div className="flex-1 flex items-center justify-center text-brand-text-muted">Loading Client Data...</div>;
@@ -166,6 +215,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     
     return (
         <div className="flex-1 flex min-w-0">
+            {/* Center Panel */}
             <main className="flex-1 flex flex-col min-w-0 lg:border-l lg:border-r border-white/10">
                 <header className="flex items-center justify-between p-4 border-b border-white/10 bg-brand-dark/50 backdrop-blur-sm sticky top-0 z-10">
                     <div className="flex items-center gap-4">
@@ -194,19 +244,21 @@ export default function ConversationPage({ params }: ConversationPageProps) {
 
                 <div className={clsx("flex flex-col flex-grow min-h-0", activeTab === 'messages' ? 'flex' : 'hidden lg:flex')}>
                    <ChatHistory 
-                       conversationData={conversationData} 
-                       selectedClient={selectedClient} 
-                       onSendMessage={handleSendMessage}
-                       messageComposerRef={messageComposerRef}
+                        conversationData={conversationData}
+                        selectedClient={selectedClient}
+                        onSendMessage={handleSendMessage}
+                        messageComposerRef={messageComposerRef}
                    />
                    
-                   {conversationData?.active_recommendations && selectedClient && (
+                   <div className="px-4 pb-2">
+                    {conversationData?.active_recommendations && !conversationData?.active_plan && (
                         <RecommendationActions
                             recommendations={conversationData.active_recommendations}
                             client={selectedClient}
                             onActionComplete={handleActionComplete}
                         />
-                   )}
+                    )}
+                   </div>
 
                    <MessageComposer onSendMessage={handleSendMessage} isSending={isSending} ref={messageComposerRef} />
                 </div>
@@ -214,14 +266,29 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                 <div className={clsx("p-6 space-y-6 overflow-y-auto", activeTab === 'intel' ? 'block lg:hidden' : 'hidden')}>
                     <DynamicTaggingCard client={selectedClient} onUpdate={updateClientInList} />
                     <ClientIntelCard client={selectedClient} onUpdate={updateClientInList} onReplan={handlePlanCampaign} />
-                    <RelationshipCampaignCard messages={scheduledMessages} onReplan={handlePlanCampaign} onUpdateMessage={handleUpdateScheduledMessage} isPlanning={isPlanningCampaign} />
+                    {/* FIX: Removed incorrect props that were causing build errors. */}
+                    <RelationshipCampaignCard 
+                        plan={conversationData?.active_plan || null}
+                        messages={scheduledMessages}
+                        onApprovePlan={handleApprovePlan}
+                        onDismissPlan={handleDismissPlan}
+                        isProcessing={isProcessingPlan}
+                    />
                 </div>
             </main>
 
+            {/* Right-hand Info Panel */}
             <aside className="bg-white/5 p-6 flex-col gap-6 overflow-y-auto w-96 flex-shrink-0 hidden lg:flex">
                 <DynamicTaggingCard client={selectedClient} onUpdate={updateClientInList} />
                 <ClientIntelCard client={selectedClient} onUpdate={updateClientInList} onReplan={handlePlanCampaign} />
-                <RelationshipCampaignCard messages={scheduledMessages} onReplan={handlePlanCampaign} onUpdateMessage={handleUpdateScheduledMessage} isPlanning={isPlanningCampaign} />
+                {/* FIX: Removed incorrect props here as well for consistency. */}
+                <RelationshipCampaignCard 
+                    plan={conversationData?.active_plan || null}
+                    messages={scheduledMessages}
+                    onApprovePlan={handleApprovePlan}
+                    onDismissPlan={handleDismissPlan}
+                    isProcessing={isProcessingPlan}
+                />
                 <InfoCard title="Properties">
                     <ul className="space-y-4">
                         {properties.slice(0, 3).map(property => (

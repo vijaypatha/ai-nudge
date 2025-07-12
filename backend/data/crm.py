@@ -14,7 +14,7 @@ from agent_core.deduplication.deduplication_engine import find_strong_duplicate
 from .models.client import Client, ClientUpdate, ClientCreate
 from .models.user import User, UserUpdate
 from .models.resource import Resource, ResourceCreate, ResourceUpdate
-from .models.campaign import CampaignBriefing, CampaignUpdate
+from .models.campaign import CampaignBriefing, CampaignUpdate, CampaignStatus
 from .models.message import ScheduledMessage, Message, MessageStatus, MessageDirection
 from uuid import UUID
 
@@ -261,11 +261,24 @@ def save_campaign_briefing(briefing: CampaignBriefing, session: Optional[Session
             logging.info(f"CRM: Committed campaign/slate -> {briefing.headline}")
 
 
-def get_new_campaign_briefings_for_user(user_id: uuid.UUID) -> List[CampaignBriefing]:
-    """Retrieves all 'new' or 'insight' campaign briefings for a specific user."""
-    with Session(engine) as session:
-        statement = select(CampaignBriefing).where(CampaignBriefing.user_id == user_id, CampaignBriefing.status.in_(["new", "insight"]))
-        return session.exec(statement).all()
+def get_new_campaign_briefings_for_user(user_id: uuid.UUID, session: Optional[Session] = None) -> List[CampaignBriefing]:
+    """
+    Fetches all campaign briefings for a user that are in a 'DRAFT' state.
+    This is what populates the main "Nudges" page in the UI.
+    """
+    db_session = session or Session(engine)
+    try:
+        # FIX: The query now uses CampaignStatus.DRAFT instead of the old hardcoded strings.
+        statement = select(CampaignBriefing).where(
+            CampaignBriefing.user_id == user_id,
+            CampaignBriefing.status == CampaignStatus.DRAFT
+        )
+        results = db_session.exec(statement).all()
+        logging.info(f"CRM: Found {len(results)} new campaign briefings for user {user_id}.")
+        return results
+    finally:
+        if not session:
+            db_session.close()
 
 def get_campaign_briefing_by_id(campaign_id: uuid.UUID, user_id: uuid.UUID) -> Optional[CampaignBriefing]:
     """Retrieves a single campaign briefing by its unique ID, ensuring it belongs to the user."""
@@ -287,38 +300,70 @@ def update_campaign_briefing(campaign_id: uuid.UUID, update_data: CampaignUpdate
         session.refresh(briefing)
         return briefing
 
+# --- NEW FUNCTION START ---
+def cancel_scheduled_messages_for_plan(plan_id: UUID, user_id: UUID, session: Session) -> int:
+    """
+    Finds and cancels all PENDING scheduled messages associated with a specific plan.
+    This is the core mechanism for "pausing" an adaptive nudge plan when a client replies.
+    Returns the number of messages that were cancelled.
+    """
+    # First, ensure the plan belongs to the user for security.
+    plan_check = session.exec(
+        select(CampaignBriefing.id)
+        .where(CampaignBriefing.id == plan_id, CampaignBriefing.user_id == user_id)
+    ).first()
+
+    if not plan_check:
+        logging.warning(f"CRM AUTH: User {user_id} attempted to cancel messages for plan {plan_id} without permission.")
+        return 0
+
+    # Find all messages that are part of the plan and are still pending.
+    messages_to_cancel_statement = select(ScheduledMessage).where(
+        ScheduledMessage.parent_plan_id == plan_id,
+        ScheduledMessage.status == MessageStatus.PENDING
+    )
+    messages_to_cancel = session.exec(messages_to_cancel_statement).all()
+    
+    count = len(messages_to_cancel)
+    if count > 0:
+        logging.info(f"CRM: Found {count} pending message(s) for plan {plan_id} to cancel.")
+        for msg in messages_to_cancel:
+            # Instead of deleting, we update the status. This maintains a record
+            # of the intended action, which is better for auditing and history.
+            msg.status = MessageStatus.CANCELLED
+            session.add(msg)
+        logging.info(f"CRM: Successfully cancelled {count} message(s) for plan {plan_id}.")
+    
+    return count
+# --- NEW FUNCTION END ---
+
 # --- NEW: Function to get the active recommendation slate for the UI ---
 def get_active_recommendation_slate_for_client(client_id: uuid.UUID, user_id: uuid.UUID, session: Session) -> Optional[CampaignBriefing]:
     """
-    Finds the currently active recommendation slate for a client.
-    This is used by the orchestrator to find slates that need to be marked 'stale'
-    and by the API to deliver the active slate to the UI.
-    Operates within a provided session.
+    Finds the currently active recommendation slate OR an active plan for a client.
     """
     statement = select(CampaignBriefing).where(
         CampaignBriefing.client_id == client_id,
         CampaignBriefing.user_id == user_id,
-        CampaignBriefing.status == 'active'
+        CampaignBriefing.status == CampaignStatus.ACTIVE
     )
     return session.exec(statement).first()
 
-# --- NEW: Function to update the status of a recommendation slate ---
-# --- REPLACE THIS ENTIRE FUNCTION ---
-def update_slate_status(slate_id: uuid.UUID, new_status: str, user_id: uuid.UUID, session: Session) -> Optional[CampaignBriefing]:
+
+# --- MODIFIED: update_slate_status to use the new Enum ---
+def update_slate_status(slate_id: uuid.UUID, new_status: CampaignStatus, user_id: uuid.UUID, session: Session) -> Optional[CampaignBriefing]:
     """
     Updates the status of a specific recommendation slate (CampaignBriefing).
-    This is the original, simple implementation without any blocking rules.
     """
     statement = select(CampaignBriefing).where(
         CampaignBriefing.id == slate_id,
         CampaignBriefing.user_id == user_id
     )
     slate = session.exec(statement).first()
-    
     if slate:
         slate.status = new_status
         session.add(slate)
-        logging.info(f"CRM: Queued status update for slate {slate_id} to '{new_status}'.")
+        logging.info(f"CRM: Queued status update for slate {slate_id} to '{new_status.value}'.")
         return slate
     return None
 

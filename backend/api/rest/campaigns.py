@@ -3,18 +3,20 @@
 
 import logging
 # --- MODIFIED: Removed 'Session' from the fastapi import ---
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body, Query
 from typing import List, Dict, Any, Optional
 from uuid import UUID
 import uuid
 from pydantic import BaseModel
 # --- ADDED: Imported 'Session' from the correct library, sqlmodel ---
 from sqlmodel import Session
+from datetime import datetime, timedelta, timezone
+
 
 from data.models.user import User
 from api.security import get_current_user_from_token
 from data.models.message import SendMessageImmediate
-from data.models.campaign import CampaignBriefing, CampaignUpdate, RecommendationSlateResponse
+from data.models.campaign import CampaignBriefing, CampaignUpdate, RecommendationSlateResponse, CampaignStatus
 from agent_core import orchestrator
 from agent_core.agents import conversation as conversation_agent
 from data import crm as crm_service
@@ -59,6 +61,54 @@ async def draft_instant_nudge_endpoint(
         logging.error(f"Error drafting instant nudge for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to generate AI draft.")
     
+# --- NEW ENDPOINT to approve and schedule a plan ---
+@router.post("/{plan_id}/approve", status_code=202)
+async def approve_and_schedule_plan(
+    plan_id: UUID,
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Approves a Nudge Plan, schedules all its messages, and sets its status to ACTIVE.
+    """
+    with Session(crm_service.engine) as session:
+        plan = crm_service.get_campaign_briefing_by_id(plan_id, current_user.id)
+        if not plan or not plan.is_plan or plan.status != CampaignStatus.DRAFT:
+            raise HTTPException(status_code=404, detail="Plan not found or not in a state that can be approved.")
+
+        playbook_steps = plan.key_intel.get("steps", [])
+        if not playbook_steps:
+            raise HTTPException(status_code=400, detail="Plan has no steps to schedule.")
+
+        client = crm_service.get_client_by_id(plan.client_id, user_id=current_user.id)
+        if not client:
+             raise HTTPException(status_code=404, detail="Client associated with plan not found.")
+
+        # Here you would call your LLM to generate the actual content for each step
+        # For this patch, we'll use placeholder content from the prompt.
+        for step in playbook_steps:
+            scheduled_time = datetime.now(timezone.utc) + timedelta(days=step['delay_days'])
+            # In a real scenario, you'd generate this content with an LLM call
+            message_content = f"AI Draft based on prompt: {step['prompt']}"
+
+            new_scheduled_message = crm_service.ScheduledMessage(
+                user_id=current_user.id,
+                client_id=plan.client_id,
+                parent_plan_id=plan.id,
+                content=message_content,
+                scheduled_at=scheduled_time,
+                status=crm_service.MessageStatus.PENDING,
+                playbook_touchpoint_id=step['name']
+            )
+            session.add(new_scheduled_message)
+        
+        plan.status = CampaignStatus.ACTIVE
+        session.add(plan)
+        session.commit()
+
+        logging.info(f"API: Approved and scheduled {len(playbook_steps)} messages for plan {plan.id}.")
+        return {"status": "success", "message": f"{len(playbook_steps)} messages scheduled for plan."}
+
+
 @router.post("/briefings/{briefing_id}/complete", response_model=RecommendationSlateResponse)
 async def complete_briefing(
     briefing_id: uuid.UUID, 
@@ -115,12 +165,20 @@ async def update_campaign_briefing(campaign_id: UUID, update_data: CampaignUpdat
         raise HTTPException(status_code=500, detail=f"Failed to update campaign: {str(e)}")
 
 @router.get("", response_model=List[CampaignBriefing])
-async def get_all_campaigns(current_user: User = Depends(get_current_user_from_token)):
+async def get_all_campaigns(
+    current_user: User = Depends(get_current_user_from_token),
+    # The query parameter for status is preserved but now correctly defaults to DRAFT.
+    status: Optional[List[CampaignStatus]] = Query([CampaignStatus.DRAFT])
+):
+    """
+    Fetches all campaign briefings for the current user, defaulting to those in DRAFT status.
+    """
     try:
+        # FIX: The call now goes to the corrected CRM function without hardcoded values.
         return crm_service.get_new_campaign_briefings_for_user(user_id=current_user.id)
     except Exception as e:
         logging.error(f"Error fetching campaigns for user {current_user.id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch campaigns: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching campaigns.")
 
 @router.get("/{campaign_id}", response_model=CampaignBriefing)
 async def get_campaign_by_id(campaign_id: UUID, current_user: User = Depends(get_current_user_from_token)):

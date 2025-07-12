@@ -4,6 +4,57 @@
 # This version adds a strategic playbook for nurturing seller leads.
 # ---
 
+import logging
+from typing import List, Dict, Any, Optional, Literal
+
+# --- ADDED: Define conversational intent types ---
+IntentType = Literal["LONG_TERM_NURTURE", "SHORT_TERM_LEAD"]
+
+# --- ADDED: A structured class for playbooks for better type safety and clarity ---
+class PlaybookStep:
+    def __init__(self, delay_days: int, prompt: str, name: str, event_type: str = "date_offset"):
+        self.delay_days = delay_days
+        self.prompt = prompt
+        self.name = name
+        self.event_type = event_type
+
+class ConversationalPlaybook:
+    def __init__(self, name: str, intent_type: IntentType, steps: List[PlaybookStep]):
+        self.name = name
+        self.intent_type = intent_type
+        self.steps = steps
+
+# --- ADDED: New Conversational Playbooks ---
+LONG_TERM_NURTURE_PLAYBOOK = ConversationalPlaybook(
+    name="Long-Term Nurture",
+    intent_type="LONG_TERM_NURTURE",
+    steps=[
+        PlaybookStep(delay_days=0, name="Initial Acknowledgement", prompt="Acknowledge the client's long-term timeline and confirm you will stay in touch. Keep it brief and professional."),
+        PlaybookStep(delay_days=30, name="Helpful Content", prompt="Draft a helpful, no-pressure check-in. Share a relevant piece of market information or a valuable article. Do not ask for a call or meeting."),
+        PlaybookStep(delay_days=90, name="Personal Check-in", prompt="Draft a personal, warm check-in message. Ask if their timeline or priorities have changed. Mention something from your last conversation to show you remember them."),
+    ]
+)
+
+SHORT_TERM_LEAD_PLAYBOOK = ConversationalPlaybook(
+    name="Short-Term Lead Conversion",
+    intent_type="SHORT_TERM_LEAD",
+    steps=[
+        PlaybookStep(delay_days=0, name="Immediate Engagement", prompt="Acknowledge the client's immediate interest and propose a specific time for a call or meeting in the next 1-2 days to discuss their needs."),
+        PlaybookStep(delay_days=3, name="Polite Follow-up", prompt="Draft a polite and brief follow-up message if the client has not responded. Gently nudge them to schedule a time."),
+    ]
+)
+
+# --- ADDED: A registry for the new conversational playbooks ---
+CONVERSATIONAL_PLAYBOOK_REGISTRY: Dict[IntentType, ConversationalPlaybook] = {
+    "LONG_TERM_NURTURE": LONG_TERM_NURTURE_PLAYBOOK,
+    "SHORT_TERM_LEAD": SHORT_TERM_LEAD_PLAYBOOK,
+}
+
+def get_playbook_for_intent(intent: IntentType) -> Optional[ConversationalPlaybook]:
+    """Selects the appropriate conversational playbook based on the AI's analysis."""
+    logging.info(f"PLAYBOOKS: Retrieving playbook for intent '{intent}'")
+    return CONVERSATIONAL_PLAYBOOK_REGISTRY.get(intent)
+
 POTENTIAL_SELLER_PLAYBOOK = {
     "name": "Potential Seller Nurture",
     "triggers": ["potential_seller", "seller_lead"],
