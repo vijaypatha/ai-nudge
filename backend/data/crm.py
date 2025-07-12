@@ -560,53 +560,74 @@ def get_community_overview(user_id: uuid.UUID) -> List[Dict[str, Any]]:
 
 def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
     """
-    Clears active recommendations and the last AI draft for a specific client.
-    This is called when the conversation progresses.
+    Clears any active recommendation slates and removes the most recent
+    AI draft from the conversation history for a specific client.
+
+    Called whenever the conversation advances (e.g., a message is sent or
+    edited) so that stale suggestions disappear from the UI.
     """
     try:
         with Session(engine) as session:
-            client_check = session.exec(
-                select(Client.id).where(Client.id == client_id, Client.user_id == user_id)
+            # Ensure the client belongs to the current user
+            client_exists = session.exec(
+                select(Client.id)
+                .where(Client.id == client_id, Client.user_id == user_id)
             ).first()
-            
-            if not client_check:
-                logging.warning(f"CRM AUTH: User {user_id} attempted to clear recommendations for client {client_id} without permission.")
+
+            if not client_exists:
+                logging.warning(
+                    f"CRM AUTH: User {user_id} attempted to clear recommendations "
+                    f"for client {client_id} without permission."
+                )
                 return False
-            
-            # --- Part 1: Clear active recommendation slates ---
+
+            # --- Part 1: Mark active recommendation slates as completed ---
             active_slates = session.exec(
                 select(CampaignBriefing).where(
                     CampaignBriefing.client_id == client_id,
                     CampaignBriefing.user_id == user_id,
-                    CampaignBriefing.status == 'active'
+                    CampaignBriefing.status == "active",
                 )
             ).all()
-            
+
             for slate in active_slates:
-                slate.status = 'completed'
+                slate.status = "completed"
                 session.add(slate)
-            
+
             if active_slates:
-                logging.info(f"CRM: Marked {len(active_slates)} recommendation slates as completed for client {client_id}")
+                logging.info(
+                    f"CRM: Marked {len(active_slates)} recommendation slates as "
+                    f"completed for client {client_id}"
+                )
 
-            # --- Part 2: Clear the last AI Draft from the message history ---
-            last_message_with_draft = session.exec(
+            # --- Part 2: Remove the newest message that still has an AI draft ---
+            messages = session.exec(
                 select(Message)
-                .where(Message.client_id == client_id, Message.ai_draft != None)
+                .where(Message.client_id == client_id)
+                .options(selectinload(Message.ai_draft))
                 .order_by(Message.created_at.desc())
-            ).first()
+            ).all()
 
-            if last_message_with_draft:
-                last_message_with_draft.ai_draft = None
-                session.add(last_message_with_draft)
-                logging.info(f"CRM: Cleared stale AI draft from message {last_message_with_draft.id} for client {client_id}")
-            
+            for msg in messages:
+                if msg.ai_draft:
+                    msg.ai_draft = None
+                    session.add(msg)
+                    logging.info(
+                        f"CRM: Cleared stale AI draft from message {msg.id} "
+                        f"for client {client_id}"
+                    )
+                    break
+
             session.commit()
             return True
-            
+
     except Exception as e:
-        logging.error(f"CRM: Error clearing recommendations/drafts for client {client_id}: {e}", exc_info=True)
+        logging.error(
+            f"CRM: Error clearing recommendations/drafts for client {client_id}: {e}",
+            exc_info=True,
+        )
         return False
+
 
 def add_client_notes(client_id: UUID, notes_to_add: str, user_id: UUID) -> Optional[Client]:
     """

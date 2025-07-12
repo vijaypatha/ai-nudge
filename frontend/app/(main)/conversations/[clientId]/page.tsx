@@ -120,6 +120,12 @@ export default function ConversationPage({ params }: ConversationPageProps) {
 
         try {
             await api.post(`/api/conversations/${selectedClient.id}/send_reply`, { content });
+            
+                // NEW ─ retire any stale AI draft & recommendation slate
+                await api.post(
+                  `/api/clients/${selectedClient.id}/recommendations/clear`,
+                  {}
+                );
             const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
             setConversationData(historyData);
         } catch (err) {
