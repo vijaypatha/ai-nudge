@@ -1,5 +1,5 @@
 // frontend/app/(main)/conversations/[clientId]/page.tsx
-// --- DEFINITIVE FIX: Detects new messages and clears old recommendations to fix stale suggestion box.
+// --- DEFINITIVE FIX: Removes all frontend clearing logic to prevent race conditions.
 
 'use client';
 
@@ -88,22 +88,8 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                 const historyData: ConversationData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
         
                 if (isMounted) {
-                    setConversationData(prevData => {
-                        const hasNewMessages = prevData && historyData.messages.length > prevData.messages.length;
-                        const hadOldRecommendations = prevData && prevData.active_recommendations;
-
-                        // If new messages have arrived and there were old recommendations showing,
-                        // make an API call to clear them from the backend.
-                        if (hasNewMessages && hadOldRecommendations) {
-                            console.log("New messages detected. Clearing stale recommendations.");
-                            api.post(`/api/clients/${selectedClient.id}/recommendations/clear`, {}).catch(err => {
-                                console.error("Failed to clear recommendations:", err);
-                            });
-                        }
-                        
-                        // Standard state update
-                        return JSON.stringify(prevData) !== JSON.stringify(historyData) ? historyData : prevData;
-                    });
+                    // This simple update logic prevents the frontend from interfering with the backend.
+                    setConversationData(prev => JSON.stringify(prev) !== JSON.stringify(historyData) ? historyData : prev);
                 }
             } catch (err) {
                 console.error("Polling failed:", err);
@@ -134,7 +120,6 @@ export default function ConversationPage({ params }: ConversationPageProps) {
 
         try {
             await api.post(`/api/conversations/${selectedClient.id}/send_reply`, { content });
-            // After sending, fetch the latest conversation data, which will have cleared recommendations
             const historyData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
             setConversationData(historyData);
         } catch (err) {
@@ -147,11 +132,9 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     }, [selectedClient, api]);
 
     const handlePlanCampaign = useCallback(async () => {
-        // This function's implementation would go here if it needed changes.
     }, [selectedClient, api, refetchScheduledMessagesForClient]);
 
     const handleUpdateScheduledMessage = (updatedMessage: ScheduledMessage) => {
-        // This function's implementation would go here if it needed changes.
     };
 
     const handleActionComplete = useCallback((updatedClient: Client) => {

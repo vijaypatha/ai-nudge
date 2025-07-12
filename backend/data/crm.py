@@ -306,23 +306,19 @@ def get_active_recommendation_slate_for_client(client_id: uuid.UUID, user_id: uu
 def update_slate_status(slate_id: uuid.UUID, new_status: str, user_id: uuid.UUID, session: Session) -> Optional[CampaignBriefing]:
     """
     Updates the status of a specific recommendation slate (CampaignBriefing).
-    This function explicitly PREVENTS direct setting of 'completed' or 'stale' status
-    to enforce the correct application logic (e.g., using clear_active_recommendations).
+    This now allows the orchestrator to set 'stale' status, but blocks 'completed'.
     """
-    # --- DEFINITIVE FIX START ---
-    # Enforce correct state transition. Slates should only be marked 'completed'
-    # by the orchestrator when the conversation progresses. A direct API call
-    # from the frontend to do this is incorrect and is now blocked at the data layer.
-    if new_status in ['completed', 'stale']:
+    # This guard clause now ONLY blocks direct 'completed' updates, which
+    # should be handled exclusively by the clear_active_recommendations function.
+    if new_status == 'completed':
         logging.warning(
-            f"CRM: BLOCKED an attempt to directly set slate {slate_id} status to '{new_status}'. "
-            "This action should be handled by the system orchestrator."
+            f"CRM: BLOCKED a direct attempt to set slate {slate_id} status to 'completed'. "
+            "This action should be handled by the system orchestrator via clear_active_recommendations."
         )
         # Return the slate without changing it to prevent breaking the frontend.
         return session.exec(
             select(CampaignBriefing).where(CampaignBriefing.id == slate_id, CampaignBriefing.user_id == user_id)
         ).first()
-    # --- DEFINITIVE FIX END ---
     
     statement = select(CampaignBriefing).where(
         CampaignBriefing.id == slate_id,
