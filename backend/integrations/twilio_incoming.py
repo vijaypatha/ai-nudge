@@ -10,6 +10,12 @@ from data import crm as crm_service
 from data.models.message import Message, MessageDirection, MessageStatus
 from data.models.client import Client
 from data.models.user import User
+from agent_core.tools.faq_matcher import match_faqs      
+from integrations import twilio_outgoing 
+from common.config import get_settings 
+
+settings = get_settings() 
+
 
 async def process_incoming_sms(from_number: str, body: str):
     """
@@ -60,6 +66,26 @@ async def process_incoming_sms(from_number: str, body: str):
     except Exception as e:
         logging.error(f"TWILIO INTEGRATION: Failed to save message to database: {e}")
         return
+    
+    # --- FAQ AUTO-REPLY (sends and exits if match found) ----------------
+    try:
+        faq_answers = await match_faqs(realtor.id, body)
+    except Exception as e:
+        logging.error(f"FAQ matcher error: {e}")
+        faq_answers = []
+
+    # ↓ UPDATED — feature flag (and optional cap)
+    if faq_answers and settings.FAQ_AUTO_REPLY_ENABLED:
+        reply_text = " ".join(faq_answers)[:320] # Truncate to avoid hitting Twilio limits
+        logging.info(f"TWILIO INTEGRATION: Sending FAQ auto-reply to {from_number}: '{reply_text}'")
+        await twilio_outgoing.send_sms(
+            to_number=from_number,
+            body=reply_text,
+            # Optionally, you can log this outgoing message as well
+        )
+        # Important: Return early to bypass the AI orchestrator
+        return
+    # --------------------------------------------------------------------
 
     # 5. Trigger the AI orchestrator, NOW PASSING THE SAVED MESSAGE OBJECT.
     try:
