@@ -1,5 +1,5 @@
 // frontend/app/(main)/conversations/[clientId]/page.tsx
-// --- MODIFIED: Renders the new RecommendationActions component.
+// --- MODIFIED: The handleActionComplete function now fully implements the 'fall-off' logic.
 
 'use client';
 
@@ -19,7 +19,6 @@ import { ChatHistory } from '@/components/conversation/ChatHistory';
 import { MessageComposer } from '@/components/conversation/MessageComposer';
 import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
-// --- ADDED: Import the new component ---
 import { RecommendationActions } from '@/components/conversation/RecommendationActions';
 
 import { Users, Menu, Phone, Video } from 'lucide-react';
@@ -151,14 +150,33 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         setScheduledMessages(prev => prev.map(msg => msg.id === updatedMessage.id ? updatedMessage : msg));
     };
 
-    // --- NEW: Callback function to refresh client data after an action ---
+    // --- MODIFIED: This function now clears the recommendation slate after an action ---
     const handleActionComplete = useCallback(async () => {
-        if(selectedClient) {
-            console.log("Action complete, refreshing client data...");
-            const refreshedClient = await api.get(`/api/clients/${selectedClient.id}`);
-            updateClientInList(refreshedClient);
+        if(selectedClient && conversationData?.active_recommendations) {
+            console.log("Action complete, clearing recommendations and refreshing client data...");
+            
+            const activeSlateId = conversationData.active_recommendations.id;
+            
+            // Optimistically clear the recommendations for a snappy UI response
+            setConversationData(prev => prev ? { ...prev, active_recommendations: null } : null);
+            
+            try {
+                // In parallel, tell the backend to mark the slate as completed and refetch the client's data.
+                const completeSlateTask = api.post(`/api/campaigns/briefings/${activeSlateId}/complete`, {});
+                const refetchClientTask = api.get(`/api/clients/${selectedClient.id}`);
+                
+                const [, refreshedClient] = await Promise.all([completeSlateTask, refetchClientTask]);
+                
+                // Update the global client list with the new tags.
+                updateClientInList(refreshedClient);
+                
+            } catch (error) {
+                console.error("Error completing action:", error);
+                alert("There was an error updating the client's information.");
+                // Note: In a real app, you might want to restore the recommendations on failure.
+            }
         }
-    }, [selectedClient, api, updateClientInList]);
+    }, [selectedClient, api, updateClientInList, conversationData]);
 
     if (loading && !selectedClient) {
         return <div className="flex-1 flex items-center justify-center text-brand-text-muted">Loading Client Data...</div>;
@@ -212,7 +230,6 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                        messageComposerRef={messageComposerRef}
                    />
                    
-                   {/* --- ADDED: Render the new RecommendationActions component --- */}
                    {conversationData?.active_recommendations && selectedClient && (
                         <RecommendationActions
                             recommendations={conversationData.active_recommendations}

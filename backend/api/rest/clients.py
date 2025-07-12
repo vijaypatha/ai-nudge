@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel
+from sqlmodel import Session
 
 from data.models.user import User, UserUpdate
 from api.security import get_current_user_from_token
@@ -24,6 +25,11 @@ class ClientSearchQuery(BaseModel):
 # --- NEW: Pydantic model for the 'add tags' request body ---
 class AddTagsPayload(BaseModel):
     tags: List[str]
+
+class UpdateIntelPayload(BaseModel):
+    tags_to_add: Optional[List[str]] = None
+    notes_to_add: Optional[str] = None
+    active_recommendation_id: Optional[UUID] = None # To clear the slate
 
 @router.post("/manual", response_model=Client)
 async def add_manual_client(
@@ -78,6 +84,41 @@ async def search_clients(query: ClientSearchQuery, current_user: User = Depends(
         return all_clients
 
     return [client for client in all_clients if client.id in final_results]
+
+# --- NEW ENDPOINT: To handle adding tags and/or notes, and clearing recommendations ---
+@router.post("/{client_id}/intel", response_model=Client)
+async def update_client_intel_endpoint(
+    client_id: UUID,
+    payload: UpdateIntelPayload,
+    current_user: User = Depends(get_current_user_from_token),
+):
+    """
+    A single, powerful endpoint to update client intel based on AI recommendations.
+    It can add tags, add notes, and clear the active recommendation slate.
+    """
+    updated_client = crm_service.update_client_intel(
+        client_id=client_id,
+        user_id=current_user.id,
+        tags_to_add=payload.tags_to_add,
+        notes_to_add=payload.notes_to_add
+    )
+
+    if not updated_client:
+        raise HTTPException(status_code=404, detail="Client not found or failed to update.")
+
+    # If an action was taken, clear the recommendation slate that prompted it.
+    if payload.active_recommendation_id:
+        with Session(crm_service.engine) as session:
+            crm_service.update_slate_status(
+                slate_id=payload.active_recommendation_id,
+                new_status='completed',
+                user_id=current_user.id,
+                session=session
+            )
+            session.commit()
+            logging.info(f"API: Marked slate {payload.active_recommendation_id} as completed.")
+
+    return updated_client
 
 @router.post("/{client_id}/tags", response_model=Client)
 async def add_tags_to_client(

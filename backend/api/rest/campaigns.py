@@ -1,17 +1,20 @@
 # File Path: backend/api/rest/campaigns.py
-# DEFINITIVE FIX: Updates the /draft-instant-nudge endpoint to return a JSON
-# object instead of a raw string, ensuring consistency with the frontend API client.
+# --- DEFINITIVE FIX: Corrects the import for 'Session' to resolve the startup error.
 
 import logging
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
-from typing import List
+# --- MODIFIED: Removed 'Session' from the fastapi import ---
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body
+from typing import List, Dict, Any, Optional
 from uuid import UUID
+import uuid
 from pydantic import BaseModel
+# --- ADDED: Imported 'Session' from the correct library, sqlmodel ---
+from sqlmodel import Session
 
 from data.models.user import User
 from api.security import get_current_user_from_token
 from data.models.message import SendMessageImmediate
-from data.models.campaign import CampaignBriefing, CampaignUpdate
+from data.models.campaign import CampaignBriefing, CampaignUpdate, RecommendationSlateResponse
 from agent_core import orchestrator
 from agent_core.agents import conversation as conversation_agent
 from data import crm as crm_service
@@ -31,7 +34,6 @@ class PlanRelationshipPayload(BaseModel):
 class DraftInstantNudgePayload(BaseModel):
     topic: str
 
-# NEW: Pydantic model for the AI draft response
 class DraftResponse(BaseModel):
     draft: str
 
@@ -52,11 +54,35 @@ async def draft_instant_nudge_endpoint(
             realtor=current_user,
             topic=payload.topic
         )
-        # BUGFIX: Return a JSON object instead of a raw string
         return DraftResponse(draft=draft_content)
     except Exception as e:
         logging.error(f"Error drafting instant nudge for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to generate AI draft.")
+    
+@router.post("/briefings/{briefing_id}/complete", response_model=RecommendationSlateResponse)
+async def complete_briefing(
+    briefing_id: uuid.UUID, 
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Marks a campaign briefing (or recommendation slate) as 'completed'.
+    This is called when a user acts on a recommendation, like adding a tag,
+    which triggers the "fall-off" UI behavior.
+    """
+    with Session(crm_service.engine) as session:
+        updated_slate = crm_service.update_slate_status(
+            slate_id=briefing_id, 
+            new_status='completed', 
+            user_id=current_user.id,
+            session=session
+        )
+        if not updated_slate:
+            raise HTTPException(status_code=404, detail="Briefing not found or you do not have permission to edit it.")
+        
+        session.commit()
+        session.refresh(updated_slate)
+        logging.info(f"API: Marked slate {briefing_id} as completed for user {current_user.id}")
+        return updated_slate
 
 @router.post("/plan-relationship", status_code=202)
 async def plan_relationship_campaign_endpoint(payload: PlanRelationshipPayload, current_user: User = Depends(get_current_user_from_token)):

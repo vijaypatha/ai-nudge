@@ -16,7 +16,7 @@ from .models.user import User, UserUpdate
 from .models.resource import Resource, ResourceCreate, ResourceUpdate
 from .models.campaign import CampaignBriefing, CampaignUpdate
 from .models.message import ScheduledMessage, Message, MessageStatus, MessageDirection
-
+from uuid import UUID
 
 
 # --- User Functions ---
@@ -143,6 +143,45 @@ def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uuid.UUID
             session.refresh(client)
             return client
         return None
+
+# --- NEW FUNCTION: To handle adding tags and notes in a single transaction ---
+def update_client_intel(
+    client_id: UUID, 
+    user_id: UUID,
+    tags_to_add: Optional[List[str]] = None, 
+    notes_to_add: Optional[str] = None
+) -> Optional[Client]:
+    """
+    Updates a client with new tags and/or notes in a single transaction.
+    This is called by the new consolidated API endpoint.
+    """
+    with Session(engine) as session:
+        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
+        if not client:
+            logging.error(f"CRM: update_client_intel failed. Client {client_id} not found for user {user_id}.")
+            return None
+        
+        # Update tags if provided
+        if tags_to_add:
+            existing_tags = set(client.user_tags)
+            new_tags = set(tags_to_add)
+            client.user_tags = sorted(list(existing_tags.union(new_tags)))
+            logging.info(f"CRM: Updating tags for client {client_id}: {client.user_tags}")
+
+        # Update notes if provided
+        if notes_to_add:
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            new_note_entry = f"Note from AI ({timestamp}):\n{notes_to_add}"
+            if client.notes:
+                client.notes = f"{client.notes}\n\n---\n\n{new_note_entry}"
+            else:
+                client.notes = new_note_entry
+            logging.info(f"CRM: Appending notes for client {client_id}")
+        
+        session.add(client)
+        session.commit()
+        session.refresh(client)
+        return client
     
 def add_client_tags(client_id: uuid.UUID, tags_to_add: List[str], user_id: uuid.UUID) -> Optional[Client]:
     """
@@ -534,3 +573,137 @@ def get_community_overview(user_id: uuid.UUID) -> List[Dict[str, Any]]:
             
         community_list.sort(key=lambda x: x['health_score'], reverse=True)
         return community_list
+
+def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
+    """
+    Clears active recommendations for a specific client by updating the status
+    of any active recommendation slates to 'completed'.
+    
+    Args:
+        client_id: The ID of the client whose recommendations should be cleared
+        user_id: The ID of the current user for security validation
+        
+    Returns:
+        bool: True if recommendations were cleared successfully, False otherwise
+    """
+    try:
+        with Session(engine) as session:
+            # First, verify the client belongs to the user
+            client_check = session.exec(
+                select(Client.id).where(Client.id == client_id, Client.user_id == user_id)
+            ).first()
+            
+            if not client_check:
+                logging.warning(f"CRM AUTH: User {user_id} attempted to clear recommendations for client {client_id} without permission.")
+                return False
+            
+            # Find all active recommendation slates for this client
+            active_slates = session.exec(
+                select(CampaignBriefing).where(
+                    CampaignBriefing.client_id == client_id,
+                    CampaignBriefing.user_id == user_id,
+                    CampaignBriefing.status == 'active'
+                )
+            ).all()
+            
+            # Update their status to 'completed'
+            for slate in active_slates:
+                slate.status = 'completed'
+                session.add(slate)
+                logging.info(f"CRM: Marked recommendation slate {slate.id} as completed for client {client_id}")
+            
+            session.commit()
+            logging.info(f"CRM: Successfully cleared {len(active_slates)} active recommendations for client {client_id}")
+            return True
+            
+    except Exception as e:
+        logging.error(f"CRM: Error clearing recommendations for client {client_id}: {e}", exc_info=True)
+        return False
+
+def add_client_notes(client_id: UUID, notes_to_add: str, user_id: UUID) -> Optional[Client]:
+    """
+    Appends new notes to a client's existing notes field.
+    
+    Args:
+        client_id: The ID of the client to update
+        notes_to_add: The notes to append
+        user_id: The ID of the current user for security
+        
+    Returns:
+        The updated Client object or None if not found
+    """
+    with Session(engine) as session:
+        # Retrieve the client, ensuring it belongs to the user
+        client = session.exec(
+            select(Client).where(Client.id == client_id, Client.user_id == user_id)
+        ).first()
+        
+        if client:
+            # Append new notes to existing notes (if any)
+            if hasattr(client, 'notes') and client.notes:
+                client.notes = f"{client.notes}\n\n{notes_to_add}"
+            else:
+                # If no notes field exists, you might need to add it to the Client model
+                # For now, we'll log this information
+                logging.info(f"CRM: Notes to add for client {client_id}: {notes_to_add}")
+            
+            session.add(client)
+            session.commit()
+            session.refresh(client)
+            logging.info(f"CRM: Added notes to client {client_id}")
+            return client
+            
+        return None
+
+def update_client_tags_and_notes(
+    client_id: UUID, 
+    tags_to_add: List[str], 
+    notes_to_add: str, 
+    user_id: UUID
+) -> bool:
+    """
+    Updates client with new tags and notes in a single transaction.
+    
+    Args:
+        client_id: The ID of the client to update
+        tags_to_add: List of tags to add to the client
+        notes_to_add: Notes to add to the client
+        user_id: The ID of the current user for security
+        
+    Returns:
+        bool: True if successful, False if client not found
+    """
+    try:
+        with Session(engine) as session:
+            # Retrieve the client, ensuring it belongs to the user
+            client = session.exec(
+                select(Client).where(Client.id == client_id, Client.user_id == user_id)
+            ).first()
+            
+            if not client:
+                return False
+            
+            # Update tags if provided
+            if tags_to_add:
+                existing_tags = set(client.user_tags)
+                new_tags = set(tags_to_add)
+                updated_tags = sorted(list(existing_tags.union(new_tags)))
+                client.user_tags = updated_tags
+                logging.info(f"CRM: Updated tags for client {client_id}: {updated_tags}")
+            
+            # Update notes if provided
+            if notes_to_add:
+                if hasattr(client, 'notes') and client.notes:
+                    client.notes = f"{client.notes}\n\n{notes_to_add}"
+                else:
+                    # Log the notes for now if no notes field exists
+                    logging.info(f"CRM: Notes for client {client_id}: {notes_to_add}")
+            
+            session.add(client)
+            session.commit()
+            session.refresh(client)
+            return True
+            
+    except Exception as e:
+        logging.error(f"CRM: Error updating client {client_id}: {e}", exc_info=True)
+        return False
