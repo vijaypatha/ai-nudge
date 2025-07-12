@@ -303,23 +303,12 @@ def get_active_recommendation_slate_for_client(client_id: uuid.UUID, user_id: uu
     return session.exec(statement).first()
 
 # --- NEW: Function to update the status of a recommendation slate ---
+# --- REPLACE THIS ENTIRE FUNCTION ---
 def update_slate_status(slate_id: uuid.UUID, new_status: str, user_id: uuid.UUID, session: Session) -> Optional[CampaignBriefing]:
     """
     Updates the status of a specific recommendation slate (CampaignBriefing).
-    This now allows the orchestrator to set 'stale' status, but blocks 'completed'.
+    This is the original, simple implementation without any blocking rules.
     """
-    # This guard clause now ONLY blocks direct 'completed' updates, which
-    # should be handled exclusively by the clear_active_recommendations function.
-    if new_status == 'completed':
-        logging.warning(
-            f"CRM: BLOCKED a direct attempt to set slate {slate_id} status to 'completed'. "
-            "This action should be handled by the system orchestrator via clear_active_recommendations."
-        )
-        # Return the slate without changing it to prevent breaking the frontend.
-        return session.exec(
-            select(CampaignBriefing).where(CampaignBriefing.id == slate_id, CampaignBriefing.user_id == user_id)
-        ).first()
-    
     statement = select(CampaignBriefing).where(
         CampaignBriefing.id == slate_id,
         CampaignBriefing.user_id == user_id

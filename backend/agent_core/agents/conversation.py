@@ -128,15 +128,15 @@ async def generate_recommendation_slate(
 
     prompt += f"""
     ## INSTRUCTIONS
-    1.  **Analyze the LATEST INCOMING MESSAGE** in the context of the history, available resources, and the Current Date.
-    2.  **Generate a helpful SMS response draft.** Use the Current Date to ensure your response is timely (e.g., if a client's birthday has passed, say "hope you had a great birthday" instead of "happy early birthday").
-    3.  **Identify new, actionable intelligence.**
-        - This includes real estate preferences (budget, location, features).
-        - **Crucially, also identify important personal details like birthdays, anniversaries, or other life events.**
-    4.  **Suggest Actions based on new intel.**
-        - If the client mentions a personal date like a birthday, suggest an `UPDATE_CLIENT_INTEL` action to add a corresponding tag (e.g., "birthday-june-30") and a note (e.g., "Birthday is on June 30.").
+    1.  **Analyze the LATEST INCOMING MESSAGE** in the context of the history and the Current Date.
+    2.  **Generate a helpful SMS response draft.** Use the Current Date to ensure your response is timely (e.g., if a birthday has passed, say "hope you had a great birthday").
+    3.  **Identify new, actionable intelligence,** including real estate needs AND personal details like birthdays.
+    4.  **Suggest Actions (Client Intel):**
+        - If new intel is found, generate an `UPDATE_CLIENT_INTEL` recommendation.
+        - **Tag Formatting Rule:** Tags MUST be short (2-3 words max) and human-readable. For example, if a client mentions needing a 3-car garage in St. George, suggest separate tags like "3-Car Garage" and "St. George". Do NOT create long, hyphenated tags like "house-hunting-st-george".
+        - If the client mentions a personal date, suggest a tag (e.g., "birthday-june-30") and a note.
         - Do NOT suggest adding tags that are already present in the 'Existing Client Tags' list.
-    5.  **Format your entire output** as a single, valid JSON object following the schema below. If no new intel is found, the `UPDATE_CLIENT_INTEL` recommendation can be omitted.
+    5.  **Format your entire output** as a single, valid JSON object following the schema. If no new intel is found, you can omit the `UPDATE_CLIENT_INTEL` recommendation.
 
     ## JSON OUTPUT SCHEMA
     ```json
