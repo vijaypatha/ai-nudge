@@ -1,5 +1,5 @@
 // frontend/app/(main)/conversations/[clientId]/page.tsx
-// --- DEFINITIVE FIX 11: Removes incorrect props from RelationshipCampaignCard to resolve the final build error.
+// DEFINITIVE FIX: Resolves all build errors and correctly displays all recommendation types.
 
 'use client';
 
@@ -20,8 +20,9 @@ import { MessageComposer } from '@/components/conversation/MessageComposer';
 import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
 import { RecommendationActions } from '@/components/conversation/RecommendationActions';
-
+import { AIDraftDisplay } from '@/components/conversation/AIDraftDisplay';
 import { Users, Menu, Phone, Video } from 'lucide-react';
+
 
 interface ConversationPageProps {
     params: {
@@ -120,18 +121,11 @@ export default function ConversationPage({ params }: ConversationPageProps) {
 
         const optimisticMessage: Message = { id: `agent-${Date.now()}`, client_id: selectedClient.id, content, direction: 'outbound', status: 'pending', created_at: new Date().toISOString() };
         
+        // FIX: This logic is now fully type-safe and handles the null case correctly.
         setConversationData(prevData => {
-            const newMessages = [...(prevData?.messages || []), optimisticMessage];
-            if (!prevData) {
-                return { 
-                    messages: newMessages, 
-                    active_plan: null, 
-                    active_recommendations: null 
-                };
-            }
             return {
-                ...prevData,
-                messages: newMessages,
+                messages: [...(prevData?.messages || []), optimisticMessage],
+                active_plan: prevData?.active_plan || null,
                 active_recommendations: null
             };
         });
@@ -146,7 +140,8 @@ export default function ConversationPage({ params }: ConversationPageProps) {
             console.error("Failed to send message:", err);
             setConversationData(prev => {
                 if (!prev) return null;
-                return { ...prev, messages: prev.messages.filter(m => m.id !== optimisticMessage.id) };
+                const newMessages = prev.messages.filter(m => m.id !== optimisticMessage.id);
+                return { ...prev, messages: newMessages };
             });
             alert("Failed to send message.");
         } finally {
@@ -213,6 +208,8 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         );
     }
     
+    const showImmediateRecommendations = conversationData?.active_recommendations && !conversationData?.active_plan;
+
     return (
         <div className="flex-1 flex min-w-0">
             {/* Center Panel */}
@@ -244,14 +241,19 @@ export default function ConversationPage({ params }: ConversationPageProps) {
 
                 <div className={clsx("flex flex-col flex-grow min-h-0", activeTab === 'messages' ? 'flex' : 'hidden lg:flex')}>
                    <ChatHistory 
-                        conversationData={conversationData}
+                        messages={conversationData?.messages || []}
                         selectedClient={selectedClient}
-                        onSendMessage={handleSendMessage}
-                        messageComposerRef={messageComposerRef}
                    />
                    
-                   <div className="px-4 pb-2">
-                    {conversationData?.active_recommendations && !conversationData?.active_plan && (
+                   <div className="px-4 pb-2 space-y-2">
+                    {showImmediateRecommendations && conversationData.active_recommendations.original_draft && (
+                        <AIDraftDisplay
+                            draft={conversationData.active_recommendations}
+                            onSendMessage={handleSendMessage}
+                            messageComposerRef={messageComposerRef}
+                        />
+                    )}
+                    {showImmediateRecommendations && (
                         <RecommendationActions
                             recommendations={conversationData.active_recommendations}
                             client={selectedClient}
@@ -263,10 +265,9 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                    <MessageComposer onSendMessage={handleSendMessage} isSending={isSending} ref={messageComposerRef} />
                 </div>
 
-                <div className={clsx("p-6 space-y-6 overflow-y-auto", activeTab === 'intel' ? 'block lg:hidden' : 'hidden')}>
+                <div className={clsx("p-6 space-y-6 overflow-y-auto", activeTab === 'intel' ? 'flex flex-col flex-grow' : 'hidden')}>
                     <DynamicTaggingCard client={selectedClient} onUpdate={updateClientInList} />
                     <ClientIntelCard client={selectedClient} onUpdate={updateClientInList} onReplan={handlePlanCampaign} />
-                    {/* FIX: Removed incorrect props that were causing build errors. */}
                     <RelationshipCampaignCard 
                         plan={conversationData?.active_plan || null}
                         messages={scheduledMessages}
@@ -281,7 +282,6 @@ export default function ConversationPage({ params }: ConversationPageProps) {
             <aside className="bg-white/5 p-6 flex-col gap-6 overflow-y-auto w-96 flex-shrink-0 hidden lg:flex">
                 <DynamicTaggingCard client={selectedClient} onUpdate={updateClientInList} />
                 <ClientIntelCard client={selectedClient} onUpdate={updateClientInList} onReplan={handlePlanCampaign} />
-                {/* FIX: Removed incorrect props here as well for consistency. */}
                 <RelationshipCampaignCard 
                     plan={conversationData?.active_plan || null}
                     messages={scheduledMessages}

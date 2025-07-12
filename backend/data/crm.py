@@ -1,5 +1,5 @@
 # backend/data/crm.py
-# --- MODIFIED: Added functions to manage the Recommendation Slate lifecycle.
+# --- DEFINITIVE FIX: Corrects the logic in get_active_recommendation_slate_for_client to look for DRAFT slates.
 
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone
@@ -141,8 +141,7 @@ def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uuid.UUID
             session.refresh(client)
             return client
         return None
-# --- NEW FUNCTION START ---
-# This new function correctly handles saving notes from the user-facing "Client Intel" card.
+
 def update_client_notes(client_id: UUID, notes: str, user_id: UUID) -> Optional[Client]:
     """
     Overwrites the entire 'notes' field for a specific client.
@@ -158,8 +157,7 @@ def update_client_notes(client_id: UUID, notes: str, user_id: UUID) -> Optional[
             logging.info(f"CRM: Manually updated notes for client {client.id}")
             return client
         return None
-# --- NEW FUNCTION END ---
-    
+
 def update_client_intel(
     client_id: UUID, 
     user_id: UUID,
@@ -268,7 +266,6 @@ def get_new_campaign_briefings_for_user(user_id: uuid.UUID, session: Optional[Se
     """
     db_session = session or Session(engine)
     try:
-        # FIX: The query now uses CampaignStatus.DRAFT instead of the old hardcoded strings.
         statement = select(CampaignBriefing).where(
             CampaignBriefing.user_id == user_id,
             CampaignBriefing.status == CampaignStatus.DRAFT
@@ -300,14 +297,12 @@ def update_campaign_briefing(campaign_id: uuid.UUID, update_data: CampaignUpdate
         session.refresh(briefing)
         return briefing
 
-# --- NEW FUNCTION START ---
 def cancel_scheduled_messages_for_plan(plan_id: UUID, user_id: UUID, session: Session) -> int:
     """
     Finds and cancels all PENDING scheduled messages associated with a specific plan.
     This is the core mechanism for "pausing" an adaptive nudge plan when a client replies.
     Returns the number of messages that were cancelled.
     """
-    # First, ensure the plan belongs to the user for security.
     plan_check = session.exec(
         select(CampaignBriefing.id)
         .where(CampaignBriefing.id == plan_id, CampaignBriefing.user_id == user_id)
@@ -317,7 +312,6 @@ def cancel_scheduled_messages_for_plan(plan_id: UUID, user_id: UUID, session: Se
         logging.warning(f"CRM AUTH: User {user_id} attempted to cancel messages for plan {plan_id} without permission.")
         return 0
 
-    # Find all messages that are part of the plan and are still pending.
     messages_to_cancel_statement = select(ScheduledMessage).where(
         ScheduledMessage.parent_plan_id == plan_id,
         ScheduledMessage.status == MessageStatus.PENDING
@@ -328,29 +322,27 @@ def cancel_scheduled_messages_for_plan(plan_id: UUID, user_id: UUID, session: Se
     if count > 0:
         logging.info(f"CRM: Found {count} pending message(s) for plan {plan_id} to cancel.")
         for msg in messages_to_cancel:
-            # Instead of deleting, we update the status. This maintains a record
-            # of the intended action, which is better for auditing and history.
             msg.status = MessageStatus.CANCELLED
             session.add(msg)
         logging.info(f"CRM: Successfully cancelled {count} message(s) for plan {plan_id}.")
     
     return count
-# --- NEW FUNCTION END ---
 
-# --- NEW: Function to get the active recommendation slate for the UI ---
+# --- DEFINITIVE FIX IS HERE ---
 def get_active_recommendation_slate_for_client(client_id: uuid.UUID, user_id: uuid.UUID, session: Session) -> Optional[CampaignBriefing]:
     """
     Finds the currently active recommendation slate OR an active plan for a client.
+    A slate is considered "active" for the UI if it is in the DRAFT state, awaiting user action.
     """
     statement = select(CampaignBriefing).where(
         CampaignBriefing.client_id == client_id,
         CampaignBriefing.user_id == user_id,
-        CampaignBriefing.status == CampaignStatus.ACTIVE
+        # FIX: Look for DRAFT status, not ACTIVE, to find newly created plans.
+        CampaignBriefing.status == CampaignStatus.DRAFT 
     )
     return session.exec(statement).first()
 
 
-# --- MODIFIED: update_slate_status to use the new Enum ---
 def update_slate_status(slate_id: uuid.UUID, new_status: CampaignStatus, user_id: uuid.UUID, session: Session) -> Optional[CampaignBriefing]:
     """
     Updates the status of a specific recommendation slate (CampaignBriefing).
@@ -613,7 +605,6 @@ def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
     """
     try:
         with Session(engine) as session:
-            # Ensure the client belongs to the current user
             client_exists = session.exec(
                 select(Client.id)
                 .where(Client.id == client_id, Client.user_id == user_id)
@@ -626,7 +617,6 @@ def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
                 )
                 return False
 
-            # --- Part 1: Mark active recommendation slates as completed ---
             active_slates = session.exec(
                 select(CampaignBriefing).where(
                     CampaignBriefing.client_id == client_id,
@@ -645,7 +635,6 @@ def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
                     f"completed for client {client_id}"
                 )
 
-            # --- Part 2: Remove the newest message that still has an AI draft ---
             messages = session.exec(
                 select(Message)
                 .where(Message.client_id == client_id)
@@ -677,29 +666,17 @@ def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
 def add_client_notes(client_id: UUID, notes_to_add: str, user_id: UUID) -> Optional[Client]:
     """
     Appends new notes to a client's existing notes field.
-    
-    Args:
-        client_id: The ID of the client to update
-        notes_to_add: The notes to append
-        user_id: The ID of the current user for security
-        
-    Returns:
-        The updated Client object or None if not found
     """
     with Session(engine) as session:
-        # Retrieve the client, ensuring it belongs to the user
         client = session.exec(
             select(Client).where(Client.id == client_id, Client.user_id == user_id)
         ).first()
         
         if client:
-            # Append new notes to existing notes (if any)
             if hasattr(client, 'notes') and client.notes:
                 client.notes = f"{client.notes}\n\n{notes_to_add}"
             else:
-                # If no notes field exists, you might need to add it to the Client model
-                # For now, we'll log this information
-                logging.info(f"CRM: Notes to add for client {client_id}: {notes_to_add}")
+                client.notes = notes_to_add
             
             session.add(client)
             session.commit()
@@ -717,19 +694,9 @@ def update_client_tags_and_notes(
 ) -> bool:
     """
     Updates client with new tags and notes in a single transaction.
-    
-    Args:
-        client_id: The ID of the client to update
-        tags_to_add: List of tags to add to the client
-        notes_to_add: Notes to add to the client
-        user_id: The ID of the current user for security
-        
-    Returns:
-        bool: True if successful, False if client not found
     """
     try:
         with Session(engine) as session:
-            # Retrieve the client, ensuring it belongs to the user
             client = session.exec(
                 select(Client).where(Client.id == client_id, Client.user_id == user_id)
             ).first()
@@ -737,7 +704,6 @@ def update_client_tags_and_notes(
             if not client:
                 return False
             
-            # Update tags if provided
             if tags_to_add:
                 existing_tags = set(client.user_tags)
                 new_tags = set(tags_to_add)
@@ -745,13 +711,11 @@ def update_client_tags_and_notes(
                 client.user_tags = updated_tags
                 logging.info(f"CRM: Updated tags for client {client_id}: {updated_tags}")
             
-            # Update notes if provided
             if notes_to_add:
                 if hasattr(client, 'notes') and client.notes:
                     client.notes = f"{client.notes}\n\n{notes_to_add}"
                 else:
-                    # Log the notes for now if no notes field exists
-                    logging.info(f"CRM: Notes for client {client_id}: {notes_to_add}")
+                    client.notes = notes_to_add
             
             session.add(client)
             session.commit()
