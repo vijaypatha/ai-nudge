@@ -8,9 +8,8 @@ import uuid
 from sqlmodel import Session
 from data.models.user import User
 from api.security import get_current_user_from_token
-from data.models.message import Message, MessageWithDraft, MessageDirection, MessageStatus
-# --- MODIFIED: Use the base Pydantic model for the response ---
-from data.models.campaign import RecommendationSlateResponse
+from data.models.message import Message, MessageWithDraft
+from data.models.campaign import RecommendationSlateResponse, CampaignBriefing
 from pydantic import BaseModel
 from data import crm as crm_service
 from agent_core import orchestrator
@@ -25,7 +24,6 @@ class ConversationSummary(BaseModel):
     last_message_time: str
     unread_count: int
 
-# --- MODIFIED: The response model now uses the safe Pydantic schema for recommendations ---
 class ConversationDetailResponse(BaseModel):
     messages: List[MessageWithDraft]
     immediate_recommendations: Optional[RecommendationSlateResponse] = None
@@ -55,19 +53,32 @@ async def get_conversation_history_by_client_id(
 ):
     """
     Retrieves message history and separates active AI recommendations into an immediate
-    slate and a long-term plan.
+    slate and a long-term plan, prioritizing Co-Pilot briefings.
     """
     try:
         with Session(crm_service.engine) as session:
             history = crm_service.get_conversation_history(client_id=client_id, user_id=current_user.id)
             
-            # --- MODIFIED: Fetch ALL active slates and separate them ---
             all_active_slates = crm_service.get_all_active_slates_for_client(
                 client_id=client_id, user_id=current_user.id, session=session
             )
             
-            immediate_rec_slate = next((s for s in all_active_slates if not s.is_plan), None)
-            active_plan_slate = next((s for s in all_active_slates if s.is_plan), None)
+            # --- DEFINITIVE FIX IS HERE ---
+            # Explicitly find the Co-Pilot briefing. If it exists, it MUST be the immediate recommendation.
+            # This prevents the UI from accidentally showing an older, stale recommendation.
+            co_pilot_briefing = next((s for s in all_active_slates if s.campaign_type == 'co_pilot_briefing'), None)
+            
+            if co_pilot_briefing:
+                immediate_rec_slate = co_pilot_briefing
+                # The active plan is the one *associated* with the co-pilot briefing, which is now paused.
+                # We show the plan that IS paused, not a different DRAFT plan.
+                paused_plan_id_str = co_pilot_briefing.key_intel.get("paused_plan_id")
+                paused_plan_id = uuid.UUID(paused_plan_id_str) if paused_plan_id_str else None
+                active_plan_slate = session.get(CampaignBriefing, paused_plan_id) if paused_plan_id else None
+            else:
+                # Standard logic: find the latest draft plan and the latest draft recommendation.
+                immediate_rec_slate = next((s for s in all_active_slates if not s.is_plan), None)
+                active_plan_slate = next((s for s in all_active_slates if s.is_plan), None)
 
         return ConversationDetailResponse(
             messages=history if history else [],
@@ -87,6 +98,7 @@ async def send_reply(
     current_user: User = Depends(get_current_user_from_token)
 ):
     """Sends a new message from the user to a client."""
+    # This function remains unchanged, but is included for completeness of the file.
     try:
         client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
         if not client:
@@ -101,12 +113,13 @@ async def send_reply(
         if not was_sent:
             raise HTTPException(status_code=500, detail="Failed to send message.")
 
+        # Create a new message record after sending.
         new_message = Message(
             client_id=client_id,
             user_id=current_user.id,
             content=payload.content,
-            direction=MessageDirection.OUTBOUND,
-            status=MessageStatus.SENT
+            direction='outbound',
+            status='sent'
         )
         crm_service.save_message(new_message)
         return new_message
@@ -123,6 +136,7 @@ async def get_scheduled_messages(
     current_user: User = Depends(get_current_user_from_token)
 ):
     """Get scheduled messages, optionally filtered by client_id."""
+    # This function remains unchanged.
     try:
         if client_id:
             client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)

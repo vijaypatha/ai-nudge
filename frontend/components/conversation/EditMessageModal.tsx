@@ -1,95 +1,78 @@
 // frontend/components/conversation/EditMessageModal.tsx
-// Purpose: A modal dialog for editing the content and date of a scheduled message.
 
 'use client';
 
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
-import type { ScheduledMessage } from '@/context/AppContext';
+import { ScheduledMessage, useAppContext } from '@/context/AppContext';
+import { Button } from '../ui/Button';
 
-/**
- * Props for the EditMessageModal.
- * @param isOpen - Controls the visibility of the modal.
- * @param onClose - Callback to close the modal.
- * @param message - The scheduled message object to be edited.
- * @param onSave - Callback after a successful save operation.
- * @param api - The API client from AppContext.
- */
 interface EditMessageModalProps {
     isOpen: boolean;
     onClose: () => void;
-    message: ScheduledMessage | null;
-    onSave: (updatedMessage: ScheduledMessage) => void;
-    api: any;
+    message: ScheduledMessage;
 }
 
-/**
- * A full-screen modal for editing a scheduled message.
- */
-export const EditMessageModal = ({ isOpen, onClose, message, onSave, api }: EditMessageModalProps) => {
-    const [content, setContent] = useState('');
-    const [scheduledAt, setScheduledAt] = useState('');
+export const EditMessageModal = ({ isOpen, onClose, message }: EditMessageModalProps) => {
+    const { api, refetchScheduledMessagesForClient } = useAppContext();
+    const [content, setContent] = useState(message.content);
+    const [isSaving, setIsSaving] = useState(false);
 
-    // Pre-fill the form when a message is passed in.
     useEffect(() => {
-        if (message) {
-            setContent(message.content);
-            // Format date for the input type="date" which expects YYYY-MM-DD.
-            setScheduledAt(new Date(message.scheduled_at).toISOString().split('T')[0]);
-        }
+        setContent(message.content);
     }, [message]);
 
-    if (!isOpen || !message) return null;
+    if (!isOpen) return null;
 
-    // Handle the save action.
     const handleSave = async () => {
+        setIsSaving(true);
         try {
-            const updatedMessage = await api.put(`/scheduled-messages/${message.id}`, {
-                content,
-                scheduled_at: new Date(scheduledAt).toISOString()
+            await api.put(`/api/scheduled-messages/${message.id}`, {
+                content: content,
             });
-            onSave(updatedMessage); // Propagate changes to the parent component.
-            console.log(`Successfully updated scheduled message: ${message.id}`);
-            onClose(); // Close the modal on success.
-        } catch(err) {
-            console.error("Failed to save scheduled message:", err);
+            // Refetch scheduled messages for the client to update the UI
+            await refetchScheduledMessagesForClient(message.client_id);
+            onClose();
+        } catch (error) {
+            console.error("Failed to save changes:", error);
             alert("Failed to save changes.");
+        } finally {
+            setIsSaving(false);
         }
     };
 
     return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-brand-dark border border-white/10 rounded-2xl w-full max-w-2xl flex flex-col shadow-2xl">
-                <header className="p-6 border-b border-white/10 flex justify-between items-center">
-                    <h2 className="text-xl font-bold text-white">Edit Scheduled Message</h2>
-                    <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10">
-                        <X size={20} />
-                    </button>
-                </header>
-                <main className="p-6 space-y-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
+            <div className="bg-brand-dark-blue border border-white/10 rounded-lg shadow-2xl w-full max-w-lg m-4">
+                <div className="p-6 border-b border-white/10 flex justify-between items-center">
+                    <h2 className="text-lg font-semibold text-white">Edit Scheduled Message</h2>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white">&times;</button>
+                </div>
+                <div className="p-6 space-y-4">
                     <div>
-                        <label className="text-sm font-semibold text-brand-text-muted mb-2 block">Scheduled Date</label>
+                        <label className="text-sm font-medium text-gray-400 block mb-2">Scheduled Date</label>
                         <input
-                            type="date"
-                            value={scheduledAt}
-                            onChange={e => setScheduledAt(e.target.value)}
-                            className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-sm text-white"
+                            type="text"
+                            readOnly
+                            value={new Date(message.scheduled_at).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                            className="w-full bg-black/20 border border-white/10 rounded-lg p-2 text-sm text-gray-300"
                         />
                     </div>
                     <div>
-                        <label className="text-sm font-semibold text-brand-text-muted mb-2 block">Message Content</label>
+                        <label className="text-sm font-medium text-gray-400 block mb-2">Message Content</label>
                         <textarea
                             value={content}
-                            onChange={e => setContent(e.target.value)}
+                            onChange={(e) => setContent(e.target.value)}
                             rows={6}
-                            className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-brand-text-main focus:outline-none focus:ring-2 focus:ring-brand-accent"
+                            className="w-full bg-black/20 border border-white/10 rounded-lg p-2 text-sm text-white"
                         />
                     </div>
-                </main>
-                <footer className="p-6 border-t border-white/10 flex justify-end gap-4">
-                    <button onClick={onClose} className="px-5 py-2.5 text-sm font-semibold bg-white/10 hover:bg-white/20 rounded-md">Cancel</button>
-                    <button onClick={handleSave} className="px-5 py-2.5 text-sm font-semibold bg-primary-action text-brand-dark hover:brightness-110 rounded-md">Save Changes</button>
-                </footer>
+                </div>
+                <div className="p-6 bg-black/20 rounded-b-lg flex justify-end gap-3">
+                    <Button variant="secondary" onClick={onClose}>Cancel</Button>
+                    <Button onClick={handleSave} disabled={isSaving}>
+                        {isSaving ? 'Saving...' : 'Save Changes'}
+                    </Button>
+                </div>
             </div>
         </div>
     );

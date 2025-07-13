@@ -1,4 +1,5 @@
 // frontend/app/(main)/conversations/[clientId]/page.tsx
+// --- FINAL, CORRECTED VERSION ---
 
 'use client';
 
@@ -76,14 +77,14 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     }, [refetchScheduledMessagesForClient]);
     
     const fetchConversationData = useCallback(async () => {
-        if (!selectedClient) return;
+        if (!clientId) return;
         try {
-            const historyData: ConversationData = await api.get(`/api/messages/?client_id=${selectedClient.id}`);
+            const historyData: ConversationData = await api.get(`/api/messages/?client_id=${clientId}`);
             setConversationData(prev => JSON.stringify(prev) !== JSON.stringify(historyData) ? historyData : prev);
         } catch (err) {
             console.error("Polling failed:", err);
         }
-    }, [selectedClient, api]);
+    }, [clientId, api]);
 
     useEffect(() => {
         if (!selectedClient) return;
@@ -115,7 +116,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         
         setConversationData(prevData => ({
             messages: [...(prevData?.messages || []), optimisticMessage],
-            immediate_recommendations: null, // Clear immediate recs upon sending
+            immediate_recommendations: null,
             active_plan: prevData?.active_plan || null
         }));
 
@@ -140,12 +141,10 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         setIsProcessingPlan(true);
         try {
             if (action === 'approve') {
-                // --- MODIFICATION: Call the new dedicated approval endpoint ---
                 await api.post(`/api/campaigns/${planId}/approve`, {});
             } else {
                 await api.put(`/api/campaigns/${planId}`, { status: 'cancelled' });
             }
-            // Refetch all data to get the latest state
             fetchConversationData();
             fetchScheduled(selectedClient.id);
         } catch (error) {
@@ -160,6 +159,15 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         updateClientInList(updatedClient);
         fetchConversationData();
     }, [updateClientInList, fetchConversationData]);
+    
+    // --- FIX START ---
+    // This new function is the callback for the CoPilotBriefingCard.
+    // When an action succeeds, it calls fetchConversationData to refresh the UI.
+    const handleCoPilotActionSuccess = useCallback(() => {
+        fetchConversationData();
+    }, [fetchConversationData]);
+    // --- FIX END ---
+
 
     if (loading && !selectedClient) {
         return <div className="flex-1 flex items-center justify-center text-brand-text-muted">Loading Client Data...</div>;
@@ -214,12 +222,23 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                    <ChatHistory 
                         messages={conversationData?.messages || []}
                         selectedClient={selectedClient}
+                        recommendations={immediateRecs || null}
+                        onActionComplete={handleActionComplete}
+                        onCoPilotActionSuccess={handleCoPilotActionSuccess}
+                        onSendMessage={handleSendMessage}
+                        messageComposerRef={messageComposerRef}
                    />
                    
                    <div className="px-4 pb-2 space-y-2">
+                        {/* --- FIX START --- */}
+                        {/* The onActionSuccess prop is now correctly passed to the component. */}
                         {isCoPilotBriefing && immediateRecs && (
-                            <CoPilotBriefingCard briefing={immediateRecs} />
+                            <CoPilotBriefingCard 
+                                briefing={immediateRecs} 
+                                onActionSuccess={handleCoPilotActionSuccess} 
+                            />
                         )}
+                        {/* --- FIX END --- */}
                         {!isCoPilotBriefing && immediateRecs && (
                             <>
                                 {immediateRecs.original_draft && (

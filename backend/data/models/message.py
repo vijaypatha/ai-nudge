@@ -1,5 +1,5 @@
-# File Path: backend/data/models/message.py
-# --- MODIFIED ---
+# backend/data/models/message.py
+# --- FINAL, CORRECTED VERSION ---
 
 from typing import Optional, TYPE_CHECKING, List
 from uuid import UUID, uuid4
@@ -32,19 +32,19 @@ class Message(SQLModel, table=True):
     direction: MessageDirection = Field(index=True)
     status: MessageStatus
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+    
     client: Optional["Client"] = Relationship(back_populates="messages")
     user: Optional["User"] = Relationship(back_populates="messages")
-    # --- MODIFIED: ai_draft now relates to CampaignBriefing instead of RecommendationSlateResponse ---
-    ai_draft: Optional["CampaignBriefing"] = Relationship(back_populates="parent_message", sa_relationship_kwargs={'uselist': False})
+    
+    # --- DEFINITIVE FIX: A Message can now have multiple AI suggestions (the inline slate AND the plan). ---
+    # This changes the relationship to a list to correctly support our "Do Both" strategy.
+    ai_drafts: List["CampaignBriefing"] = Relationship(back_populates="parent_message")
 
 class ScheduledMessage(SQLModel, table=True):
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id", index=True)
     client_id: UUID = Field(foreign_key="client.id")
-
-    # --- ADDED: Foreign key to link this scheduled message to an overarching plan. ---
     parent_plan_id: Optional[UUID] = Field(default=None, foreign_key="campaignbriefing.id", index=True)
-
     content: str
     scheduled_at: datetime = Field(index=True)
     status: MessageStatus = Field(default=MessageStatus.PENDING, index=True)
@@ -56,14 +56,10 @@ class ScheduledMessage(SQLModel, table=True):
 
     client: Optional["Client"] = Relationship(back_populates="scheduled_messages")
     user: Optional["User"] = Relationship(back_populates="scheduled_messages")
-
-    # --- ADDED: Relationship to the parent CampaignBriefing (the plan). ---
     parent_plan: Optional["CampaignBriefing"] = Relationship(back_populates="scheduled_messages")
 
-
-# --- MODIFIED: MessageWithDraft now expects ai_draft to be a RecommendationSlateResponse ---
 class MessageWithDraft(BaseModel):
-    """API model for a Message that includes its optional AI draft."""
+    """API model for a Message that includes its optional AI suggestions."""
     id: UUID
     user_id: UUID
     client_id: UUID
@@ -71,11 +67,11 @@ class MessageWithDraft(BaseModel):
     direction: MessageDirection
     status: MessageStatus
     created_at: datetime
-    ai_draft: Optional["RecommendationSlateResponse"] = None
+    # --- DEFINITIVE FIX: Updated to reflect the one-to-many relationship ---
+    ai_drafts: List["RecommendationSlateResponse"] = []
 
     class Config:
         from_attributes = True
-
 
 class ScheduledMessageCreate(SQLModel):
     client_id: UUID

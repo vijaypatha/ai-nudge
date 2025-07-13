@@ -333,13 +333,15 @@ def cancel_scheduled_messages_for_plan(plan_id: UUID, user_id: UUID, session: Se
 def get_all_active_slates_for_client(client_id: uuid.UUID, user_id: uuid.UUID, session: Session) -> List[CampaignBriefing]:
     """
     Finds ALL currently active recommendation slates and/or plans for a client.
-    A slate is considered "active" for the UI if it is in the DRAFT state, awaiting user action.
+    A slate is considered "active" for the UI if it is in the DRAFT state.
+    --- MODIFIED: Now sorts by creation date to ensure predictable order. ---
     """
     statement = select(CampaignBriefing).where(
         CampaignBriefing.client_id == client_id,
         CampaignBriefing.user_id == user_id,
         CampaignBriefing.status == CampaignStatus.DRAFT
-    )
+    ).order_by(CampaignBriefing.created_at.desc()) # This sorting is critical
+    
     return session.exec(statement).all()
 
 
@@ -394,7 +396,7 @@ def get_conversation_history(client_id: uuid.UUID, user_id: uuid.UUID) -> List[M
         statement = (
             select(Message)
             .where(Message.client_id == client_id)
-            .options(selectinload(Message.ai_draft))
+            .options(selectinload(Message.ai_drafts))
             .order_by(Message.created_at)
         )
         return session.exec(statement).all()
