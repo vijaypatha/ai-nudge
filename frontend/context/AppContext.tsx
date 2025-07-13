@@ -1,4 +1,5 @@
 // frontend/context/AppContext.tsx
+// --- DEFINITIVE FIX: Adds the missing 'ScheduledMessage' interface definition. ---
 
 'use client';
 
@@ -48,11 +49,23 @@ export interface CampaignBriefing {
     matched_audience: MatchedClient[]; 
     status: string;
     is_plan: boolean;
+    parent_message_id?: string;
 }
 
-export interface Message { id:string; client_id: string; content: string; direction: 'inbound' | 'outbound'; status: string; created_at: string; ai_draft?: CampaignBriefing; }
+export interface Message { id:string; client_id: string; content: string; direction: 'inbound' | 'outbound'; status: string; created_at: string; ai_drafts?: CampaignBriefing[]; }
 export interface Conversation { id: string; client_id: string; client_name: string; last_message: string; last_message_time: string; unread_count: number; }
-export interface ScheduledMessage { id: string; user_id: string; client_id: string; content: string; scheduled_at: string; status: string; }
+
+// --- FIX START: The missing ScheduledMessage interface has been added. ---
+export interface ScheduledMessage {
+  id: string;
+  user_id: string;
+  client_id: string;
+  content: string;
+  scheduled_at: string;
+  status: 'pending' | 'sent' | 'failed' | 'cancelled';
+  playbook_touchpoint_id?: string;
+}
+// --- FIX END ---
 
 interface AppContextType {
   loading: boolean;
