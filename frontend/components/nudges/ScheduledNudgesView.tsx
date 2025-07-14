@@ -1,5 +1,5 @@
 // frontend/components/nudges/ScheduledNudgesView.tsx
-// --- DEFINITIVE, COMPLETE VERSION ---
+// --- DEFINITIVE FIX: Corrects timezone conversion logic for grouping and display.
 
 'use client';
 
@@ -16,31 +16,29 @@ interface ScheduledNudgesViewProps {
     messages: ScheduledMessage[];
     isLoading: boolean;
     clients: Client[];
-    user: User | null; // Pass the main user object
+    user: User | null;
     onAction: () => void;
 }
 
-const groupMessagesByDate = (messages: ScheduledMessage[], timeZone: string) => {
-    const groups: { [key: string]: ScheduledMessage[] } = { Today: [], Tomorrow: [], 'This Week': [], 'Next Week': [], Later: [] };
-    const now = new Date();
-    const today = new Date(now.toLocaleString("en-US", { timeZone }));
-    today.setHours(0, 0, 0, 0);
+const groupMessagesByDate = (messages: ScheduledMessage[], localTimeZone: string) => {
+    const groups: { [key: string]: ScheduledMessage[] } = { Today: [], Tomorrow: [], 'This Week': [], 'Later': [] };
+    const dateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: localTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+    const todayStr = dateFormatter.format(new Date());
 
     messages.forEach(msg => {
-        const msgDate = new Date(new Date(msg.scheduled_at).toLocaleString("en-US", { timeZone }));
-        msgDate.setHours(0, 0, 0, 0);
-        const diffDays = Math.ceil((msgDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        const msgDate = new Date(msg.scheduled_at);
+        const msgDateStr = dateFormatter.format(msgDate);
+        const diffDays = Math.round((new Date(msgDateStr).getTime() - new Date(todayStr).getTime()) / 86400000);
 
-        if (diffDays === 0) groups.Today.push(msg);
+        if (diffDays < 0) groups.Later.push(msg);
+        else if (diffDays === 0) groups.Today.push(msg);
         else if (diffDays === 1) groups.Tomorrow.push(msg);
         else if (diffDays > 1 && diffDays <= 7) groups['This Week'].push(msg);
-        else if (diffDays > 7 && diffDays <= 14) groups['Next Week'].push(msg);
         else groups.Later.push(msg);
     });
     return groups;
 };
 
-// --- NEW: Timezone aware date formatter ---
 const formatDateTimezone = (dateString: string, timeZone: string) => {
     const options: Intl.DateTimeFormatOptions = {
         month: 'long',
@@ -53,8 +51,6 @@ const formatDateTimezone = (dateString: string, timeZone: string) => {
     try {
         return new Intl.DateTimeFormat('en-US', options).format(new Date(dateString));
     } catch (e) {
-        console.error("Invalid timezone for formatting:", timeZone);
-        // Fallback to local time if timezone is invalid
         return new Date(dateString).toLocaleString();
     }
 };
@@ -66,7 +62,6 @@ export const ScheduledNudgesView: FC<ScheduledNudgesViewProps> = ({ messages, is
     const [processingId, setProcessingId] = useState<string | null>(null);
 
     const userTimezone = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-
     const findClient = (clientId: string) => clients.find(c => c.id === clientId);
     const groupedMessages = useMemo(() => groupMessagesByDate(messages, userTimezone), [messages, userTimezone]);
 
@@ -107,7 +102,6 @@ export const ScheduledNudgesView: FC<ScheduledNudgesViewProps> = ({ messages, is
                                     const client = findClient(msg.client_id);
                                     const clientName = client?.full_name || 'Unknown Client';
                                     const effectiveTimezone = client?.timezone || userTimezone;
-
                                     return (
                                         <motion.div key={msg.id} className="bg-brand-primary border border-white/10 rounded-xl p-4">
                                             <div className="flex items-start gap-4">

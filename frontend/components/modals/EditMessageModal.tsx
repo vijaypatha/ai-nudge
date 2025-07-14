@@ -1,5 +1,5 @@
-// File Path: frontend/components/modals/EditMessageModal.tsx
-// --- NEW FILE ---
+// frontend/components/modals/EditMessageModal.tsx
+// --- DEFINITIVE FIX: Corrects timezone conversion logic for editing.
 
 'use client';
 
@@ -16,14 +16,24 @@ interface EditMessageModalProps {
     onSaveSuccess: () => void;
 }
 
+// Helper to format a UTC ISO string to a local datetime-local input value
+const toLocalISOString = (isoString: string): string => {
+    const date = new Date(isoString);
+    const timezoneOffset = date.getTimezoneOffset() * 60000;
+    const localDate = new Date(date.getTime() - timezoneOffset);
+    return localDate.toISOString().slice(0, 16);
+};
+
 export const EditMessageModal: FC<EditMessageModalProps> = ({ isOpen, onClose, message, onSaveSuccess }) => {
     const { api } = useAppContext();
     const [editedContent, setEditedContent] = useState('');
+    const [editedDate, setEditedDate] = useState('');
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
         if (message) {
             setEditedContent(message.content);
+            setEditedDate(toLocalISOString(message.scheduled_at));
         }
     }, [message]);
 
@@ -32,7 +42,8 @@ export const EditMessageModal: FC<EditMessageModalProps> = ({ isOpen, onClose, m
         setIsSaving(true);
         try {
             await api.put(`/api/scheduled-messages/${message.id}`, {
-                content: editedContent
+                content: editedContent,
+                scheduled_at: new Date(editedDate).toISOString()
             });
             onSaveSuccess();
         } catch (error) {
@@ -56,12 +67,24 @@ export const EditMessageModal: FC<EditMessageModalProps> = ({ isOpen, onClose, m
                     <h2 className="font-bold text-lg text-white">Edit Scheduled Message</h2>
                     <Button variant="ghost" size="sm" onClick={onClose}><X className="w-5 h-5" /></Button>
                 </header>
-                <main className="p-6">
-                    <textarea
-                        value={editedContent}
-                        onChange={(e) => setEditedContent(e.target.value)}
-                        className="w-full h-40 p-3 bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-primary-action"
-                    />
+                <main className="p-6 space-y-4">
+                    <div>
+                        <label className="text-sm font-semibold text-gray-300 mb-2 block">Scheduled Time (Your Local Time)</label>
+                        <input
+                            type="datetime-local"
+                            value={editedDate}
+                            onChange={(e) => setEditedDate(e.target.value)}
+                            className="w-full p-3 bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-primary-action"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-sm font-semibold text-gray-300 mb-2 block">Message</label>
+                        <textarea
+                            value={editedContent}
+                            onChange={(e) => setEditedContent(e.target.value)}
+                            className="w-full h-40 p-3 bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-primary-action"
+                        />
+                    </div>
                 </main>
                 <footer className="flex justify-end gap-3 p-4 bg-black/20 border-t border-white/10">
                     <Button variant="secondary" onClick={onClose} disabled={isSaving}>Cancel</Button>

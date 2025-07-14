@@ -61,6 +61,7 @@ export const DynamicTaggingCard = ({ client, onUpdate }: DynamicTaggingCardProps
             <div className="p-4 text-center border-b border-white/10">
                 <Avatar name={client.full_name} className="w-16 h-16 text-2xl mb-3 mx-auto" />
                 <h3 className="text-lg font-bold text-brand-text-main">{client.full_name}</h3>
+                <p className="text-sm text-brand-text-muted">{client.phone}</p>
                 <p className="text-sm text-brand-text-muted">{client.email}</p>
             </div>
             <div className="p-4 space-y-4">
