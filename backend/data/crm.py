@@ -277,11 +277,27 @@ def get_new_campaign_briefings_for_user(user_id: uuid.UUID, session: Optional[Se
         if not session:
             db_session.close()
 
-def get_campaign_briefing_by_id(campaign_id: uuid.UUID, user_id: uuid.UUID) -> Optional[CampaignBriefing]:
-    """Retrieves a single campaign briefing by its unique ID, ensuring it belongs to the user."""
-    with Session(engine) as session:
-        statement = select(CampaignBriefing).where(CampaignBriefing.id == campaign_id, CampaignBriefing.user_id == user_id)
-        return session.exec(statement).first()
+def get_campaign_briefing_by_id(
+    campaign_id: uuid.UUID, 
+    user_id: uuid.UUID, 
+    session: Optional[Session] = None
+) -> Optional[CampaignBriefing]:
+    """
+    Retrieves a single campaign briefing by its unique ID, ensuring it belongs to the user.
+    Can optionally use a provided database session to participate in a larger transaction.
+    """
+    def _get(db_session: Session) -> Optional[CampaignBriefing]:
+        statement = select(CampaignBriefing).where(
+            CampaignBriefing.id == campaign_id, 
+            CampaignBriefing.user_id == user_id
+        )
+        return db_session.exec(statement).first()
+
+    if session:
+        return _get(session)
+    else:
+        with Session(engine) as new_session:
+            return _get(new_session)
 
 def update_campaign_briefing(campaign_id: uuid.UUID, update_data: CampaignUpdate, user_id: uuid.UUID) -> Optional[CampaignBriefing]:
     """Updates a campaign briefing with new data, ensuring it belongs to the user."""
@@ -327,8 +343,6 @@ def cancel_scheduled_messages_for_plan(plan_id: UUID, user_id: UUID, session: Se
         logging.info(f"CRM: Successfully cancelled {count} message(s) for plan {plan_id}.")
     
     return count
-
-# --- DEFINITIVE FIX IS HERE ---
 
 def get_all_active_slates_for_client(client_id: uuid.UUID, user_id: uuid.UUID, session: Session) -> List[CampaignBriefing]:
     """

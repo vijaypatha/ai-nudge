@@ -1,7 +1,6 @@
 # ---
 # File Path: backend/workflow/relationship_playbooks.py
-# --- V6: Added Potential Seller Playbook ---
-# This version adds a strategic playbook for nurturing seller leads.
+# --- DEFINITIVE FIX: Removes redundant "Day 0" steps from conversational playbooks.
 # ---
 
 import logging
@@ -24,22 +23,25 @@ class ConversationalPlaybook:
         self.intent_type = intent_type
         self.steps = steps
 
-# --- ADDED: New Conversational Playbooks ---
+# --- MODIFIED: Removed the Day 0 step ---
 LONG_TERM_NURTURE_PLAYBOOK = ConversationalPlaybook(
     name="Long-Term Nurture",
     intent_type="LONG_TERM_NURTURE",
     steps=[
-        PlaybookStep(delay_days=0, name="Initial Acknowledgement", prompt="Acknowledge the client's long-term timeline and confirm you will stay in touch. Keep it brief and professional."),
+        # The Day 0 "Initial Acknowledgement" step has been removed. 
+        # The user's manual reply serves this purpose.
         PlaybookStep(delay_days=30, name="Helpful Content", prompt="Draft a helpful, no-pressure check-in. Share a relevant piece of market information or a valuable article. Do not ask for a call or meeting."),
         PlaybookStep(delay_days=90, name="Personal Check-in", prompt="Draft a personal, warm check-in message. Ask if their timeline or priorities have changed. Mention something from your last conversation to show you remember them."),
     ]
 )
 
+# --- MODIFIED: Removed the Day 0 step ---
 SHORT_TERM_LEAD_PLAYBOOK = ConversationalPlaybook(
     name="Short-Term Lead Conversion",
     intent_type="SHORT_TERM_LEAD",
     steps=[
-        PlaybookStep(delay_days=0, name="Immediate Engagement", prompt="Acknowledge the client's immediate interest and propose a specific time for a call or meeting in the next 1-2 days to discuss their needs."),
+        # The Day 0 "Immediate Engagement" step has been removed.
+        # The user's manual reply serves this purpose.
         PlaybookStep(delay_days=3, name="Polite Follow-up", prompt="Draft a polite and brief follow-up message if the client has not responded. Gently nudge them to schedule a time."),
     ]
 )
