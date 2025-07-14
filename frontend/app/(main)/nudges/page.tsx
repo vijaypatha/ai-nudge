@@ -1,5 +1,5 @@
 // frontend/app/(main)/nudges/page.tsx
-// --- DEFINITIVE, REFACTORED VERSION ---
+// --- DEFINITIVE, CORRECTED VERSION ---
 
 'use client';
 
@@ -13,12 +13,11 @@ import { OpportunityNudgesView } from '@/components/nudges/OpportunityNudgesView
 import { ScheduledNudgesView } from '@/components/nudges/ScheduledNudgesView';
 import { InstantNudgeView } from '@/components/nudges/InstantNudgeView';
 
-// Assuming ActionDeck is extracted to its own component if it's used by OpportunityNudgesView
-// If not, it should be part of OpportunityNudgesView.tsx
-// For this example, we assume it's handled within OpportunityNudgesView.
-
 export default function NudgesPage() {
-    const { nudges, clients, api, loading, fetchDashboardData } = useAppContext();
+    // --- FIX START: Get the 'user' object from the context ---
+    const { user, nudges, clients, api, loading, fetchDashboardData } = useAppContext();
+    // --- FIX END ---
+    
     const searchParams = useSearchParams();
     
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'ai_suggestions');
@@ -32,19 +31,23 @@ export default function NudgesPage() {
         
     ];
 
+    const refetchScheduled = useCallback(() => {
+        setIsScheduledLoading(true);
+        api.get('/api/scheduled-messages/')
+            .then(data => {
+                const pendingMessages = data.filter((msg: ScheduledMessage) => msg.status === 'pending');
+                pendingMessages.sort((a: ScheduledMessage, b: ScheduledMessage) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
+                setScheduledMessages(pendingMessages);
+            })
+            .catch(err => console.error("Failed to fetch scheduled messages:", err))
+            .finally(() => setIsScheduledLoading(false));
+    }, [api]);
+
     useEffect(() => {
         if (activeTab === 'scheduled') {
-            setIsScheduledLoading(true);
-            api.get('/api/scheduled-messages/')
-                .then(data => {
-                    const pendingMessages = data.filter((msg: ScheduledMessage) => msg.status === 'pending');
-                    pendingMessages.sort((a: ScheduledMessage, b: ScheduledMessage) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
-                    setScheduledMessages(pendingMessages);
-                })
-                .catch(err => console.error("Failed to fetch scheduled messages:", err))
-                .finally(() => setIsScheduledLoading(false));
+            refetchScheduled();
         }
-    }, [activeTab, api]);
+    }, [activeTab, refetchScheduled]);
 
     useEffect(() => {
         if (!loading) {
@@ -96,15 +99,8 @@ export default function NudgesPage() {
                         messages={scheduledMessages} 
                         isLoading={isScheduledLoading} 
                         clients={clients}
-                        onAction={() => {
-                            // Refetch scheduled messages after an action
-                            api.get('/api/scheduled-messages/')
-                                .then(data => {
-                                    const pendingMessages = data.filter((msg: ScheduledMessage) => msg.status === 'pending');
-                                    pendingMessages.sort((a: ScheduledMessage, b: ScheduledMessage) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
-                                    setScheduledMessages(pendingMessages);
-                                });
-                        }}
+                        user={user} // --- FIX START: Pass the 'user' prop down ---
+                        onAction={refetchScheduled}
                     />
                 )}
                 {activeTab === 'instant_nudge' && <InstantNudgeView />}

@@ -1,5 +1,5 @@
 // frontend/context/AppContext.tsx
-// --- DEFINITIVE FIX: Adds the missing 'ScheduledMessage' interface definition. ---
+// --- DEFINITIVE, COMPLETE VERSION ---
 
 'use client';
 
@@ -12,7 +12,7 @@ export interface User {
   full_name: string;
   email?: string;
   phone_number: string;
-  user_type: string | null;
+  user_type: 'realtor' | 'therapist' | 'loan_officer' | null;
   onboarding_complete: boolean;
   onboarding_state: {
       phone_verified: boolean;
@@ -21,6 +21,12 @@ export interface User {
       first_nudges_seen: boolean;
       [key: string]: any;
   };
+  // --- ADDED MISSING FIELDS ---
+  timezone?: string;
+  mls_username?: string;
+  mls_password?: string;
+  license_number?: string;
+  faq_auto_responder_enabled: boolean;
 }
 
 export interface Client { 
@@ -28,11 +34,13 @@ export interface Client {
     user_id: string; 
     full_name: string; 
     email: string | null; 
+    phone: string | null;
     ai_tags: string[]; 
     user_tags: string[]; 
     preferences: { notes?: string[]; [key: string]: any; }; 
     last_interaction: string | null; 
     notes?: string;
+    timezone?: string;
 }
 export interface Property { id: string; address: string; price: number; status: string; image_urls: string[]; }
 export interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reason: string; }
@@ -55,7 +63,6 @@ export interface CampaignBriefing {
 export interface Message { id:string; client_id: string; content: string; direction: 'inbound' | 'outbound'; status: string; created_at: string; ai_drafts?: CampaignBriefing[]; }
 export interface Conversation { id: string; client_id: string; client_name: string; last_message: string; last_message_time: string; unread_count: number; }
 
-// --- FIX START: The missing ScheduledMessage interface has been added. ---
 export interface ScheduledMessage {
   id: string;
   user_id: string;
@@ -65,7 +72,6 @@ export interface ScheduledMessage {
   status: 'pending' | 'sent' | 'failed' | 'cancelled';
   playbook_touchpoint_id?: string;
 }
-// --- FIX END ---
 
 interface AppContextType {
   loading: boolean;

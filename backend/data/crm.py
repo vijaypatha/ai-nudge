@@ -194,6 +194,26 @@ def update_client_intel(
         session.refresh(client)
         return client
 
+#function to handle saving the new timezone field.
+def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUID) -> Optional[Client]:
+    """
+    Updates a client record with the provided data in a generic way.
+    """
+    with Session(engine) as session:
+        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
+        if not client:
+            return None
+
+        update_dict = update_data.model_dump(exclude_unset=True)
+        for key, value in update_dict.items():
+            setattr(client, key, value)
+
+        session.add(client)
+        session.commit()
+        session.refresh(client)
+        return client
+
+
 def add_client_tags(client_id: uuid.UUID, tags_to_add: List[str], user_id: uuid.UUID) -> Optional[Client]:
     """This function now calls the main intel updater for consistency."""
     return update_client_intel(client_id=client_id, user_id=user_id, tags_to_add=tags_to_add)

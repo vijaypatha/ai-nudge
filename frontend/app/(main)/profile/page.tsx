@@ -1,23 +1,15 @@
 // frontend/app/(main)/profile/page.tsx
+// --- DEFINITIVE, CORRECTED VERSION ---
+
 "use client";
 
 import { useState, useEffect, ChangeEvent, FC } from "react";
 import { Trash2, Edit3, Save, XCircle, Loader2, User, Briefcase, Bot, LogOut } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
-import { useAppContext } from '@/context/AppContext';
+import { useAppContext, User as UserType } from '@/context/AppContext'; // Use the User type from context
+import { TimezoneSelector } from "@/components/ui/TimezoneSelector"; // Import the timezone component
 
-// --- TYPE DEFINITIONS ---
-interface UserProfile {
-    id: string;
-    user_type: 'realtor' | 'therapist' | 'loan_officer';
-    full_name: string;
-    phone_number: string;
-    email?: string;
-    mls_username?: string;
-    mls_password?: string;
-    license_number?: string;
-    faq_auto_responder_enabled: boolean;
-}
+// --- REMOVED Redundant UserProfile interface ---
 
 export interface FaqItem {
   id: string;
@@ -106,25 +98,78 @@ const FaqCard: FC<{
 
 // --- MAIN PAGE COMPONENT ---
 export default function ProfilePage() {
-    const { api, loading: isContextLoading, logout } = useAppContext();
-    const [profile, setProfile] = useState<UserProfile | null>(null);
+    const { api, user, loading: isContextLoading, logout, refreshUser } = useAppContext();
+    const [profile, setProfile] = useState<UserType | null>(null);
     const [faqs, setFaqs] = useState<FaqItem[]>([]);
     const [isEditingProfile, setIsEditingProfile] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    const handleProfileChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+        setProfile(p => p ? { ...p, [e.target.name]: e.target.value } : null);
+    };
+
+    const handleProfileSave = async (initialData?: Partial<UserType>) => {
+        const dataToSave = initialData || profile;
+        if (!dataToSave) return;
+        
+        setIsSaving(true);
+        setError(null);
+        
+        try {
+            // Build a payload with only the fields that can be updated
+            const payload = {
+                full_name: dataToSave.full_name,
+                email: dataToSave.email,
+                timezone: dataToSave.timezone,
+                mls_username: dataToSave.mls_username,
+                mls_password: (dataToSave as any).mls_password, // Password is write-only
+                ...initialData // Include timezone if it's an auto-save
+            };
+            
+            // Remove password if it's empty to avoid overwriting with blank
+            if (payload.mls_password && payload.mls_password.trim() === '') {
+                delete payload.mls_password;
+            }
+
+            const updatedUser = await api.put('/api/users/me', payload);
+            setProfile(updatedUser);
+            await refreshUser();
+            if (!initialData) setIsEditingProfile(false);
+        } catch (err) {
+            setError("Failed to save profile.");
+            console.error(err);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+    
+    // Auto-detect timezone on first load if not present
+    useEffect(() => {
+        if (user && !user.timezone) {
+            const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            if (detectedTimezone) {
+                handleProfileSave({ timezone: detectedTimezone });
+            }
+        }
+    }, [user]);
+
+    // Set local state from context once user is loaded
+    useEffect(() => {
+        if (user) {
+            setProfile(user);
+        }
+    }, [user]);
+
+    // Fetch page-specific data
     useEffect(() => {
         if (isContextLoading) return;
         const fetchData = async () => {
             setIsLoading(true);
             setError(null);
             try {
-                const [userData, faqData] = await Promise.all([
-                    api.get('/api/users/me'),
-                    api.get('/api/faqs/')
-                ]);
-                setProfile(userData);
+                const faqData = await api.get('/api/faqs/');
                 setFaqs(faqData);
             } catch (err: any) {
                 setError(err.message || "Could not load your settings.");
@@ -134,28 +179,6 @@ export default function ProfilePage() {
         };
         fetchData();
     }, [isContextLoading, api]);
-
-    const handleProfileChange = (e: ChangeEvent<HTMLInputElement>) => {
-        setProfile(p => p ? { ...p, [e.target.name]: e.target.value } : null);
-    };
-
-    const handleProfileSave = async () => {
-        if (!profile) return;
-        setIsSaving(true);
-        setError(null);
-        const { mls_password, ...rest } = profile;
-        const payload = (mls_password && mls_password.trim() !== '') ? profile : rest;
-        
-        try {
-            const updatedProfile = await api.put('/api/users/me', payload);
-            setProfile(updatedProfile);
-            setIsEditingProfile(false);
-        } catch (err) {
-            setError("Failed to save profile.");
-        } finally {
-            setIsSaving(false);
-        }
-    };
 
     const handleMasterSwitchToggle = async (checked: boolean) => {
         if (!profile) return;
@@ -221,7 +244,7 @@ export default function ProfilePage() {
         }
     };
 
-    if (isLoading) return <div className="flex items-center justify-center h-screen bg-gray-900"><Loader2 className="animate-spin h-8 w-8 text-teal-500" /></div>;
+    if (isLoading || isContextLoading) return <div className="flex items-center justify-center h-screen bg-gray-900"><Loader2 className="animate-spin h-8 w-8 text-teal-500" /></div>;
     if (error && !profile) return <div className="p-8 text-center text-red-400 bg-gray-900">{error}</div>;
     if (!profile) return null;
 
@@ -235,7 +258,7 @@ export default function ProfilePage() {
                             <button onClick={logout} className="px-4 py-2 text-sm font-semibold flex items-center gap-2 bg-gray-700/50 hover:bg-gray-700 rounded-md">
                                <LogOut size={16}/> Logout
                             </button>
-                            <button onClick={isEditingProfile ? handleProfileSave : () => setIsEditingProfile(true)} disabled={isSaving} className="btn-primary px-4 py-2 text-sm font-semibold flex items-center gap-2">
+                            <button onClick={() => isEditingProfile ? handleProfileSave() : setIsEditingProfile(true)} disabled={isSaving} className="btn-primary px-4 py-2 text-sm font-semibold flex items-center gap-2">
                                 {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving...</> : (isEditingProfile ? <><Save size={16}/>Save Profile</> : <><Edit3 size={16}/>Edit Profile</>)}
                             </button>
                         </div>
@@ -243,8 +266,11 @@ export default function ProfilePage() {
                     <div className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-1"><label className="text-sm font-medium text-gray-400">Full Name</label><input name="full_name" value={profile.full_name || ''} onChange={handleProfileChange} disabled={!isEditingProfile} className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white disabled:opacity-50" /></div>
-                            <div className="space-y-1"><label className="text-sm font-medium text-gray-400">Contact Phone (for Login)</label><input value={profile.phone_number || ''} disabled={true} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-gray-500 cursor-not-allowed" /></div>
-                            <div className="space-y-1 md:col-span-2"><label className="text-sm font-medium text-gray-400">Email Address (Optional)</label><input name="email" type="email" value={profile.email || ''} onChange={handleProfileChange} disabled={!isEditingProfile} className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white disabled:opacity-50" /></div>
+                            <div className="space-y-1"><label className="text-sm font-medium text-gray-400">Contact Phone</label><input value={profile.phone_number || ''} disabled={true} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-gray-500 cursor-not-allowed" /></div>
+                            <div className="space-y-1"><label className="text-sm font-medium text-gray-400">Email Address</label><input name="email" type="email" value={profile.email || ''} onChange={handleProfileChange} disabled={!isEditingProfile} className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white disabled:opacity-50" /></div>
+                            <div className="space-y-1"><label className="text-sm font-medium text-gray-400">My Default Time Zone</label>
+                                <TimezoneSelector value={profile.timezone || ''} onChange={handleProfileChange} disabled={!isEditingProfile} />
+                            </div>
                         </div>
                     </div>
                 </div>

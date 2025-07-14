@@ -1,8 +1,8 @@
 # File Path: backend/api/rest/scheduled_messages.py
 # File Path: backend/api/rest/scheduled_messages.py
 
-from fastapi import APIRouter, HTTPException, Depends, Optional
-from typing import List
+from fastapi import APIRouter, HTTPException, Depends
+from typing import List, Optional
 from uuid import UUID
 from data.models.user import User
 from data.models.message import ScheduledMessage, ScheduledMessageUpdate

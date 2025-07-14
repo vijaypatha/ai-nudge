@@ -28,6 +28,8 @@ class Client(SQLModel, table=True):
     
     preferences: Dict[str, Any] = Field(sa_column=Column(JSON))
     last_interaction: Optional[str] = Field(default=None)
+    timezone: Optional[str] = Field(default=None)
+
     
     user: "User" = Relationship(back_populates="clients")
     
@@ -50,7 +52,13 @@ class ClientCreate(SQLModel):
     preferences: Dict[str, Any] = {}
 
 class ClientUpdate(SQLModel):
-    preferences: Dict[str, Any]
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    notes: Optional[str] = None
+    user_tags: Optional[List[str]] = None
+    preferences: Optional[Dict[str, Any]] = None
+    timezone: Optional[str] = None
 
 class ClientTagUpdate(SQLModel):
     """

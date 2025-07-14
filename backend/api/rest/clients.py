@@ -209,8 +209,19 @@ async def get_client_scheduled_messages(client_id: UUID, current_user: User = De
     return messages
 
 @router.put("/{client_id}", response_model=Client)
-async def update_client_details(client_id: UUID, client_data: ClientUpdate, current_user: User = Depends(get_current_user_from_token)):
-    updated_client = crm_service.update_client_preferences(client_id=client_id, preferences=client_data.preferences, user_id=current_user.id)
+async def update_client_details(
+    client_id: UUID, 
+    client_data: ClientUpdate, 
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Updates a client's details, including preferences, notes, or timezone.
+    """
+    updated_client = crm_service.update_client(
+        client_id=client_id, 
+        update_data=client_data, 
+        user_id=current_user.id
+    )
     if not updated_client:
         raise HTTPException(status_code=404, detail="Client not found.")
     return updated_client

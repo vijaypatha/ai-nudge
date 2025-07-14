@@ -55,6 +55,8 @@ class User(SQLModel, table=True):
     specialties: Optional[List[str]] = Field(default_factory=list, sa_column=Column(JSON)) #
     faq_auto_responder_enabled: bool = Field(default=True) #
     twilio_phone_number: Optional[str] = Field(default=None, index=True) #
+    timezone: Optional[str] = Field(default=None, index=True) #
+
 
 
     # --- Relationships ---
@@ -83,3 +85,4 @@ class UserUpdate(SQLModel):
     specialties: Optional[List[str]] = None #
     faq_auto_responder_enabled: Optional[bool] = None #
     twilio_phone_number: Optional[str] = None #
+    timezone: Optional[str] = None #
