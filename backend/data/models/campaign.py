@@ -1,5 +1,5 @@
 # backend/data/models/campaign.py
-# --- FINAL, CORRECTED, AND COMPLETE VERSION ---
+# --- MODIFIED: Added 'matched_audience' to CampaignBriefing and enhanced MatchedClient.
 
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -24,9 +24,16 @@ class CoPilotAction(BaseModel):
     type: str
     label: str
 
+# --- MODIFIED: Enhanced with match_score and match_reasons ---
 class MatchedClient(BaseModel):
+    """
+    A Pydantic model representing a client matched to an opportunity.
+    This is not a database table; it's used for data validation and structure.
+    """
     client_id: UUID
     client_name: str
+    match_score: int          # <-- NEW: The calculated score for the match.
+    match_reasons: List[str]  # <-- NEW: Human-readable reasons for the score.
 
 class CampaignBriefing(SQLModel, table=True):
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
@@ -37,6 +44,11 @@ class CampaignBriefing(SQLModel, table=True):
     campaign_type: str = Field(index=True)
     headline: str
     key_intel: Dict[str, Any] = Field(sa_column=Column(JSON))
+    
+    # --- NEW: Added field to store the list of matched clients as JSON. ---
+    # This aligns the model with the data being passed by nudge_engine.py.
+    matched_audience: List[Dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    
     original_draft: str
     status: CampaignStatus = Field(default=CampaignStatus.DRAFT, index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -46,7 +58,6 @@ class CampaignBriefing(SQLModel, table=True):
     client: Optional["Client"] = Relationship(back_populates="campaign_briefings")
     scheduled_messages: List["ScheduledMessage"] = Relationship(back_populates="parent_plan")
 
-# --- DEFINITIVE FIX: This class was accidentally deleted and is now restored. ---
 class CampaignUpdate(SQLModel):
     """Model for updating campaign briefings."""
     campaign_type: Optional[str] = None

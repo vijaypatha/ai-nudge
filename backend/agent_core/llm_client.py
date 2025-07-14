@@ -1,45 +1,54 @@
-import os
+# backend/agent_core/llm_client.py
+# --- REPLACED: This is now a functional, production-ready abstraction layer. ---
 import logging
-# from openai import OpenAI # Actual OpenAI client import, commented out for pure mock
+from typing import List
+
+from common.config import get_settings
+# Import our specific provider integrations
+from integrations.gemini import get_text_embedding as get_gemini_embedding
+# from integrations.openai import get_text_embedding as get_openai_embedding # Future use
 
 logger = logging.getLogger(__name__)
 
-# Mock client initialization - in a real app, this would be more robust
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# client = None
-# if OPENAI_API_KEY and OPENAI_API_KEY not in ["your_openai_api_key_here", "mock_openai_key_if_not_set_in_env"]:
-#     try:
-#         # client = OpenAI(api_key=OPENAI_API_KEY)
-#         logger.info("Mock OpenAI client would be initialized here if uncommented.")
-#     except Exception as e:
-#         logger.error(f"Error initializing OpenAI client (mock setup): {e}")
-# else:
-#     logger.warning("OPENAI_API_KEY not found or is a placeholder. Using purely mock LLM responses.")
-
-
-def get_ai_suggestion(prompt_template: str, context_details: str = "") -> str:
+async def generate_embedding(text: str) -> List[float]:
     """
-    Mocks an OpenAI call to get an AI suggestion.
-    This function simulates behavior based on the presence and validity of an API key.
+    Generates a vector embedding for a given text using the configured LLM provider.
+    This is the single point of entry for all embedding tasks in the application.
+
+    Args:
+        text: The input string to embed.
+
+    Returns:
+        A list of floats representing the vector embedding.
     """
-    openai_api_key = os.getenv("OPENAI_API_KEY")
+    settings = get_settings()
+    provider = settings.LLM_PROVIDER
+    
+    # Clean and truncate text to avoid excessive API usage
+    text_to_embed = text.strip()
+    if not text_to_embed:
+        logger.warning("LLM CLIENT: generate_embedding called with empty text. Returning zero-vector.")
+        return [0.0] * 768 # Return a zero-vector of Gemini's expected dimension
 
-    logger.info(f"get_ai_suggestion called. Prompt: '{prompt_template[:50]}...', Context: '{context_details[:50]}...'")
+    # Truncate to a reasonable length to control costs and stay within model limits
+    max_length = 2048
+    if len(text_to_embed) > max_length:
+        text_to_embed = text_to_embed[:max_length]
+        logger.warning(f"LLM CLIENT: Text truncated to {max_length} characters for embedding.")
 
-    if not openai_api_key or openai_api_key in ["your_openai_api_key_here", "mock_openai_key_if_not_set_in_env"]:
-        logger.warning(f"OPENAI_API_KEY is not set or is a placeholder. Returning basic mock response.")
-        response = (f"Basic Mock AI Suggestion (No valid API Key):\n"
-                    f"Prompt: \"{prompt_template}\"\n"
-                    f"Context: \"{context_details}\"\n"
-                    f"Consider this: [Mock Insight A], [Mock Insight B].")
-        return response
+    logger.info(f"LLM CLIENT: Generating embedding with provider '{provider}' for text: '{text_to_embed[:60]}...'")
 
-    # Simulate a more 'aware' mock if a key is present but client logic is inactive (as it is here)
-    # This part simulates that the key *could* be used if the OpenAI client were active.
-    logger.info(f"OPENAI_API_KEY detected. Generating an 'enhanced' mock response as live client calls are commented out.")
-    response = (f"Enhanced Mock AI Suggestion (API Key Detected but live call is MOCKED):\n"
-                f"Responding to Prompt: \"{prompt_template}\"\n"
-                f"Given Context: \"{context_details}\"\n"
-                f"Suggested approach: Elaborate on key benefits, ask open-ended questions, and suggest a next step. "
-                f"For example: 'That's an interesting point! Have you also considered [related aspect]? Perhaps we could discuss this further.'")
-    return response
+    try:
+        if provider.lower() == "gemini":
+            return await get_gemini_embedding(text_to_embed)
+        elif provider.lower() == "openai":
+            # This is where we would call the OpenAI embedding function
+            # return await get_openai_embedding(text_to_embed)
+            raise NotImplementedError("OpenAI embedding function is not yet implemented.")
+        else:
+            raise ValueError(f"Unknown LLM_PROVIDER '{provider}' in settings.")
+            
+    except Exception as e:
+        logger.error(f"LLM CLIENT: Error generating embedding with {provider}: {e}", exc_info=True)
+        # Return a zero-vector on any error to prevent crashes downstream
+        return [0.0] * 768

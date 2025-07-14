@@ -1,13 +1,12 @@
 // frontend/components/nudges/ActionDeck.tsx
-// --- NEW COMPONENT FILE ---
+// --- UPDATED: Now imports types from AppContext and removes local definitions.
 
 'use client';
 
 import { useState, useEffect, useMemo, FC, ReactNode } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
-import clsx from 'clsx';
-import { CampaignBriefing, Client } from '@/context/AppContext';
+import { CampaignBriefing, Client, MatchedClient } from '@/context/AppContext'; // <-- MODIFIED: Import types
 import { ManageAudienceModal } from '@/components/modals/ManageAudienceModal';
 
 // --- ICONS ---
@@ -17,9 +16,9 @@ import {
 } from 'lucide-react';
 
 // --- TYPE DEFINITIONS ---
-interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reason: string; }
+// REMOVED: Local MatchedClient interface is no longer needed.
 
-// --- DESIGN SYSTEM ---
+// --- DESIGN SYSTEM (Unchanged) ---
 const NUDGE_TYPE_CONFIG: Record<string, { icon: ReactNode; color: string; title: string; }> = {
     'price_drop': { icon: <Sparkles size={20} />, color: 'text-primary-action', title: 'Price Drops' },
     'sold_listing': { icon: <TrendingUp size={20} />, color: 'text-primary-action', title: 'Sold Listings' },
@@ -32,19 +31,55 @@ const NUDGE_TYPE_CONFIG: Record<string, { icon: ReactNode; color: string; title:
 };
 const BRAND_ACCENT_COLOR = '#20D5B3';
 
-// --- HELPER COMPONENTS ---
-
-const Avatar = ({ name, className }: { name: string; className?: string }) => {
-  const initials = name?.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase() || '';
-  return <div className={clsx('flex items-center justify-center rounded-full bg-white/10 text-brand-text-muted font-bold select-none', className)}>{initials}</div>;
-};
-
+// --- HELPER COMPONENTS (Unchanged) ---
 const IntelStat: FC<{ icon?: ReactNode; label: string; value: string | number; className?: string }> = ({ icon, label, value, className }) => (
     <div className={`flex items-start gap-3 ${className}`}>
         {icon && <div className="mt-1 flex-shrink-0 text-brand-text-muted">{icon}</div>}
         <div><p className="text-sm font-medium text-brand-text-muted">{label}</p><p className="font-bold text-lg text-brand-text-main">{value}</p></div>
     </div>
 );
+
+const ScoreCircle: FC<{ score: number }> = ({ score }) => {
+    const radius = 18;
+    const circumference = 2 * Math.PI * radius;
+    const offset = circumference - (score / 100) * circumference;
+    const color = score > 80 ? '#20D5B3' : score > 60 ? '#FBBF24' : '#4ADE80';
+
+    return (
+        <div className="relative flex-shrink-0 flex items-center justify-center w-12 h-12">
+            <svg className="w-full h-full" viewBox="0 0 44 44">
+                <circle className="text-white/5" strokeWidth="4" stroke="currentColor" fill="transparent" r={radius} cx="22" cy="22" />
+                <motion.circle
+                    initial={{ strokeDashoffset: circumference }}
+                    animate={{ strokeDashoffset: offset }}
+                    transition={{ duration: 0.8, ease: "easeOut" }}
+                    strokeWidth="4"
+                    strokeDasharray={circumference}
+                    strokeLinecap="round"
+                    stroke={color}
+                    fill="transparent"
+                    r={radius}
+                    cx="22"
+                    cy="22"
+                    transform="rotate(-90 22 22)"
+                />
+            </svg>
+            <span className="absolute text-sm font-bold text-brand-text-main">{score}</span>
+        </div>
+    );
+};
+
+const MatchReasonTag: FC<{ reason: string }> = ({ reason }) => {
+    const icon = reason.startsWith('🔥') ? '🔥' : reason.startsWith('✅') ? '✅' : '✨';
+    const text = reason.replace(/^[🔥✅✨]\s*/, '');
+    return (
+        <div className="flex items-center gap-1.5 text-xs font-medium bg-white/5 text-primary-action py-1 px-2.5 rounded-full">
+            <span>{icon}</span>
+            <span className="text-brand-text-muted">{text}</span>
+        </div>
+    );
+};
+
 
 interface PersuasiveCommandCardProps {
     briefing: CampaignBriefing;
@@ -59,16 +94,18 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
 
     useEffect(() => { setDraft(briefing.edited_draft || briefing.original_draft || ''); }, [briefing.id, briefing.original_draft, briefing.edited_draft]);
 
-    const imageUrl = useMemo(() => { const imageUrls = briefing.key_intel?.image_urls; return Array.isArray(imageUrls) && imageUrls.length > 0 ? imageUrls[0] : null; }, [briefing.key_intel]);
+    const imageUrl = briefing.listing_url || null;
     const intel = briefing.key_intel || {};
-    const price = intel.price ? `$${Number(intel.price).toLocaleString()}` : null;
+    const price = intel['New Price'] || intel['Asking Price'] || intel['Sold Price'] || intel['Last Price'];
     const beds = intel.bedrooms ? Number(intel.bedrooms) : null;
     const baths = intel.bathrooms ? Number(intel.bathrooms) : null;
     const sqft = intel.sqft ? `${Number(intel.sqft).toLocaleString()} sqft` : null;
 
     const handleDraftChange = (newDraft: string) => { setDraft(newDraft); onBriefingUpdate({ ...briefing, edited_draft: newDraft }); };
+    
+    // --- MODIFIED: Uses the correct MatchedClient type from context ---
     const handleSaveAudience = async (newAudience: Client[]) => {
-        const updatedMatchedAudience: MatchedClient[] = newAudience.map(c => ({ client_id: c.id, client_name: c.full_name, match_score: 0, match_reason: 'Manually selected' }));
+        const updatedMatchedAudience: MatchedClient[] = newAudience.map(c => ({ client_id: c.id, client_name: c.full_name, match_score: 0, match_reasons: ['Manually Added'] }));
         onBriefingUpdate({ ...briefing, matched_audience: updatedMatchedAudience });
     };
 
@@ -76,20 +113,44 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
         <>
             <ManageAudienceModal isOpen={isAudienceModalOpen} onClose={() => setIsAudienceModalOpen(false)} onSave={handleSaveAudience} initialSelectedClientIds={new Set(briefing.matched_audience.map(c => c.client_id))} />
             <div className="absolute w-full h-full bg-brand-primary border border-white/10 rounded-xl overflow-hidden flex flex-col shadow-2xl">
+                {/* Header and Intel sections are unchanged */}
                 <div className="flex-shrink-0 p-4 bg-black/30 border-b border-white/10 flex items-center justify-between"><div className="flex items-center gap-3"><span className={config.color}>{config.icon}</span><h3 className="font-bold text-lg text-brand-text-main">{briefing.headline}</h3></div></div>
                 <div className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-x-6 overflow-y-auto">
                     <div className="p-5 space-y-5 border-r border-white/5">{imageUrl && (<div className="relative w-full h-48 rounded-lg overflow-hidden"><Image src={imageUrl} alt={`Property at ${briefing.headline}`} layout="fill" objectFit="cover" className="bg-white/5"/></div>)}<div className="space-y-1"><h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><Target size={16}/>Strategic Summary</h4><p className="text-brand-text-main text-base">This is a key market event relevant to your clients.</p></div><div className="space-y-4 pt-2"><h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><ChevronsRight size={16}/>Key Intel</h4><div className="grid grid-cols-2 gap-4">{price && <IntelStat icon={<DollarSign size={20}/>} label="Price" value={price} />}{beds && <IntelStat icon={<BedDouble size={20}/>} label="Beds" value={beds} />}{baths && <IntelStat icon={<Bath size={20}/>} label="Baths" value={baths} />}{sqft && <IntelStat label="SqFt" value={sqft} />}</div></div></div>
                     <div className="p-5 space-y-5 flex flex-col">
-                        <div><button onClick={() => setIsAudienceModalOpen(true)} className="w-full flex items-center justify-center gap-2 p-2 text-sm font-semibold text-brand-text-muted bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 hover:text-brand-text-main transition-colors mb-3"><Users size={16}/>Manage Audience</button><div className="space-y-3 max-h-40 overflow-y-auto pr-2">{briefing.matched_audience.map(client => (<div key={client.client_id}><p className="font-semibold text-brand-text-main text-base">{client.client_name}</p><p className={`text-sm ${config.color} flex items-center gap-1.5`}><Check size={14}/>{client.match_reason}</p></div>))}</div></div>
-                        <div className="flex-grow flex flex-col"><h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2 mb-3"><Edit size={16}/>Draft Message</h4><textarea value={draft} onChange={(e) => handleDraftChange(e.target.value)} className="w-full flex-grow bg-brand-dark border border-white/10 rounded-md focus:ring-2 focus:ring-primary-action text-brand-text-main text-base p-3 resize-none"/></div>
+                        <div>
+                            <button onClick={() => setIsAudienceModalOpen(true)} className="w-full flex items-center justify-center gap-2 p-2 text-sm font-semibold text-brand-text-muted bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 hover:text-brand-text-main transition-colors mb-4"><Users size={16}/>Manage Audience ({briefing.matched_audience.length})</button>
+                            <div className="space-y-3 max-h-48 overflow-y-auto pr-2">
+                                {briefing.matched_audience.map((client, index) => (
+                                    <div key={client.client_id} className="p-3 bg-white/[.03] border border-white/5 rounded-lg">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <ScoreCircle score={client.match_score} />
+                                                <div>
+                                                    <p className="font-semibold text-brand-text-main text-base">{client.client_name}</p>
+                                                    {index === 0 && <p className="text-xs font-bold text-amber-400">Top Match</p>}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {/* This now correctly maps over the array of reasons */}
+                                        <div className="flex flex-wrap items-center gap-2 mt-2 pl-[60px]">
+                                            {client.match_reasons.map(reason => <MatchReasonTag key={reason} reason={reason} />)}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="flex-grow flex flex-col mt-4"><h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2 mb-2"><Edit size={16}/>Draft Message</h4><textarea value={draft} onChange={(e) => handleDraftChange(e.target.value)} className="w-full flex-grow bg-brand-dark border border-white/10 rounded-md focus:ring-2 focus:ring-primary-action text-brand-text-main text-base p-3 resize-none"/></div>
                     </div>
                 </div>
+                {/* Footer is unchanged */}
                 <div className="flex-shrink-0 p-3 bg-black/30 border-t border-white/10 grid grid-cols-2 gap-3"><button onClick={() => onAction(briefing, 'dismiss')} className="p-3 bg-white/5 border border-white/10 text-brand-text-main rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-white/10 hover:border-white/20 transition-all duration-200"><X size={18} /> Dismiss Nudge</button><button onClick={() => onAction(briefing, 'send')} className="p-3 text-brand-dark rounded-lg font-bold flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(32,213,179,0.4)] hover:scale-[1.03] transition-all duration-200" style={{ backgroundColor: BRAND_ACCENT_COLOR }}><Send size={18} /> Send to {briefing.matched_audience.length} Client(s)</button></div>
             </div>
         </>
     );
 };
 
+// Main ActionDeck component export is unchanged
 interface ActionDeckProps { 
     briefings: CampaignBriefing[]; 
     onClose: () => void; 

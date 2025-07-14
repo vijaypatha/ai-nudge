@@ -1,9 +1,8 @@
 # File Path: backend/data/models/client.py
-# --- MODIFIED: Added an optional 'notes' field to store AI-generated intel.
+# --- MODIFIED: Added notes_embedding field to store the semantic vector.
 
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
-# --- MODIFIED: Import Text for longer form notes ---
 from sqlalchemy import Column, Text
 from sqlmodel import SQLModel, Field, Relationship, JSON
 
@@ -20,8 +19,12 @@ class Client(SQLModel, table=True):
     email: Optional[str] = Field(default=None, unique=True, index=True)
     phone: Optional[str] = Field(default=None, index=True)
     
-    # --- NEW: Field to store notes and insights about the client ---
     notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+    
+    # --- NEW: Field to store the vector embedding of the client's notes. ---
+    # This vector represents the "concept profile" for semantic matching.
+    # Stored as JSON in the database.
+    notes_embedding: Optional[List[float]] = Field(default=None, sa_column=Column(JSON))
     
     ai_tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     user_tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
@@ -29,7 +32,6 @@ class Client(SQLModel, table=True):
     preferences: Dict[str, Any] = Field(sa_column=Column(JSON))
     last_interaction: Optional[str] = Field(default=None)
     timezone: Optional[str] = Field(default=None)
-
     
     user: "User" = Relationship(back_populates="clients")
     
@@ -39,13 +41,9 @@ class Client(SQLModel, table=True):
 
 
 class ClientCreate(SQLModel):
-    """
-    This is the model used for creating new clients, including during import.
-    """
     full_name: str
     email: Optional[str] = None
     phone: Optional[str] = None
-    # --- MODIFIED: Added notes field ---
     notes: Optional[str] = None
     ai_tags: List[str] = []
     user_tags: List[str] = []
@@ -61,7 +59,4 @@ class ClientUpdate(SQLModel):
     timezone: Optional[str] = None
 
 class ClientTagUpdate(SQLModel):
-    """
-    The key is 'user_tags' to match the frontend request.
-    """
     user_tags: List[str]

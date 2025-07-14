@@ -1,5 +1,5 @@
 // frontend/context/AppContext.tsx
-// --- DEFINITIVE, COMPLETE VERSION ---
+// --- UPDATED: Corrected the MatchedClient type definition.
 
 'use client';
 
@@ -21,7 +21,6 @@ export interface User {
       first_nudges_seen: boolean;
       [key: string]: any;
   };
-  // --- ADDED MISSING FIELDS ---
   timezone?: string;
   mls_username?: string;
   mls_password?: string;
@@ -43,7 +42,9 @@ export interface Client {
     timezone?: string;
 }
 export interface Property { id: string; address: string; price: number; status: string; image_urls: string[]; }
-export interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reason: string; }
+
+// --- MODIFIED: match_reason is now an array of strings ---
+export interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reasons: string[]; }
 
 export interface CampaignBriefing { 
     id: string; 
