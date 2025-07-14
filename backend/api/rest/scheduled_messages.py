@@ -1,7 +1,7 @@
 # File Path: backend/api/rest/scheduled_messages.py
 # File Path: backend/api/rest/scheduled_messages.py
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Optional
 from typing import List
 from uuid import UUID
 from data.models.user import User
@@ -14,16 +14,24 @@ router = APIRouter(
     tags=["Scheduled Messages"]
 )
 
+# AFTER
 @router.get("", response_model=List[ScheduledMessage])
-async def get_scheduled_messages_for_client(
-    client_id: UUID,
+async def get_scheduled_messages(
+    client_id: Optional[UUID] = None,
     current_user: User = Depends(get_current_user_from_token)
 ):
+    """
+    Get scheduled messages. If client_id is provided, it filters for that client.
+    Otherwise, it returns all scheduled messages for the current user.
+    """
     try:
-        return crm_service.get_scheduled_messages_for_client(
-            user_id=current_user.id,
-            client_id=client_id
-        )
+        if client_id:
+            return crm_service.get_scheduled_messages_for_client(
+                user_id=current_user.id,
+                client_id=client_id
+            )
+        else:
+            return crm_service.get_all_scheduled_messages(user_id=current_user.id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch scheduled messages: {str(e)}")
 

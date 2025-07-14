@@ -26,9 +26,10 @@ export default function NudgesPage() {
     const [isScheduledLoading, setIsScheduledLoading] = useState(true);
 
     const tabOptions: TabOption[] = [ 
-        { id: 'ai_suggestions', label: 'AI Suggestions' }, 
+        { id: 'ai_suggestions', label: 'AI Suggestions' },
+        { id: 'instant_nudge', label: 'Instant Nudge' }, 
         { id: 'scheduled', label: 'Scheduled' },
-        { id: 'instant_nudge', label: 'Instant Nudge' } 
+        
     ];
 
     useEffect(() => {
@@ -94,7 +95,16 @@ export default function NudgesPage() {
                     <ScheduledNudgesView 
                         messages={scheduledMessages} 
                         isLoading={isScheduledLoading} 
-                        clients={clients} 
+                        clients={clients}
+                        onAction={() => {
+                            // Refetch scheduled messages after an action
+                            api.get('/api/scheduled-messages/')
+                                .then(data => {
+                                    const pendingMessages = data.filter((msg: ScheduledMessage) => msg.status === 'pending');
+                                    pendingMessages.sort((a: ScheduledMessage, b: ScheduledMessage) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
+                                    setScheduledMessages(pendingMessages);
+                                });
+                        }}
                     />
                 )}
                 {activeTab === 'instant_nudge' && <InstantNudgeView />}

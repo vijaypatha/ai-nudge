@@ -3,7 +3,7 @@ import React from 'react';
 import clsx from 'clsx';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-    variant?: 'primary' | 'secondary' | 'danger';
+    variant?: 'primary' | 'secondary' | 'danger' |'ghost' | 'destructive';
     size?: 'sm' | 'md' | 'lg';
     children: React.ReactNode;
 }
@@ -16,6 +16,8 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             primary: 'bg-brand-accent text-white hover:bg-brand-accent/90',
             secondary: 'bg-white/10 text-brand-text-main hover:bg-white/20',
             danger: 'bg-red-600 text-white hover:bg-red-700',
+            ghost: 'bg-transparent text-brand-text-main hover:bg-white/10',
+            destructive: 'bg-red-100 text-red-700 hover:bg-red-200',
         };
 
         const sizeStyles = {
