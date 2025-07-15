@@ -69,6 +69,8 @@ class CampaignUpdate(SQLModel):
     key_intel: Optional[Dict[str, Any]] = None
     original_draft: Optional[str] = None
     status: Optional[CampaignStatus] = None
+    edited_draft: Optional[str] = None
+    matched_audience: Optional[List[Dict[str, Any]]] = None
 
 class RecommendationSlateResponse(BaseModel):
     """A lightweight response model for campaign lists in the UI."""
