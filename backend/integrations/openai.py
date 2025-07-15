@@ -1,71 +1,94 @@
 # File Path: backend/integrations/openai.py
-# --- UPDATED: Switched to the proper AsyncOpenAI client.
+# PURPOSE: Integration functions for interacting with the OpenAI API.
 
+import logging
+from typing import List, Optional, Dict, Any
+from functools import lru_cache
+from openai import AsyncOpenAI, OpenAIError
 import httpx
-from openai import AsyncOpenAI, APIStatusError, AuthenticationError # <-- MODIFIED: Import AsyncOpenAI
+
 from common.config import get_settings
-from typing import List
 
-settings = get_settings()
-_openai_client = None
+logger = logging.getLogger(__name__)
 
-# --- MODIFIED: This function now returns an AsyncOpenAI client ---
-def get_openai_client() -> AsyncOpenAI:
+@lru_cache()
+def get_async_client() -> AsyncOpenAI:
     """
-    Returns an initialized AsyncOpenAI client (singleton pattern).
+    Initializes and returns a cached AsyncOpenAI client.
+    This version manually creates the httpx.AsyncClient to prevent
+    a version incompatibility issue with proxy settings.
     """
-    global _openai_client
-    if _openai_client is None:
-        if not settings.OPENAI_API_KEY:
-            raise ValueError("OpenAI API Key is missing from environment variables.")
-        
-        # httpx.AsyncClient is needed for AsyncOpenAI
-        http_client = httpx.AsyncClient()
-        
-        _openai_client = AsyncOpenAI( # <-- MODIFIED: Instantiate AsyncOpenAI
-            api_key=settings.OPENAI_API_KEY,
-            http_client=http_client
+    logger.info("OPENAI INTEGRATION: Initializing new AsyncOpenAI client...")
+    settings = get_settings()
+    if not settings.OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY is not set in the environment.")
+
+    # Manually create the httpx client with NO arguments to avoid the 'proxies' TypeError.
+    http_client = httpx.AsyncClient()
+    
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY, http_client=http_client)
+
+async def get_text_embedding(text: str) -> List[float]:
+    """
+    Gets a text embedding from the OpenAI API.
+    """
+    try:
+        client = get_async_client()
+        response = await client.embeddings.create(
+            model="text-embedding-3-small",
+            input=text
         )
-        print("OPENAI INTEGRATION: AsyncOpenAI client initialized successfully.")
-    return _openai_client
+        return response.data[0].embedding
+    except (OpenAIError, ValueError) as e:
+        logger.error(f"OPENAI INTEGRATION: Error getting text embedding: {e}", exc_info=True)
+        return [0.0] * 1536
+
+async def get_chat_completion(
+    messages: list,
+    model: str = "gpt-4o-mini",
+    temperature: float = 0.7,
+    max_tokens: int = 1024,
+    json_response: bool = False,
+    **kwargs
+) -> Optional[str]:
+    """
+    Gets a chat completion from the OpenAI API. This is the new, unified function
+    that is backward-compatible with other parts of the system.
+    """
+    try:
+        client = get_async_client()
+        
+        # This block handles arguments from both old and new code.
+        # It prioritizes the 'response_format' from kwargs if present.
+        if "response_format" in kwargs:
+            pass # The argument is already in kwargs
+        elif json_response:
+            kwargs["response_format"] = {"type": "json_object"}
+        
+        logger.info(f"OPENAI INTEGRATION: Calling OpenAI model '{model}' with extra args: {kwargs}")
+
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs # Pass all extra arguments
+        )
+        content = response.choices[0].message.content
+        logger.info(f"OPENAI INTEGRATION: Received response: {content[:100]}...")
+        return content
+    except (OpenAIError, ValueError) as e:
+        logger.error(f"OPENAI INTEGRATION: Error getting chat completion: {e}", exc_info=True)
+        return None
 
 async def generate_text_completion(prompt_messages: list, model: str = "gpt-4o-mini", **kwargs) -> str | None:
     """
     Generates a text completion using an OpenAI model.
+    This function is preserved for backward compatibility and now calls the new unified function.
     """
-    try:
-        client = get_openai_client()
-        print(f"OPENAI INTEGRATION: Calling OpenAI model '{model}' with extra args: {kwargs}")
-
-        # --- MODIFIED: Added 'await' as we are now using the async client ---
-        response = await client.chat.completions.create(
-            model=model,
-            messages=prompt_messages,
-            temperature=0.7,
-            max_tokens=250,
-            **kwargs 
-        )
-        
-        if response.choices and response.choices[0].message.content:
-            generated_text = response.choices[0].message.content.strip()
-            print(f"OPENAI INTEGRATION: Received response: {generated_text[:70]}...")
-            return generated_text
-        return None
-
-    except Exception as e:
-        print(f"OPENAI INTEGRATION ERROR: An unexpected error occurred in text generation: {e}")
-        return None
-
-async def get_text_embedding(text: str, model="text-embedding-3-small") -> List[float]:
-    """
-    Generates a vector embedding for a given text using OpenAI's embedding models.
-    """
-    try:
-        client = get_openai_client()
-        text = text.replace("\n", " ")
-        # The 'await' here is now correct because we are using the AsyncOpenAI client
-        response = await client.embeddings.create(input=[text], model=model)
-        return response.data[0].embedding
-    except Exception as e:
-        print(f"OPENAI INTEGRATION ERROR: Could not generate embedding. {e}")
-        return [0.0] * 1536
+    logger.info("Calling legacy 'generate_text_completion', redirecting to 'get_chat_completion'.")
+    return await get_chat_completion(
+        messages=prompt_messages,
+        model=model,
+        **kwargs
+    )

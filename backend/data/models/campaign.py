@@ -1,6 +1,5 @@
-# backend/data/models/campaign.py
-# --- MODIFIED: Added 'matched_audience' to CampaignBriefing and enhanced MatchedClient.
-
+# File Path: backend/data/models/campaign.py
+# PURPOSE: Defines the data models for campaigns, nudges, and matched clients.
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
@@ -12,8 +11,10 @@ if TYPE_CHECKING:
     from .user import User
     from .client import Client
     from .message import Message, ScheduledMessage
+    from .resource import Resource
 
 class CampaignStatus(str, Enum):
+    """Enumeration for the status of a campaign."""
     DRAFT = "draft"
     ACTIVE = "active"
     PAUSED = "paused"
@@ -21,10 +22,10 @@ class CampaignStatus(str, Enum):
     CANCELLED = "cancelled"
 
 class CoPilotAction(BaseModel):
+    """A Pydantic model for co-pilot actions in the UI."""
     type: str
     label: str
 
-# --- MODIFIED: Enhanced with match_score and match_reasons ---
 class MatchedClient(BaseModel):
     """
     A Pydantic model representing a client matched to an opportunity.
@@ -32,31 +33,34 @@ class MatchedClient(BaseModel):
     """
     client_id: UUID
     client_name: str
-    match_score: int          # <-- NEW: The calculated score for the match.
-    match_reasons: List[str]  # <-- NEW: Human-readable reasons for the score.
+    match_score: int
+    match_reasons: List[str]
 
 class CampaignBriefing(SQLModel, table=True):
+    """Represents an AI-generated Nudge or a user-created Campaign Plan."""
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id", index=True)
     client_id: Optional[UUID] = Field(default=None, foreign_key="client.id", index=True)
+    
+    # Field to reliably link this nudge to the resource that triggered it.
+    triggering_resource_id: Optional[UUID] = Field(default=None, foreign_key="resource.id", index=True)
+    
     parent_message_id: Optional[UUID] = Field(default=None, foreign_key="message.id", index=True)
     is_plan: bool = Field(default=False, index=True)
     campaign_type: str = Field(index=True)
     headline: str
     key_intel: Dict[str, Any] = Field(sa_column=Column(JSON))
-    
-    # --- NEW: Added field to store the list of matched clients as JSON. ---
-    # This aligns the model with the data being passed by nudge_engine.py.
     matched_audience: List[Dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
-    
     original_draft: str
     status: CampaignStatus = Field(default=CampaignStatus.DRAFT, index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+    # Database relationships
     parent_message: Optional["Message"] = Relationship(back_populates="ai_drafts")
     user: Optional["User"] = Relationship(back_populates="campaigns")
     client: Optional["Client"] = Relationship(back_populates="campaign_briefings")
     scheduled_messages: List["ScheduledMessage"] = Relationship(back_populates="parent_plan")
+    triggering_resource: Optional["Resource"] = Relationship()
 
 class CampaignUpdate(SQLModel):
     """Model for updating campaign briefings."""
@@ -67,6 +71,7 @@ class CampaignUpdate(SQLModel):
     status: Optional[CampaignStatus] = None
 
 class RecommendationSlateResponse(BaseModel):
+    """A lightweight response model for campaign lists in the UI."""
     id: UUID
     is_plan: bool
     campaign_type: str

@@ -2,7 +2,7 @@
 # --- MODIFIED: Integrated embedding generation into client note updates.
 
 from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 from sqlmodel import Session, select, delete
 from sqlalchemy.orm import selectinload
@@ -14,14 +14,16 @@ from agent_core import llm_client
 from agent_core.deduplication.deduplication_engine import find_strong_duplicate
 
 from .models.client import Client, ClientUpdate, ClientCreate
+from .models.event import MarketEvent
 from .models.user import User, UserUpdate
 from .models.resource import Resource, ResourceCreate, ResourceUpdate
 from .models.campaign import CampaignBriefing, CampaignUpdate, CampaignStatus
 from .models.message import ScheduledMessage, Message, MessageStatus, MessageDirection
+from agent_core.agents import profiler as profiler_agent
+
 from uuid import UUID
 
 # --- User Functions (Unchanged) ---
-# ... (code for user functions remains the same)
 
 def get_user_by_id(user_id: uuid.UUID) -> Optional[User]:
     """Retrieves a single user by their unique ID."""
@@ -178,8 +180,8 @@ async def update_client_intel(
     notes_to_add: Optional[str] = None
 ) -> Optional[Client]:
     """
-    Appends notes and/or tags, then regenerates the semantic embedding.
-    NOW ASYNCHRONOUS to support embedding calls.
+    Appends notes/tags, extracts structured preferences from the notes, 
+    regenerates the AI embedding, and triggers a proactive re-scan.
     """
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
@@ -189,11 +191,11 @@ async def update_client_intel(
         
         notes_were_updated = False
         if tags_to_add:
-            existing_tags = set(client.user_tags or [])
-            new_tags = set(tags_to_add)
-            client.user_tags = sorted(list(existing_tags.union(new_tags)))
+            # Combine existing and new tags, ensuring no duplicates and alphabetical order.
+            client.user_tags = sorted(list(set(client.user_tags or []).union(set(tags_to_add))))
 
         if notes_to_add:
+            # Append the new note with a timestamp.
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             new_note_entry = f"Note from AI ({timestamp}):\n{notes_to_add}"
             if client.notes:
@@ -202,14 +204,40 @@ async def update_client_intel(
                 client.notes = new_note_entry
             notes_were_updated = True
 
+        # --- New AI Preference Extraction Step ---
+        if notes_were_updated and client.notes:
+            # Consolidate all text data (notes and tags) for the profiler agent.
+            all_text_to_analyze = f"Notes: {client.notes}\nTags: {', '.join(client.user_tags)}"
+            extracted_prefs = await profiler_agent.extract_preferences_from_text(all_text_to_analyze)
+            
+            if extracted_prefs:
+                # Safely initialize and update the structured preferences dictionary.
+                if client.preferences is None:
+                    client.preferences = {}
+                client.preferences.update(extracted_prefs)
+                logging.info(f"CRM: Automatically updated structured preferences for client {client.id}: {extracted_prefs}")
+
+        # --- Regenerate Embedding ---
         if notes_were_updated and client.notes and client.notes.strip():
             logging.info(f"CRM: Regenerating notes embedding for client {client.id} after intel update...")
-            embedding = await llm_client.generate_embedding(client.notes) # <-- Use await
-            client.notes_embedding = embedding
+            client.notes_embedding = await llm_client.generate_embedding(client.notes)
         
+        # Commit all changes to the database.
         session.add(client)
         session.commit()
         session.refresh(client)
+
+        # --- Trigger Proactive Re-scan ---
+        if notes_were_updated:
+            try:
+                # Use a local import to prevent potential circular dependency issues.
+                from celery_tasks import rescore_client_against_recent_events_task
+                logging.info(f"CRM: Triggering proactive re-scan for client {client.id} due to profile update.")
+                # Pass the newly extracted preferences directly to the task to avoid race conditions.
+                rescore_client_against_recent_events_task.delay(client_id=str(client.id), extracted_prefs=extracted_prefs)
+            except Exception as e:
+                logging.error(f"CRM: Failed to trigger re-scan task for client {client.id}: {e}", exc_info=True)
+        
         return client
 
 # --- MODIFIED: Now generates an embedding if notes are changed. ---
@@ -362,6 +390,54 @@ def get_campaign_briefing_by_id(
     else:
         with Session(engine) as new_session:
             return _get(new_session)
+    
+def get_active_events_in_range(lookback_days: int, session: Session) -> List[MarketEvent]:
+    """
+    Retrieves all market events within a given lookback period that are linked
+    to a resource that is still 'active'.
+    """
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    
+    # First, get the IDs of all resources that are currently active to prevent errors.
+    active_resource_ids = session.exec(
+        select(Resource.id).where(Resource.status == 'active')
+    ).all()
+
+    if not active_resource_ids:
+        return []
+
+    # Then, fetch events that are recent AND belong to that active list.
+    statement = (
+        select(MarketEvent)
+        .where(
+            MarketEvent.created_at >= cutoff_date,
+            MarketEvent.entity_id.in_(active_resource_ids)
+        )
+    )
+    return session.exec(statement).all()
+
+def does_nudge_exist_for_client_and_resource(client_id: UUID, resource_id: UUID, session: Session) -> bool:
+    """
+    Checks if a campaign briefing already exists for a specific client and resource.
+    This is used for duplicate prevention.
+    """
+    # Find all campaigns related to this resource using the reliable foreign key.
+    statement = select(CampaignBriefing).where(CampaignBriefing.triggering_resource_id == resource_id)
+    campaigns = session.exec(statement).all()
+
+    if not campaigns:
+        return False
+
+    # Loop through the campaigns and their audiences to see if the client is already there.
+    str_client_id = str(client_id)
+    for campaign in campaigns:
+        for audience_member in campaign.matched_audience:
+            if audience_member.get('client_id') == str_client_id:
+                # A nudge for this client and this resource already exists.
+                return True
+    
+    # No existing nudge was found.
+    return False
 
 def update_campaign_briefing(campaign_id: uuid.UUID, update_data: CampaignUpdate, user_id: uuid.UUID) -> Optional[CampaignBriefing]:
     """Updates a campaign briefing with new data, ensuring it belongs to the user."""

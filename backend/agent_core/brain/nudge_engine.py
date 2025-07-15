@@ -1,6 +1,5 @@
 # File Path: backend/agent_core/brain/nudge_engine.py
-# --- MODIFIED: Fixed crash by removing invalid argument and tuned similarity threshold.
-
+# PURPOSE: The core AI brain for detecting opportunities and matching clients.
 import uuid
 import asyncio
 import logging
@@ -30,26 +29,31 @@ SCORE_WEIGHTS = {
     "features": 15,
 }
 
-# --- Key Intel Builder Functions (Unchanged) ---
 def _build_price_drop_intel(event: MarketEvent, resource: Resource) -> Dict[str, Any]:
+    """Builds the key intel dictionary for a price drop event."""
     old_price = event.payload.get('OriginalListPrice', 0)
     new_price = event.payload.get('ListPrice', 0)
     price_change = old_price - new_price
     return {"Price Drop": f"${price_change:,.0f}", "New Price": f"${new_price:,.0f}"}
 
 def _build_sold_intel(event: MarketEvent, resource: Resource) -> Dict[str, Any]:
+    """Builds the key intel dictionary for a sold listing event."""
     return {"Sold Price": f"${event.payload.get('ClosePrice', 0):,.0f}", "Address": resource.attributes.get('address', 'N/A')}
 
 def _build_simple_intel(event: MarketEvent, resource: Resource) -> Dict[str, Any]:
+    """Builds a simple key intel dictionary for basic listing events."""
     return {"Asking Price": f"${event.payload.get('ListPrice', 0):,.0f}", "Address": resource.attributes.get('address', 'N/A')}
 
 def _build_expired_intel(event: MarketEvent, resource: Resource) -> Dict[str, Any]:
+    """Builds the key intel dictionary for an expired listing event."""
     return {"Last Price": f"${event.payload.get('ListPrice', 0):,.0f}", "Status": "Expired"}
 
 def _build_coming_soon_intel(event: MarketEvent, resource: Resource) -> Dict[str, Any]:
+    """Builds the key intel dictionary for a coming soon event."""
     return {"Anticipated Price": f"${event.payload.get('ListPrice', 0):,.0f}", "Status": "Coming Soon"}
 
 def _build_withdrawn_intel(event: MarketEvent, resource: Resource) -> Dict[str, Any]:
+    """Builds the key intel dictionary for a withdrawn listing event."""
     return {"Last Price": f"${event.payload.get('ListPrice', 0):,.0f}", "Status": "Withdrawn"}
 
 CAMPAIGN_CONFIG = {
@@ -63,6 +67,7 @@ CAMPAIGN_CONFIG = {
 }
 
 def _calculate_cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
+    """Calculates the cosine similarity between two vectors."""
     if not isinstance(vec1, list) or not isinstance(vec2, list) or not vec1 or not vec2: return 0.0
     v1 = np.array(vec1)
     v2 = np.array(vec2)
@@ -71,63 +76,43 @@ def _calculate_cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
     return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
 
 def _get_client_score_for_property(client: Client, resource_payload: Dict[str, Any], property_embedding: Optional[List[float]]) -> tuple[int, list[str]]:
+    """Calculates a weighted match score for a single client against a property."""
     total_score = 0
     reasons = []
     
     logging.info(f"--- Scoring Client: {client.full_name} (ID: {client.id}) ---")
 
-    # 1. Score by Semantic Match
     client_embedding = client.notes_embedding
     if client_embedding and property_embedding:
         similarity = _calculate_cosine_similarity(client_embedding, property_embedding)
         logging.info(f"  - Semantic Similarity: {similarity:.4f}")
-        # --- MODIFIED: Lowered threshold to a more reasonable value for tuning. ---
         if similarity > 0.45:
             score_contribution = SCORE_WEIGHTS['semantic_match'] * similarity
             total_score += score_contribution
             reasons.append("🔥 Conceptual Match")
             logging.info(f"  - Semantic Match contribution: {score_contribution:.2f}")
     else:
-        logging.info(f"  - Semantic Similarity: SKIPPED (Client Embedding: {'Exists' if client_embedding else 'None'}, Property Embedding: {'Exists' if property_embedding else 'None'})")
+        logging.info(f"  - Semantic Similarity: SKIPPED")
 
-    # 2. Score by Price
     client_prefs = client.preferences or {}
     max_budget = client_prefs.get('budget_max')
     list_price = resource_payload.get('ListPrice')
-    if list_price and max_budget:
-        logging.info(f"  - Price Check: Budget=${max_budget}, Price=${list_price}")
-        if list_price <= max_budget:
-            total_score += SCORE_WEIGHTS['price']
-            reasons.append("✅ Budget Match")
-            logging.info(f"  - Price contribution: {SCORE_WEIGHTS['price']}")
-    else:
-        logging.info(f"  - Price Check: SKIPPED (Budget: {max_budget}, Price: {list_price})")
+    if list_price and max_budget and list_price <= max_budget:
+        total_score += SCORE_WEIGHTS['price']
+        reasons.append("✅ Budget Match")
 
-    # 3. Score by Location
     resource_location = resource_payload.get('SubdivisionName', '').lower()
     client_locations = client_prefs.get('locations', [])
-    if resource_location and client_locations:
-        logging.info(f"  - Location Check: Client wants {client_locations}, Property is in '{resource_location}'")
-        if any(loc.lower() in resource_location for loc in client_locations):
-            total_score += SCORE_WEIGHTS['location']
-            reasons.append("✅ Location Match")
-            logging.info(f"  - Location contribution: {SCORE_WEIGHTS['location']}")
-    else:
-        logging.info(f"  - Location Check: SKIPPED (Client Locations: {client_locations}, Resource Location: {resource_location})")
+    if resource_location and client_locations and any(loc.lower() in resource_location for loc in client_locations):
+        total_score += SCORE_WEIGHTS['location']
+        reasons.append("✅ Location Match")
 
-    # 4. Score by Features
     min_beds = client_prefs.get('min_bedrooms')
     resource_beds = resource_payload.get('BedroomsTotal')
-    if min_beds and resource_beds:
-        logging.info(f"  - Features Check: Client wants min {min_beds} beds, Property has {resource_beds}")
-        if resource_beds >= min_beds:
-            total_score += SCORE_WEIGHTS['features']
-            reasons.append(f"✅ Features Match ({resource_beds} Beds)")
-            logging.info(f"  - Features contribution: {SCORE_WEIGHTS['features']}")
-    else:
-        logging.info(f"  - Features Check: SKIPPED (Min Beds: {min_beds}, Resource Beds: {resource_beds})")
+    if min_beds and resource_beds and resource_beds >= min_beds:
+        total_score += SCORE_WEIGHTS['features']
+        reasons.append(f"✅ Features Match ({resource_beds} Beds)")
 
-    # 5. Score by Keywords
     keywords = set([tag.lower() for tag in client.user_tags] + [tag.lower() for tag in client.ai_tags])
     notes_keywords = re.findall(r'\b\w+\b', (client.notes or '').lower())
     keywords.update(notes_keywords)
@@ -136,25 +121,21 @@ def _get_client_score_for_property(client: Client, resource_payload: Dict[str, A
     if found_keywords:
         total_score += SCORE_WEIGHTS['keywords']
         reasons.append(f"✅ Keyword Match ({', '.join(list(found_keywords)[:2])})")
-        logging.info(f"  - Keyword contribution: {SCORE_WEIGHTS['keywords']}")
 
     logging.info(f"  - FINAL SCORE for {client.full_name}: {int(total_score)}")
     
     return int(total_score), reasons
 
 async def _create_campaign_from_event(event: MarketEvent, realtor: User, resource: Resource, matched_audience: list[MatchedClient], db_session: Session):
+    """Creates and saves a CampaignBriefing from a market event and a matched audience."""
     config = CAMPAIGN_CONFIG.get(event.event_type)
     if not config: return
     address = event.payload.get('UnparsedAddress', resource.attributes.get('address', 'N/A'))
     headline = config["headline"].format(address=address)
     key_intel = config["intel_builder"](event, resource)
     
-    # --- MODIFIED: Removed the invalid 'resource_payload' argument to prevent crash. ---
     ai_draft = await conversation_agent.draft_outbound_campaign_message(
-        realtor=realtor, 
-        resource=resource, 
-        event_type=event.event_type, 
-        matched_audience=matched_audience
+        realtor=realtor, resource=resource, event_type=event.event_type, matched_audience=matched_audience
     )
     
     audience_for_db = [m.model_dump(mode='json') for m in matched_audience]
@@ -163,20 +144,37 @@ async def _create_campaign_from_event(event: MarketEvent, realtor: User, resourc
     new_briefing = CampaignBriefing(
         id=briefing_id, 
         user_id=realtor.id, 
+        triggering_resource_id=resource.id,
         campaign_type=event.event_type, 
         status=CampaignStatus.DRAFT,
         headline=headline, 
         key_intel=key_intel, 
         listing_url=next((media['MediaURL'] for media in event.payload.get('Media', []) if media.get('Order') == 0), None),
         original_draft=ai_draft, 
-        matched_audience=audience_for_db,
-        triggering_event_id=uuid.uuid5(uuid.NAMESPACE_DNS, f"{event.payload.get('ListingKey', str(uuid.uuid4()))}-{event.event_type}")
+        matched_audience=audience_for_db
     )
     
     crm_service.save_campaign_briefing(new_briefing, session=db_session)
     logging.info(f"NUDGE ENGINE: Successfully created Campaign Briefing {briefing_id} for event {event.event_type}")
 
+async def create_single_client_nudge_from_event(event: MarketEvent, realtor: User, client: Client, score: int, reasons: list[str], db_session: Session):
+    """Creates a campaign briefing for a single matched client, typically from a re-scan."""
+    matched_client = MatchedClient(
+        client_id=client.id,
+        client_name=client.full_name,
+        match_score=score,
+        match_reasons=reasons
+    )
+    await _create_campaign_from_event(
+        event=event,
+        realtor=realtor,
+        resource=Resource(id=event.entity_id, user_id=realtor.id, resource_type="property", status="active", attributes={"address": event.payload.get("UnparsedAddress", "N/A")}),
+        matched_audience=[matched_client],
+        db_session=db_session
+    )
+
 async def process_market_event(event: MarketEvent, realtor: User, db_session: Optional[Session] = None):
+    """Processes a single market event, finds a matching audience, and creates a campaign."""
     logging.info(f"NUDGE ENGINE: Processing event -> {event.event_type} for entity {event.entity_id}")
     resource_payload = event.payload
     if not resource_payload:
@@ -195,10 +193,7 @@ async def process_market_event(event: MarketEvent, realtor: User, db_session: Op
         
         if score >= MATCH_THRESHOLD:
             matched_audience.append(MatchedClient(
-                client_id=client.id, 
-                client_name=client.full_name, 
-                match_score=score, 
-                match_reasons=reasons
+                client_id=client.id, client_name=client.full_name, match_score=score, match_reasons=reasons
             ))
     
     if not matched_audience:
@@ -222,6 +217,7 @@ async def process_market_event(event: MarketEvent, realtor: User, db_session: Op
             session_to_use.close()
 
 async def generate_recency_nudges(realtor: User):
+    """Periodically checks for clients who haven't been contacted recently."""
     logging.info("NUDGE ENGINE: Checking for clients needing a follow-up...")
     RECENCY_THRESHOLD_DAYS = 90
     all_clients = crm_service.get_all_clients(user_id=realtor.id)
@@ -241,20 +237,17 @@ async def generate_recency_nudges(realtor: User):
     ai_draft = await conversation_agent.draft_outbound_campaign_message(realtor=realtor, event_type="recency_nudge", matched_audience=matched_audience)
     
     recency_briefing = CampaignBriefing(
-        id=uuid.uuid4(),
-        user_id=realtor.id,
-        campaign_type="recency_nudge",
-        status=CampaignStatus.DRAFT,
+        id=uuid.uuid4(), user_id=realtor.id, campaign_type="recency_nudge", status=CampaignStatus.DRAFT,
         headline=f"Relationship Opportunity: {len(at_risk_clients)} clients need a follow-up",
         key_intel={"At-Risk Clients": len(at_risk_clients), "Threshold": f"{RECENCY_THRESHOLD_DAYS} days"},
         original_draft=ai_draft,
-        matched_audience=[m.model_dump(mode='json') for m in matched_audience],
-        triggering_event_id=uuid.uuid4()
+        matched_audience=[m.model_dump(mode='json') for m in matched_audience]
     )
     
     crm_service.save_campaign_briefing(recency_briefing)
 
 async def scan_for_all_market_events(realtor: User, minutes_ago: int = 60):
+    """The main orchestrator function that scans the MLS for all relevant event types."""
     mls_client = get_mls_client()
     if not mls_client:
         logging.warning("NUDGE ENGINE: Could not initialize MLS client. Aborting scan.")

@@ -1,6 +1,5 @@
-# backend/common/config.py
-# --- UPDATED: Added LLM_PROVIDER setting.
-
+# File Path: backend/common/config.py
+# PURPOSE: Manages all application settings from the environment.
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import Optional
@@ -10,7 +9,6 @@ class Settings(BaseSettings):
     Manages application settings loaded from the .env file.
     Provides type validation for all settings.
     """
-    # --- NEW: Setting to choose the AI provider ---
     LLM_PROVIDER: str = "openai" # Default to 'openai', can be switched to 'gemini'
 
     # OpenAI
@@ -37,6 +35,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "production"
     FRONTEND_APP_URL: str = "http://localhost:3000"
     SECRET_KEY: str
+    RESCAN_LOOKBACK_DAYS: int = 30 # Days to look back for active events during a re-scan
 
     # FAQ Auto-Reply
     FAQ_AUTO_REPLY_ENABLED: bool = True
