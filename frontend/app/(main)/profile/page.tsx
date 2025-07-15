@@ -1,25 +1,23 @@
 // frontend/app/(main)/profile/page.tsx
-// --- DEFINITIVE, CORRECTED VERSION ---
+// --- UPDATED: Removed MLS username/password fields and related save logic.
 
 "use client";
 
 import { useState, useEffect, ChangeEvent, FC } from "react";
 import { Trash2, Edit3, Save, XCircle, Loader2, User, Briefcase, Bot, LogOut } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
-import { useAppContext, User as UserType } from '@/context/AppContext'; // Use the User type from context
-import { TimezoneSelector } from "@/components/ui/TimezoneSelector"; // Import the timezone component
-
-// --- REMOVED Redundant UserProfile interface ---
+import { useAppContext, User as UserType } from '@/context/AppContext';
+import { TimezoneSelector } from "@/components/ui/TimezoneSelector";
 
 export interface FaqItem {
   id: string;
   question: string;
   answer: string;
   is_enabled: boolean;
-  isNew?: boolean; // Used for client-side state only
+  isNew?: boolean;
 }
 
-// --- HELPER COMPONENT: FaqCard ---
+// --- HELPER COMPONENT: FaqCard (Unchanged) ---
 const FaqCard: FC<{
   item: FaqItem;
   onUpdate: (id: string, data: Partial<FaqItem>) => Promise<void>;
@@ -110,6 +108,7 @@ export default function ProfilePage() {
         setProfile(p => p ? { ...p, [e.target.name]: e.target.value } : null);
     };
 
+    // --- MODIFIED: Removed MLS fields from the save payload ---
     const handleProfileSave = async (initialData?: Partial<UserType>) => {
         const dataToSave = initialData || profile;
         if (!dataToSave) return;
@@ -118,21 +117,13 @@ export default function ProfilePage() {
         setError(null);
         
         try {
-            // Build a payload with only the fields that can be updated
             const payload = {
                 full_name: dataToSave.full_name,
                 email: dataToSave.email,
                 timezone: dataToSave.timezone,
-                mls_username: dataToSave.mls_username,
-                mls_password: (dataToSave as any).mls_password, // Password is write-only
-                ...initialData // Include timezone if it's an auto-save
+                ...initialData
             };
             
-            // Remove password if it's empty to avoid overwriting with blank
-            if (payload.mls_password && payload.mls_password.trim() === '') {
-                delete payload.mls_password;
-            }
-
             const updatedUser = await api.put('/api/users/me', payload);
             setProfile(updatedUser);
             await refreshUser();
@@ -145,7 +136,6 @@ export default function ProfilePage() {
         }
     };
     
-    // Auto-detect timezone on first load if not present
     useEffect(() => {
         if (user && !user.timezone) {
             const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -155,14 +145,12 @@ export default function ProfilePage() {
         }
     }, [user]);
 
-    // Set local state from context once user is loaded
     useEffect(() => {
         if (user) {
             setProfile(user);
         }
     }, [user]);
 
-    // Fetch page-specific data
     useEffect(() => {
         if (isContextLoading) return;
         const fetchData = async () => {
@@ -228,17 +216,17 @@ export default function ProfilePage() {
         }
     };
 
+    // --- MODIFIED: Removed the MLS fields from the JSX for 'realtor' user type ---
     const renderBusinessDetails = () => {
         if (!profile) return null;
-        const inputStyles = "w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition text-sm disabled:opacity-50";
         switch(profile.user_type) {
             case 'realtor':
-                return (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-1"><label className="text-sm font-medium text-gray-400">MLS Username</label><input name="mls_username" value={profile.mls_username || ''} onChange={handleProfileChange} disabled={!isEditingProfile} className={inputStyles} /></div>
-                        <div className="space-y-1"><label className="text-sm font-medium text-gray-400">MLS Password</label><input name="mls_password" type="password" placeholder="•••••••• (leave blank to keep unchanged)" onChange={handleProfileChange} disabled={!isEditingProfile} className={inputStyles} /></div>
-                    </div>
-                );
+                // For now, we show a message that the connection is managed.
+                // This makes it clean and ready for other vertical-specific settings.
+                return <p className="text-sm text-gray-400">Your MLS connection is managed automatically by the system.</p>;
+            // --- NEW: Added a placeholder case for 'therapist' ---
+            case 'therapist':
+                return <p className="text-sm text-gray-400">No business-specific settings required for this user type.</p>;
             default:
                 return <p className="text-sm text-gray-500">No business-specific settings available for this user type.</p>;
         }

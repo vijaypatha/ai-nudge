@@ -97,12 +97,9 @@ async def update_client_intel_endpoint(
 ):
     """
     A single, powerful endpoint to update client intel based on AI recommendations.
-    It can add tags and add notes. The recommendation slate itself is cleared
-    separately when the conversation progresses (e.g., a message is sent).
     """
-    # --- MODIFICATION START ---
-    # This call now only updates the client's data (tags, notes).
-    updated_client = crm_service.update_client_intel(
+    # --- MODIFIED: Added 'await' for the async CRM function ---
+    updated_client = await crm_service.update_client_intel(
         client_id=client_id,
         user_id=current_user.id,
         tags_to_add=payload.tags_to_add,
@@ -112,10 +109,6 @@ async def update_client_intel_endpoint(
     if not updated_client:
         raise HTTPException(status_code=404, detail="Client not found or failed to update.")
 
-    # REMOVED: The logic to mark the slate as 'completed' has been removed.
-    # This is the key change to prevent the UI from disappearing prematurely.
-    # The slate is now cleared only when a message is sent or received,
-    # handled by a different process.
     if payload.active_recommendation_id:
         logging.info(f"API: Processed intel action for client {client_id} from slate {payload.active_recommendation_id}. Slate status was not changed.")
 
@@ -130,7 +123,8 @@ async def update_client_notes_endpoint(
     """
     Updates the client's notes from a manual user edit. This overwrites the notes.
     """
-    updated_client = crm_service.update_client_notes(
+    # --- MODIFIED: Added 'await' for the async CRM function ---
+    updated_client = await crm_service.update_client_notes(
         client_id=client_id,
         notes=payload.notes,
         user_id=current_user.id
@@ -217,7 +211,8 @@ async def update_client_details(
     """
     Updates a client's details, including preferences, notes, or timezone.
     """
-    updated_client = crm_service.update_client(
+    # --- MODIFIED: Added 'await' for the async CRM function ---
+    updated_client = await crm_service.update_client(
         client_id=client_id, 
         update_data=client_data, 
         user_id=current_user.id

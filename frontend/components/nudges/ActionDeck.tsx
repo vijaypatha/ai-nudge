@@ -1,12 +1,12 @@
 // frontend/components/nudges/ActionDeck.tsx
-// --- UPDATED: Now imports types from AppContext and removes local definitions.
+// --- UPDATED: Added defensive checks for 'matched_audience' to prevent crashes with older data.
 
 'use client';
 
 import { useState, useEffect, useMemo, FC, ReactNode } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CampaignBriefing, Client, MatchedClient } from '@/context/AppContext'; // <-- MODIFIED: Import types
+import { CampaignBriefing, Client, MatchedClient } from '@/context/AppContext';
 import { ManageAudienceModal } from '@/components/modals/ManageAudienceModal';
 
 // --- ICONS ---
@@ -14,9 +14,6 @@ import {
     User as UserIcon, Sparkles, Send, X, Users, Home, TrendingUp, RotateCcw,
     TimerOff, CalendarPlus, Archive, Edit, DollarSign, Target, Check, ChevronsRight, BedDouble, Bath
 } from 'lucide-react';
-
-// --- TYPE DEFINITIONS ---
-// REMOVED: Local MatchedClient interface is no longer needed.
 
 // --- DESIGN SYSTEM (Unchanged) ---
 const NUDGE_TYPE_CONFIG: Record<string, { icon: ReactNode; color: string; title: string; }> = {
@@ -92,6 +89,9 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
     const [draft, setDraft] = useState(briefing.edited_draft || briefing.original_draft || '');
     const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
 
+    // --- MODIFIED: Use optional chaining and nullish coalescing for safety ---
+    const matchedAudience = useMemo(() => briefing.matched_audience ?? [], [briefing.matched_audience]);
+
     useEffect(() => { setDraft(briefing.edited_draft || briefing.original_draft || ''); }, [briefing.id, briefing.original_draft, briefing.edited_draft]);
 
     const imageUrl = briefing.listing_url || null;
@@ -103,7 +103,6 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
 
     const handleDraftChange = (newDraft: string) => { setDraft(newDraft); onBriefingUpdate({ ...briefing, edited_draft: newDraft }); };
     
-    // --- MODIFIED: Uses the correct MatchedClient type from context ---
     const handleSaveAudience = async (newAudience: Client[]) => {
         const updatedMatchedAudience: MatchedClient[] = newAudience.map(c => ({ client_id: c.id, client_name: c.full_name, match_score: 0, match_reasons: ['Manually Added'] }));
         onBriefingUpdate({ ...briefing, matched_audience: updatedMatchedAudience });
@@ -111,17 +110,19 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
 
     return (
         <>
-            <ManageAudienceModal isOpen={isAudienceModalOpen} onClose={() => setIsAudienceModalOpen(false)} onSave={handleSaveAudience} initialSelectedClientIds={new Set(briefing.matched_audience.map(c => c.client_id))} />
+            {/* --- FIX 1: Add fallback for initialSelectedClientIds --- */}
+            <ManageAudienceModal isOpen={isAudienceModalOpen} onClose={() => setIsAudienceModalOpen(false)} onSave={handleSaveAudience} initialSelectedClientIds={new Set(matchedAudience.map(c => c.client_id))} />
             <div className="absolute w-full h-full bg-brand-primary border border-white/10 rounded-xl overflow-hidden flex flex-col shadow-2xl">
-                {/* Header and Intel sections are unchanged */}
                 <div className="flex-shrink-0 p-4 bg-black/30 border-b border-white/10 flex items-center justify-between"><div className="flex items-center gap-3"><span className={config.color}>{config.icon}</span><h3 className="font-bold text-lg text-brand-text-main">{briefing.headline}</h3></div></div>
                 <div className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-x-6 overflow-y-auto">
                     <div className="p-5 space-y-5 border-r border-white/5">{imageUrl && (<div className="relative w-full h-48 rounded-lg overflow-hidden"><Image src={imageUrl} alt={`Property at ${briefing.headline}`} layout="fill" objectFit="cover" className="bg-white/5"/></div>)}<div className="space-y-1"><h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><Target size={16}/>Strategic Summary</h4><p className="text-brand-text-main text-base">This is a key market event relevant to your clients.</p></div><div className="space-y-4 pt-2"><h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><ChevronsRight size={16}/>Key Intel</h4><div className="grid grid-cols-2 gap-4">{price && <IntelStat icon={<DollarSign size={20}/>} label="Price" value={price} />}{beds && <IntelStat icon={<BedDouble size={20}/>} label="Beds" value={beds} />}{baths && <IntelStat icon={<Bath size={20}/>} label="Baths" value={baths} />}{sqft && <IntelStat label="SqFt" value={sqft} />}</div></div></div>
                     <div className="p-5 space-y-5 flex flex-col">
                         <div>
-                            <button onClick={() => setIsAudienceModalOpen(true)} className="w-full flex items-center justify-center gap-2 p-2 text-sm font-semibold text-brand-text-muted bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 hover:text-brand-text-main transition-colors mb-4"><Users size={16}/>Manage Audience ({briefing.matched_audience.length})</button>
+                            {/* --- FIX 2: Add fallback for audience count --- */}
+                            <button onClick={() => setIsAudienceModalOpen(true)} className="w-full flex items-center justify-center gap-2 p-2 text-sm font-semibold text-brand-text-muted bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 hover:text-brand-text-main transition-colors mb-4"><Users size={16}/>Manage Audience ({matchedAudience.length})</button>
                             <div className="space-y-3 max-h-48 overflow-y-auto pr-2">
-                                {briefing.matched_audience.map((client, index) => (
+                                {/* --- FIX 3: Add fallback for the main audience map --- */}
+                                {matchedAudience.map((client, index) => (
                                     <div key={client.client_id} className="p-3 bg-white/[.03] border border-white/5 rounded-lg">
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-3">
@@ -132,7 +133,6 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
                                                 </div>
                                             </div>
                                         </div>
-                                        {/* This now correctly maps over the array of reasons */}
                                         <div className="flex flex-wrap items-center gap-2 mt-2 pl-[60px]">
                                             {client.match_reasons.map(reason => <MatchReasonTag key={reason} reason={reason} />)}
                                         </div>
@@ -143,14 +143,13 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
                         <div className="flex-grow flex flex-col mt-4"><h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2 mb-2"><Edit size={16}/>Draft Message</h4><textarea value={draft} onChange={(e) => handleDraftChange(e.target.value)} className="w-full flex-grow bg-brand-dark border border-white/10 rounded-md focus:ring-2 focus:ring-primary-action text-brand-text-main text-base p-3 resize-none"/></div>
                     </div>
                 </div>
-                {/* Footer is unchanged */}
-                <div className="flex-shrink-0 p-3 bg-black/30 border-t border-white/10 grid grid-cols-2 gap-3"><button onClick={() => onAction(briefing, 'dismiss')} className="p-3 bg-white/5 border border-white/10 text-brand-text-main rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-white/10 hover:border-white/20 transition-all duration-200"><X size={18} /> Dismiss Nudge</button><button onClick={() => onAction(briefing, 'send')} className="p-3 text-brand-dark rounded-lg font-bold flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(32,213,179,0.4)] hover:scale-[1.03] transition-all duration-200" style={{ backgroundColor: BRAND_ACCENT_COLOR }}><Send size={18} /> Send to {briefing.matched_audience.length} Client(s)</button></div>
+                {/* --- FIX 4: Add fallback for button text --- */}
+                <div className="flex-shrink-0 p-3 bg-black/30 border-t border-white/10 grid grid-cols-2 gap-3"><button onClick={() => onAction(briefing, 'dismiss')} className="p-3 bg-white/5 border border-white/10 text-brand-text-main rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-white/10 hover:border-white/20 transition-all duration-200"><X size={18} /> Dismiss Nudge</button><button onClick={() => onAction(briefing, 'send')} className="p-3 text-brand-dark rounded-lg font-bold flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(32,213,179,0.4)] hover:scale-[1.03] transition-all duration-200" style={{ backgroundColor: BRAND_ACCENT_COLOR }}><Send size={18} /> Send to {matchedAudience.length} Client(s)</button></div>
             </div>
         </>
     );
 };
 
-// Main ActionDeck component export is unchanged
 interface ActionDeckProps { 
     briefings: CampaignBriefing[]; 
     onClose: () => void; 

@@ -1,5 +1,5 @@
 # File Path: backend/api/rest/campaigns.py
-# --- FINAL, COMPLETE VERSION ---
+# --- FINAL FIX: Changed the response_model to return the full CampaignBriefing object.
 
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body, Query
@@ -166,7 +166,8 @@ async def update_campaign_briefing(campaign_id: UUID, update_data: CampaignUpdat
         raise HTTPException(status_code=500, detail=f"Failed to update campaign: {str(e)}")
 
 
-@router.get("", response_model=List[RecommendationSlateResponse])
+# --- MODIFIED: Changed response_model to List[CampaignBriefing] to include full data. ---
+@router.get("", response_model=List[CampaignBriefing])
 async def get_all_campaigns(
     current_user: User = Depends(get_current_user_from_token)
 ):

@@ -1,4 +1,6 @@
 # backend/common/config.py
+# --- UPDATED: Added LLM_PROVIDER setting.
+
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import Optional
@@ -8,6 +10,9 @@ class Settings(BaseSettings):
     Manages application settings loaded from the .env file.
     Provides type validation for all settings.
     """
+    # --- NEW: Setting to choose the AI provider ---
+    LLM_PROVIDER: str = "openai" # Default to 'openai', can be switched to 'gemini'
+
     # OpenAI
     OPENAI_API_KEY: str
 
@@ -33,7 +38,7 @@ class Settings(BaseSettings):
     FRONTEND_APP_URL: str = "http://localhost:3000"
     SECRET_KEY: str
 
-    # FAQ Auto-Reply - Simplified for JSON blob approach
+    # FAQ Auto-Reply
     FAQ_AUTO_REPLY_ENABLED: bool = True
 
     # MLS Providers

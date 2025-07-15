@@ -35,14 +35,30 @@ export const ClientIntelCard = ({ client, onUpdate, onReplan }: ClientIntelCardP
     const handleSave = async () => {
         setIsSaving(true);
         try {
-            const payload = {
-                notes: notes,
-                timezone: timezone || null 
-            };
-            const updatedClient = await api.put(`/api/clients/${client.id}`, payload);
-            onUpdate(updatedClient);
+            // --- MODIFIED: Build the payload dynamically ---
+            // This is a more robust pattern that only sends changed data,
+            // which can prevent issues with how the backend processes null/empty values.
+            const payload: { notes?: string; timezone?: string | null } = {};
+    
+            if (notes !== (client.notes || '')) {
+                payload.notes = notes;
+            }
+            if (timezone !== (client.timezone || '')) {
+                payload.timezone = timezone || null;
+            }
+    
+            // Only make an API call if there's actually something to save.
+            if (Object.keys(payload).length > 0) {
+                const updatedClient = await api.put(`/api/clients/${client.id}`, payload);
+                onUpdate(updatedClient);
+            }
+            
             setIsEditing(false);
-            setShowReplanPrompt(true);
+            // We only show the replan prompt if notes actually changed.
+            if (payload.notes !== undefined) {
+                setShowReplanPrompt(true);
+            }
+    
         } catch(err) {
             console.error("Failed to save client intel:", err);
             alert("Failed to save intel.");

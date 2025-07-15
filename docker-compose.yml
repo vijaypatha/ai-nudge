@@ -27,6 +27,8 @@ services:
     image: redis:7-alpine
     networks:
       - ai_nudge_net
+    ports:
+      - "6379:6379"
 
   # Backend API Service (FastAPI)
   backend:

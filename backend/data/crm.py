@@ -9,8 +9,6 @@ from sqlalchemy.orm import selectinload
 from .database import engine
 import logging
 
-# --- NEW: Import asyncio for bridging sync/async and our new llm_client ---
-import asyncio
 from agent_core import llm_client
 
 from agent_core.deduplication.deduplication_engine import find_strong_duplicate
@@ -149,24 +147,21 @@ def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uuid.UUID
 
 # --- MODIFIED: Now generates an embedding when notes are updated. ---
 # Replace this function in backend/data/crm.py
-def update_client_notes(client_id: UUID, notes: str, user_id: UUID) -> Optional[Client]:
+async def update_client_notes(client_id: UUID, notes: str, user_id: UUID) -> Optional[Client]:
     """
-    Overwrites the entire 'notes' field for a specific client and generates a new
-    semantic embedding for the notes content.
+    Overwrites the 'notes' field and generates a new semantic embedding.
+    NOW ASYNCHRONOUS to support embedding calls.
     """
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if client:
             client.notes = notes
             
-            # --- NEW: Semantic Embedding Generation ---
             if notes and notes.strip():
-                # Call the async embedding function from our sync context
                 logging.info(f"CRM: Generating new notes embedding for client {client.id}...")
-                embedding = asyncio.run(llm_client.generate_embedding(notes))
+                embedding = await llm_client.generate_embedding(notes) # <-- Use await
                 client.notes_embedding = embedding
             else:
-                # If notes are cleared, clear the embedding as well
                 client.notes_embedding = None
             
             session.add(client)
@@ -176,15 +171,15 @@ def update_client_notes(client_id: UUID, notes: str, user_id: UUID) -> Optional[
             return client
         return None
 
-def update_client_intel(
+async def update_client_intel(
     client_id: UUID, 
     user_id: UUID,
     tags_to_add: Optional[List[str]] = None, 
     notes_to_add: Optional[str] = None
 ) -> Optional[Client]:
     """
-    Updates a client with new tags and/or appends notes, then regenerates the
-    semantic embedding for the updated notes.
+    Appends notes and/or tags, then regenerates the semantic embedding.
+    NOW ASYNCHRONOUS to support embedding calls.
     """
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
@@ -197,7 +192,6 @@ def update_client_intel(
             existing_tags = set(client.user_tags or [])
             new_tags = set(tags_to_add)
             client.user_tags = sorted(list(existing_tags.union(new_tags)))
-            logging.info(f"CRM: Updating tags for client {client.id}: {client.user_tags}")
 
         if notes_to_add:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -207,12 +201,10 @@ def update_client_intel(
             else:
                 client.notes = new_note_entry
             notes_were_updated = True
-            logging.info(f"CRM: Appending notes for client {client.id}")
 
-        # --- NEW: Semantic Embedding Generation ---
         if notes_were_updated and client.notes and client.notes.strip():
             logging.info(f"CRM: Regenerating notes embedding for client {client.id} after intel update...")
-            embedding = asyncio.run(llm_client.generate_embedding(client.notes))
+            embedding = await llm_client.generate_embedding(client.notes) # <-- Use await
             client.notes_embedding = embedding
         
         session.add(client)
@@ -221,10 +213,10 @@ def update_client_intel(
         return client
 
 # --- MODIFIED: Now generates an embedding if notes are changed. ---
-def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUID) -> Optional[Client]:
+async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUID) -> Optional[Client]:
     """
-    Updates a client record with the provided data in a generic way.
-    If 'notes' are part of the update, it regenerates the semantic embedding.
+    Generically updates a client record. Regenerates embedding if notes change.
+    NOW ASYNCHRONOUS to support embedding calls.
     """
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
@@ -237,12 +229,11 @@ def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUID) -> 
         for key, value in update_dict.items():
             setattr(client, key, value)
         
-        # --- NEW: Semantic Embedding Generation ---
         if notes_updated:
             notes_content = update_dict.get('notes')
             if notes_content and notes_content.strip():
                 logging.info(f"CRM: Regenerating notes embedding for client {client.id} via generic update...")
-                embedding = asyncio.run(llm_client.generate_embedding(notes_content))
+                embedding = await llm_client.generate_embedding(notes_content) # <-- Use await
                 client.notes_embedding = embedding
             else:
                 client.notes_embedding = None
@@ -257,6 +248,20 @@ def add_client_tags(client_id: uuid.UUID, tags_to_add: List[str], user_id: uuid.
     """This function now calls the main intel updater for consistency."""
     return update_client_intel(client_id=client_id, user_id=user_id, tags_to_add=tags_to_add)
 
+async def regenerate_embedding_for_client(client: Client, session: Session):
+    """
+    Generates and saves an embedding for a client based on their current notes.
+    This is a helper designed for seeding or backfilling operations.
+    """
+    if client.notes and client.notes.strip():
+        logging.info(f"CRM (SEED): Generating embedding for client {client.id} - {client.full_name}")
+        embedding = await llm_client.generate_embedding(client.notes)
+        client.notes_embedding = embedding
+        session.add(client)
+    else:
+        logging.info(f"CRM (SEED): Skipping embedding for client {client.id} - no notes.")
+        client.notes_embedding = None
+        session.add(client)
 
 # --- Resource Functions ---
 
