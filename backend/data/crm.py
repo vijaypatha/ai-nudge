@@ -870,3 +870,35 @@ def update_client_tags_and_notes(
     except Exception as e:
         logging.error(f"CRM: Error updating client {client_id}: {e}", exc_info=True)
         return False
+    
+def get_resource_by_entity_id(entity_id: str, session: Session) -> Optional[Resource]:
+    """
+    Finds a resource by its external entity ID from the data provider.
+    This is crucial for preventing duplicate resource creation.
+    """
+    statement = select(Resource).where(Resource.entity_id == entity_id)
+    return session.exec(statement).first()
+
+
+def does_nudge_exist_for_client_and_resource(client_id: uuid.UUID, resource_id: uuid.UUID, session: Session, event_type: str) -> bool:
+    """
+    Checks if a nudge (CampaignBriefing) of a specific type already exists
+    for a given client and triggering resource.
+    This is crucial for preventing duplicate nudge notifications.
+    """
+    # This query is a bit more complex as it needs to check the JSON field.
+    # Note: This approach is functional but may not be the most performant on very large datasets.
+    # A more optimized solution might involve a dedicated join table between clients and campaigns.
+    
+    statement = select(CampaignBriefing).where(
+        CampaignBriefing.triggering_resource_id == resource_id,
+        CampaignBriefing.campaign_type == event_type
+    )
+    
+    briefings = session.exec(statement).all()
+    
+    for briefing in briefings:
+        for audience_member in briefing.matched_audience:
+            if audience_member.get("client_id") == str(client_id):
+                return True
+    return False

@@ -1,5 +1,5 @@
 # File Path: backend/api/rest/campaigns.py
-# --- FINAL FIX: Changed the response_model to return the full CampaignBriefing object.
+# --- FINAL FIX v2: Corrected the CRM function call to fetch nudges.
 
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body, Query
@@ -8,13 +8,12 @@ from uuid import UUID
 import uuid
 from pydantic import BaseModel
 from sqlmodel import Session
-from datetime import datetime, timedelta, timezone
 
 from data.models.user import User
 from api.security import get_current_user_from_token
 from data.models.message import SendMessageImmediate
 from data.models.campaign import CampaignBriefing, CampaignUpdate, RecommendationSlateResponse, CampaignStatus
-from agent_core import orchestrator
+from agent_core.brain.verticals import VERTICAL_CONFIGS
 from agent_core.agents import conversation as conversation_agent
 from data import crm as crm_service
 from workflow import outbound as outbound_workflow
@@ -28,6 +27,10 @@ router = APIRouter(
 
 # --- Pydantic Models for Payloads & Responses ---
 
+class AgnosticNudgesResponse(BaseModel):
+    nudges: List[CampaignBriefing]
+    display_config: Dict[str, Any]
+
 class PlanRelationshipPayload(BaseModel):
     client_id: UUID
 
@@ -38,19 +41,42 @@ class DraftResponse(BaseModel):
     draft: str
 
 class CoPilotActionPayload(BaseModel):
-    action_type: str # e.g., "UPDATE_PLAN" or "END_PLAN"
-
+    action_type: str
 
 # --- API Endpoints ---
+
+@router.get("", response_model=AgnosticNudgesResponse)
+async def get_all_campaigns(
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Fetches all campaign briefings in DRAFT status for the current user,
+    wrapped in an agnostic response model that includes UI display configuration.
+    """
+    try:
+        # --- FIX: Reverted to the original, correct function call ---
+        briefings = crm_service.get_new_campaign_briefings_for_user(user_id=current_user.id)
+        
+        vertical_config = VERTICAL_CONFIGS.get(current_user.vertical, {})
+        campaign_configs = vertical_config.get("campaign_configs", {})
+        
+        display_config = {
+            campaign_type: config.get("display", {})
+            for campaign_type, config in campaign_configs.items()
+        }
+        
+        return AgnosticNudgesResponse(nudges=briefings, display_config=display_config)
+
+    except Exception as e:
+        logging.error(f"Error fetching campaigns for user {current_user.id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching campaigns.")
+
 
 @router.post("/draft-instant-nudge", response_model=DraftResponse)
 async def draft_instant_nudge_endpoint(
     payload: DraftInstantNudgePayload,
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """
-    Generates a message draft for the 'Instant Nudge' feature based on a topic.
-    """
     if not payload.topic or not payload.topic.strip():
         raise HTTPException(status_code=400, detail="Topic cannot be empty.")
     try:
@@ -70,9 +96,6 @@ async def handle_campaign_action(
     payload: CoPilotActionPayload,
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """
-    Handles a user action from a Co-Pilot Suggestion card (e.g., Update Plan, End Plan).
-    """
     try:
         result = await campaign_workflow.handle_copilot_action(
             briefing_id=briefing_id,
@@ -92,10 +115,6 @@ async def approve_campaign_plan(
     campaign_id: UUID,
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """
-    Approves a campaign plan and schedules its pre-computed messages.
-    This is the definitive 'approve' endpoint.
-    """
     try:
         updated_plan = await campaign_workflow.approve_and_schedule_precomputed_plan(
             plan_id=campaign_id,
@@ -114,9 +133,6 @@ async def complete_briefing(
     briefing_id: uuid.UUID,
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """
-    Marks a campaign briefing (or recommendation slate) as 'completed'.
-    """
     with Session(crm_service.engine) as session:
         updated_slate = crm_service.update_slate_status(
             slate_id=briefing_id,
@@ -144,6 +160,7 @@ async def plan_relationship_campaign_endpoint(payload: PlanRelationshipPayload, 
 
 @router.post("/messages/send-now", status_code=200)
 async def send_message_now(message_data: SendMessageImmediate, current_user: User = Depends(get_current_user_from_token)):
+    from agent_core import orchestrator
     success = await orchestrator.orchestrate_send_message_now(
         client_id=message_data.client_id,
         content=message_data.content,
@@ -164,21 +181,6 @@ async def update_campaign_briefing(campaign_id: UUID, update_data: CampaignUpdat
         return updated_briefing
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update campaign: {str(e)}")
-
-
-# --- MODIFIED: Changed response_model to List[CampaignBriefing] to include full data. ---
-@router.get("", response_model=List[CampaignBriefing])
-async def get_all_campaigns(
-    current_user: User = Depends(get_current_user_from_token)
-):
-    """
-    Fetches all campaign briefings in DRAFT status for the current user.
-    """
-    try:
-        return crm_service.get_new_campaign_briefings_for_user(user_id=current_user.id)
-    except Exception as e:
-        logging.error(f"Error fetching campaigns for user {current_user.id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching campaigns.")
 
 
 @router.get("/{campaign_id}", response_model=CampaignBriefing)

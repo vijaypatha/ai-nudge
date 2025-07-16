@@ -14,6 +14,8 @@ class Resource(SQLModel, table=True):
     """
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id", index=True)
+    entity_id: Optional[str] = Field(default=None, index=True)
+
     
     # The type of resource, e.g., "property", "vehicle", "venue".
     resource_type: str = Field(index=True)

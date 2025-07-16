@@ -1,14 +1,20 @@
 // frontend/components/conversation/RelationshipCampaignCard.tsx
-// --- DEFINITIVE, COMPLETE VERSION ---
+// --- AGNOSTIC VERSION ---
+// This component now receives displayConfig to render its title dynamically.
 
 'use client';
 
-import { useState } from 'react';
+import { useState, ReactNode } from 'react';
 import { Zap, Sparkles, Calendar, Edit2, Loader2, Check, X, PauseCircle, BrainCircuit, ArrowRight } from 'lucide-react';
 import { ScheduledMessage, CampaignBriefing } from '@/context/AppContext';
 import { InfoCard } from '../ui/InfoCard';
 import { EditMessageModal } from './EditMessageModal';
-import clsx from 'clsx';
+import { ConversationDisplayConfig } from '@/app/(main)/conversations/[clientId]/page';
+
+const ICONS: Record<string, ReactNode> = {
+    BrainCircuit: <BrainCircuit className="h-4 w-4 text-gray-400" />,
+    Default: <BrainCircuit className="h-4 w-4 text-gray-400" />,
+};
 
 interface RelationshipCampaignCardProps {
   plan: CampaignBriefing | null;
@@ -18,25 +24,26 @@ interface RelationshipCampaignCardProps {
   isProcessing: boolean;
   isSuccess: boolean;
   onViewScheduled: () => void;
+  displayConfig: ConversationDisplayConfig | null; // Expect the config
 }
 
-const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-};
-
-export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDismissPlan, isProcessing, isSuccess, onViewScheduled }: RelationshipCampaignCardProps) => {
+export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDismissPlan, isProcessing, isSuccess, onViewScheduled, displayConfig }: RelationshipCampaignCardProps) => {
   const [editingMessage, setEditingMessage] = useState<ScheduledMessage | null>(null);
+
+  // --- DYNAMIC CONFIGURATION ---
+  const config = displayConfig?.relationship_campaign || { title: 'Relationship Campaign', icon: 'Default' };
+  const defaultIcon = ICONS[config.icon] || ICONS.Default;
 
   const statusIcons: { [key: string]: JSX.Element } = {
     DRAFT: <Sparkles className="h-4 w-4 text-purple-400" />,
     ACTIVE: <Zap className="h-4 w-4 text-green-400" />,
     PAUSED: <PauseCircle className="h-4 w-4 text-yellow-400" />,
   };
-  const statusIcon = plan ? statusIcons[plan.status.toUpperCase()] || <BrainCircuit className="h-4 w-4 text-gray-400" /> : <BrainCircuit className="h-4 w-4 text-gray-400" />;
+  const statusIcon = plan ? statusIcons[plan.status.toUpperCase()] || defaultIcon : defaultIcon;
 
   if (!isSuccess && (!plan || !plan.is_plan || plan.status.toUpperCase() !== 'DRAFT')) {
     return (
-        <InfoCard title="Relationship Campaign" icon={<BrainCircuit className="h-4 w-4 text-gray-400" />}>
+        <InfoCard title={config.title} icon={defaultIcon}>
              <div className="text-center py-4">
                 <p className="text-sm text-gray-400">No new plan suggested.</p>
              </div>
@@ -54,7 +61,7 @@ export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDism
         />
       )}
       
-      <InfoCard title="Relationship Campaign" icon={statusIcon}>
+      <InfoCard title={config.title} icon={statusIcon}>
         {isSuccess && (
             <div className="p-3 -m-2 rounded-lg bg-green-600/10 text-center animate-fade-in">
                 <div className="flex items-center justify-center gap-2 font-semibold text-green-300">

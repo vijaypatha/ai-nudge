@@ -1,14 +1,18 @@
 # FILE: backend/data/seed.py
-# --- MODIFIED: Adds a "Prospective Seller" client ---
+# --- VERSION 3.0 ---
+# This version enriches client data with more context, keywords, and specific
+# phone numbers to enable real-world testing and more nuanced AI matching.
 
 import logging
 from sqlalchemy.orm import Session
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 from .database import engine
 from .models.user import User, UserType
 from .models.client import Client
 from .models.resource import Resource
+from .models.campaign import CampaignBriefing
 from .models.faq import Faq
 from common.config import get_settings
 from . import crm as crm_service
@@ -20,14 +24,21 @@ logger = logging.getLogger(__name__)
 
 async def seed_database():
     """
-    Main function to seed both Realtor and Therapist data.
+    Main function to seed both Realtor and Therapist data with diverse clients.
     """
     logger.info("--- Starting database seeding process ---")
     
     with Session(engine) as session:
-        if session.query(User).first():
-            logger.info("Database already contains data. Skipping seed process.")
-            return
+        # Clear existing data for a clean seed
+        logger.info("Clearing existing data...")
+        session.query(CampaignBriefing).delete()
+        session.query(Faq).delete()
+        session.query(Client).delete()
+        session.query(Resource).delete()
+        session.query(User).delete()
+        session.commit()
+        
+        logger.info("Previous data cleared. Seeding new data...")
 
         # --- Step 1: Create Users for Each Vertical ---
         realtor_user = User(
@@ -35,8 +46,8 @@ async def seed_database():
             full_name="Jane Doe",
             email="jane.doe@realty.com",
             phone_number="+15558675309",
-            twilio_phone_number="+14352721987",
-            market_focus=["Sunnyvale", "Mountain View", "Santa Clara"],
+            twilio_phone_number="+14352721987", # As requested
+            market_focus=["St. George", "Washington", "Hurricane", "Santa Clara"],
             tool_provider=settings.MLS_PROVIDER,
             vertical="real_estate"
         )
@@ -61,88 +72,63 @@ async def seed_database():
 
         # --- Step 2: Create Vertical-Specific Resources ---
         session.add(Resource(
-            user_id=realtor_user.id,
-            resource_type="property",
-            status="active",
-            attributes={
-                "address": "123 Maple St, Sunnyvale, CA", "price": 1100000.0,
-                "property_type": "Single Family", "bedrooms": 4, "bathrooms": 3,
-                "PublicRemarks": "An entertainer's dream! This spacious home features an open floor plan."
-            }
-        ))
-        session.add(Resource(
-            user_id=therapist_user.id,
-            resource_type="session",
-            status="active",
-            attributes={
-                "title": "Cognitive Behavioral Therapy for Anxiety",
-                "description": "Individual CBT session focused on anxiety management.",
-                "duration": 60, "specialty": "Anxiety Treatment"
-            }
+            user_id=realtor_user.id, resource_type="property", status="active",
+            attributes={"address": "456 Oak Ave, St. George, UT", "price": 550000.0}
         ))
         
-        # --- Step 3: Create Clients for Each User ---
+        # --- Step 3: Create A DIVERSE set of Clients ---
+        
+        # -- REAL ESTATE CLIENTS --
         buyer_client = Client(
-            user_id=realtor_user.id, 
-            full_name="Alex Chen (Buyer Client)",
-            email="alex.chen@example.com", 
-            phone="+14155551234",
-            notes="Looking for a high ROI property. Interested in Sunnyvale starter homes, maybe a fixer-upper. Wants something with good bones and a large yard for a dog.",
-            preferences={
-                "budget_max": 2500000,
-                "min_bedrooms": 3,
-                "locations": ["Sunnyvale", "Santa Clara", "Mountain View"]
-            }
+            user_id=realtor_user.id, full_name="Alex Chen (Buyer)",
+            notes="Looking for a starter home, maybe a fixer-upper. Wants a large yard for a dog. Mentioned needing good schools and a quiet street. Prefers single-story homes.",
+            preferences={"budget_max": 1200000, "min_bedrooms": 3, "locations": ["St. George", "Washington"], "keywords": ["yard", "fixer", "single-story", "quiet street"]}
         )
-        session.add(buyer_client)
-
-        # --- NEW: Add a Seller Client to see different nudge types ---
         seller_client = Client(
-            user_id=realtor_user.id,
-            full_name="Brenda Miller (Prospective Seller)",
-            email="brenda.miller@example.com",
-            phone="+14155551236",
-            notes="Homeowner in Santa Clara, considering selling in the next 6-12 months. Curious about what her home is worth and recent sales activity in her neighborhood.",
-            user_tags=["homeowner", "prospective-seller"],
-            preferences={
-                "locations": ["Santa Clara"] # Used to find nearby "Just Sold" events
-            }
+            user_id=realtor_user.id, full_name="Brenda Miller (Seller)",
+            phone="+13856268825", # As requested for testing
+            notes="Homeowner in the 'Tonaquint' area of St. George. Thinking about downsizing in the next 6-12 months. Very interested in what homes like hers are selling for.",
+            user_tags=["prospective-seller", "homeowner", "downsizing"],
+            preferences={"locations": ["Tonaquint", "St. George", "Hurricane"]}
         )
-        session.add(seller_client)
-        # --- END OF NEW CODE ---
+        investor_client = Client(
+            user_id=realtor_user.id, full_name="Carlos Rodriguez (Investor)",
+            notes="Real estate investor looking for multi-family properties or homes with rental potential (e.g., casitas or basement apartments). Focused on cash flow and ROI, not primary residence features.",
+            user_tags=["investor", "1031-exchange"],
+            preferences={"locations": ["St. George", "Hurricane"], "keywords": ["duplex", "triplex", "investment", "cash flow", "tenant", "rental", "investor"]}
+        )
+        luxury_client = Client(
+            user_id=realtor_user.id, full_name="Diana Prince (Luxury Client)",
+            notes="Looking to sell her luxury condo in 'Entrada' and purchase a larger estate with a view, possibly in 'The Ledges' or 'Stone Cliff'. High-end finishes and privacy are key.",
+            user_tags=["luxury-client", "prospective-seller", "buyer"],
+            preferences={"budget_max": 7000000, "min_bedrooms": 4, "locations": ["The Ledges", "Stone Cliff", "Entrada"], "keywords": ["view", "luxury", "gated", "privacy", "custom", "pool"]}
+        )
 
-        therapy_client = Client(
-            user_id=therapist_user.id, 
-            full_name="Jennifer Martinez (Therapy Client)",
-            email="jennifer.martinez@example.com", 
-            phone="+14155551235",
+        # -- THERAPY CLIENTS --
+        standard_therapy_client = Client(
+            user_id=therapist_user.id, full_name="Jennifer Martinez",
             notes="Experiencing generalized anxiety and looking for coping mechanisms.",
-            preferences={}
+            last_interaction=datetime.now(timezone.utc).isoformat()
         )
-        session.add(therapy_client)
         
+        realty_clients = [buyer_client, seller_client, investor_client, luxury_client]
+        therapy_clients = [standard_therapy_client]
+        
+        session.add_all(realty_clients)
+        session.add_all(therapy_clients)
         session.commit()
-        session.refresh(buyer_client)
-        session.refresh(seller_client)
-        session.refresh(therapy_client)
 
-        # --- Step 4: Create FAQs for Each Vertical ---
-        session.add(Faq(
-            user_id=realtor_user.id,
-            question="What's the current market like in Sunnyvale?",
-            answer="The current market is competitive with low inventory and high demand."
-        ))
-        session.add(Faq(
-            user_id=therapist_user.id,
-            question="How often should I have therapy sessions?",
-            answer="For most clients, weekly sessions are recommended initially."
-        ))
+        for client in realty_clients + therapy_clients:
+            session.refresh(client)
+        
+        # --- Step 4: Create FAQs ---
+        session.add(Faq(user_id=realtor_user.id, question="What's the market like?", answer="Competitive."))
+        session.add(Faq(user_id=therapist_user.id, question="How often are sessions?", answer="Weekly is typical."))
 
-        # --- Step 5: Regenerate embeddings for all seeded clients ---
-        logger.info("Generating initial embeddings for seeded clients...")
-        await crm_service.regenerate_embedding_for_client(buyer_client, session=session)
-        await crm_service.regenerate_embedding_for_client(seller_client, session=session) # Added seller client
-        await crm_service.regenerate_embedding_for_client(therapy_client, session=session)
+        # --- Step 5: Regenerate embeddings for all new clients ---
+        logger.info("Generating initial embeddings for all seeded clients...")
+        for client in realty_clients + therapy_clients:
+            await crm_service.regenerate_embedding_for_client(client, session=session)
         logger.info("Embeddings generated.")
 
         session.commit()

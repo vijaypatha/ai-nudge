@@ -1,27 +1,39 @@
 // frontend/components/conversation/ClientIntelCard.tsx
-// --- DEFINITIVE, COMPLETE VERSION ---
+// --- AGNOSTIC VERSION ---
+// This component now receives displayConfig to render its title dynamically.
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, ReactNode } from 'react';
 import { Info, Sparkles, Edit, Save, Loader2 } from 'lucide-react';
 import { useAppContext, Client } from '@/context/AppContext';
 import { InfoCard } from '../ui/InfoCard';
 import { TimezoneSelector } from '../ui/TimezoneSelector';
+import { ConversationDisplayConfig } from '@/app/(main)/conversations/[clientId]/page';
+
+const ICONS: Record<string, ReactNode> = {
+    Info: <Info size={14} />,
+    Default: <Info size={14} />,
+};
 
 interface ClientIntelCardProps {
     client: Client | undefined;
     onUpdate: (updatedClient: Client) => void;
     onReplan: () => void;
+    displayConfig: ConversationDisplayConfig | null; // Expect the config
 }
 
-export const ClientIntelCard = ({ client, onUpdate, onReplan }: ClientIntelCardProps) => {
+export const ClientIntelCard = ({ client, onUpdate, onReplan, displayConfig }: ClientIntelCardProps) => {
     const { api } = useAppContext();
     const [isEditing, setIsEditing] = useState(false);
     const [notes, setNotes] = useState('');
     const [timezone, setTimezone] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [showReplanPrompt, setShowReplanPrompt] = useState(false);
+
+    // --- DYNAMIC CONFIGURATION ---
+    const config = displayConfig?.client_intel || { title: 'Client Intel', icon: 'Default' };
+    const icon = ICONS[config.icon] || ICONS.Default;
 
     useEffect(() => {
         if (client) {
@@ -35,30 +47,16 @@ export const ClientIntelCard = ({ client, onUpdate, onReplan }: ClientIntelCardP
     const handleSave = async () => {
         setIsSaving(true);
         try {
-            // --- MODIFIED: Build the payload dynamically ---
-            // This is a more robust pattern that only sends changed data,
-            // which can prevent issues with how the backend processes null/empty values.
             const payload: { notes?: string; timezone?: string | null } = {};
-    
-            if (notes !== (client.notes || '')) {
-                payload.notes = notes;
-            }
-            if (timezone !== (client.timezone || '')) {
-                payload.timezone = timezone || null;
-            }
-    
-            // Only make an API call if there's actually something to save.
+            if (notes !== (client.notes || '')) payload.notes = notes;
+            if (timezone !== (client.timezone || '')) payload.timezone = timezone || null;
+            
             if (Object.keys(payload).length > 0) {
                 const updatedClient = await api.put(`/api/clients/${client.id}`, payload);
                 onUpdate(updatedClient);
             }
-            
             setIsEditing(false);
-            // We only show the replan prompt if notes actually changed.
-            if (payload.notes !== undefined) {
-                setShowReplanPrompt(true);
-            }
-    
+            if (payload.notes !== undefined) setShowReplanPrompt(true);
         } catch(err) {
             console.error("Failed to save client intel:", err);
             alert("Failed to save intel.");
@@ -89,7 +87,7 @@ export const ClientIntelCard = ({ client, onUpdate, onReplan }: ClientIntelCardP
     const hasVisibleNotes = renderedNotesContent && renderedNotesContent.some(item => item);
 
     return (
-        <InfoCard title="Client Intel" icon={<Info size={14}/>} onEdit={!isEditing ? () => setIsEditing(true) : undefined}>
+        <InfoCard title={config.title} icon={icon} onEdit={!isEditing ? () => setIsEditing(true) : undefined}>
             <div className="pt-2">
                 {isEditing ? (
                     <div className="space-y-4">
