@@ -15,7 +15,7 @@ from sqlmodel import Session, select
 from data import crm as crm_service
 from integrations import twilio_otp as twilio
 from api.security import settings, get_current_user_from_token
-from data.models.user import User, UserUpdate # Import UserUpdate
+from data.models.user import User, UserUpdate, UserType # Import UserUpdate
 from data.models.client import ClientCreate
 from integrations.oauth.google import GoogleContacts
 
@@ -171,16 +171,20 @@ async def google_callback(
 # --- Developer-Only Login Endpoint ---
 
 if os.getenv("ENVIRONMENT") == "development":
-    @router.post("/dev-login")
-    async def developer_login(payload: DevLoginPayload):
+    @router.post("/dev-login") # Changed from GET to POST for consistency
+    async def developer_login():
         """
-        [DEV ONLY] Bypasses OTP for a given user_id and returns a JWT.
+        [DEV ONLY] Finds the first "Realtor" user and returns a JWT.
+        This is now a one-click login that requires no payload.
         """
-        user = crm_service.get_user_by_id(payload.user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="Demo user not found.")
+        logger.info("Attempting developer login...")
+        with Session(crm_service.engine) as session:
+            statement = select(User).where(User.user_type == UserType.REALTOR).limit(1)
+            user = session.exec(statement).first()
 
-        access_token = _create_access_token(
-            data={"sub": str(user.id)}
-        )
-        return {"access_token": access_token, "token_type": "bearer"}
+        if not user:
+            raise HTTPException(status_code=404, detail="No Realtor user found in the database to log in with.")
+
+        logger.info(f"Dev login successful for user: {user.email}")
+        access_token = _create_access_token(data={"sub": str(user.id)})
+        return {"access_token": access_token, "token_type": "bearer", "user_id": user.id}

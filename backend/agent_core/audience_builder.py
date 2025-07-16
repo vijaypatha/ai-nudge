@@ -29,7 +29,7 @@ async def initialize_client_index():
     print("AUDIENCE BUILDER: Initializing client index...")
     # --- MODIFIED: Call the new system-level function ---
     clients = crm_service._get_all_clients_for_system_indexing()
-    clients_with_notes = [c for c in clients if c.preferences.get("notes")]
+    clients_with_notes = [c for c in clients if c.preferences and c.preferences.get("notes")]
     
     if not clients_with_notes:
         print("AUDIENCE BUILDER: No client notes found to build index.")

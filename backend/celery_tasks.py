@@ -1,16 +1,20 @@
 # FILE: backend/celery_tasks.py
-# PURPOSE: Defines the background tasks that our Celery worker will run.
+# --- FINAL, COMPLETE, AND UNABBREVIATED VERSION ---
+# This version contains the master pipeline with batch processing to prevent
+# memory overloads. All other helper functions are included in their entirety.
+
 import asyncio
 import logging
 import uuid
 from datetime import timedelta
 from celery.schedules import crontab
-from sqlmodel import select
+from sqlmodel import select, Session
 
 from celery_worker import celery_app
 from agent_core.brain import nudge_engine, relationship_planner
 from data import crm as crm_service
-from data.models.message import MessageStatus
+from data.models.user import User
+from data.models.event import MarketEvent
 from data.models.client import Client
 from data.models.resource import Resource
 from agent_core import llm_client
@@ -18,23 +22,88 @@ from workflow.relationship_playbooks import ALL_PLAYBOOKS
 
 logger = logging.getLogger(__name__)
 
-@celery_app.task
-def check_mls_for_events_task():
+@celery_app.task(name="tasks.main_opportunity_pipeline")
+def main_opportunity_pipeline_task():
     """
-    The main scheduled task to poll the MLS for new events and process them.
-    This is the "alarm" that triggers our "Perceive -> Reason" loop.
+    The master task for the opportunity pipeline. It fetches events and
+    processes them in small batches to prevent memory overloads and ensure
+    data is committed incrementally.
     """
-    logger.info("CELERY TASK: Starting MLS event check...")
-    try:
-        realtor_id = uuid.UUID("a8c6f1d7-8f7a-4b6e-8b0f-9e5a7d6c5b4a")
-        realtor = crm_service.get_user_by_id(realtor_id)
-        if not realtor:
-            logger.error("CELERY TASK FAILED: Could not find a default realtor user.")
-            return
-        asyncio.run(nudge_engine.scan_for_all_market_events(realtor, minutes_ago=15))
-        logger.info("CELERY TASK: MLS event check completed successfully.")
-    except Exception as e:
-        logger.error(f"CELERY TASK ERROR: MLS event check failed: {e}")
+    logger.info("--- STARTING MASTER PIPELINE TASK ---")
+    from data.database import engine
+
+    all_users = crm_service.get_all_users()
+    if not all_users:
+        logger.info("PIPELINE: No users found. Exiting.")
+        return
+
+    for user in all_users:
+        if not user.tool_provider:
+            logger.info(f"PIPELINE: Skipping user {user.id} (no tool_provider).")
+            continue
+
+        logger.info(f"--- Running pipeline for user: {user.email} ---")
+        
+        try:
+            tool = nudge_engine.get_tool_for_user(user)
+            if not tool:
+                logger.warning(f"Could not get tool for user {user.id}. Skipping.")
+                continue
+
+            tool_events: list[nudge_engine.ToolEvent] = asyncio.run(asyncio.to_thread(tool.get_events, minutes_ago=1440))
+            
+            if not tool_events:
+                logger.info(f"No new tool events found for user {user.id}.")
+                continue
+            
+            logger.info(f"Found {len(tool_events)} events from tool. Processing in batches...")
+
+            BATCH_SIZE = 10 
+            for i in range(0, len(tool_events), BATCH_SIZE):
+                batch = tool_events[i:i + BATCH_SIZE]
+                
+                with Session(engine) as session:
+                    try:
+                        logger.info(f"--- Processing Batch {i//BATCH_SIZE + 1} ({len(batch)} events) ---")
+                        for tool_event in batch:
+                            db_event = MarketEvent(
+                                event_type=tool_event.event_type,
+                                entity_id=tool_event.entity_id,
+                                payload=tool_event.raw_data,
+                                entity_type="property",
+                                market_area="default",
+                                status="unprocessed",
+                                user_id=user.id
+                            )
+                            asyncio.run(nudge_engine.process_market_event(db_event, user, db_session=session))
+                            db_event.status = "processed"
+                            session.add(db_event)
+                        
+                        session.commit()
+                        logger.info(f"--- BATCH {i//BATCH_SIZE + 1} COMMITTED SUCCESSFULLY ---")
+
+                    except Exception as e:
+                        logger.error(f"--- BATCH {i//BATCH_SIZE + 1} FAILED ---", exc_info=True)
+                        session.rollback()
+
+        except Exception as e:
+            logger.error(f"--- FATAL ERROR IN PIPELINE for user {user.id} ---", exc_info=True)
+
+    logger.info("--- FINISHED MASTER PIPELINE TASK ---")
+
+
+# --- DEPRECATED TASKS ---
+@celery_app.task(name="tasks.check_for_tool_events")
+def check_for_tool_events_task():
+    logger.warning("DEPRECATED: This task is no longer used. Use `main_opportunity_pipeline_task` instead.")
+    pass
+
+@celery_app.task(name="tasks.process_unprocessed_events")
+def process_unprocessed_events_task():
+    logger.warning("DEPRECATED: This task is no longer used. Use `main_opportunity_pipeline_task` instead.")
+    pass
+
+# --- OTHER SCHEDULED TASKS (100% Complete) ---
 
 @celery_app.task
 def check_for_recency_nudges_task():
@@ -76,8 +145,6 @@ def rescore_client_against_recent_events_task(client_id: str, extracted_prefs: d
                 logging.warning(f"CELERY TASK: Skipping re-scan. Client {client_uuid} not found.")
                 return
 
-            # If new prefs were passed directly, merge them into the client object
-            # This ensures we are scoring with the absolute latest data.
             if extracted_prefs:
                 if client.preferences is None: client.preferences = {}
                 client.preferences.update(extracted_prefs)
@@ -88,8 +155,6 @@ def rescore_client_against_recent_events_task(client_id: str, extracted_prefs: d
                 return
 
             realtor = client.user
-            # If new prefs were passed directly, merge them into the client object
-# This ensures we are scoring with the absolute latest data.
             if extracted_prefs:
                 if client.preferences is None:
                     client.preferences = {}
@@ -101,7 +166,7 @@ def rescore_client_against_recent_events_task(client_id: str, extracted_prefs: d
             if not active_events:
                 return
 
-            resource_ids = [event.entity_id for event in active_events]
+            resource_ids = [event.entity_id for event in active_events if event.entity_id]
             resources = session.exec(select(Resource).where(Resource.id.in_(resource_ids))).all()
             resource_map = {res.id: res for res in resources}
             
@@ -166,15 +231,22 @@ def reschedule_recurring_messages_task():
             if crm_service.has_future_recurring_message(message.client_id, message.playbook_touchpoint_id):
                 continue
             
+            if not message.sent_at:
+                continue
+
             frequency_days = touchpoint.get("recurrence", {}).get("frequency_days", 90)
             next_date = message.sent_at + timedelta(days=frequency_days)
             
-            realtor = crm_service.get_user_by_id(touchpoint.get("user_id"))
-            relationship_planner._schedule_message_from_touchpoint(message.client, realtor, touchpoint, next_date)
+            realtor = crm_service.get_user_by_id(message.user_id)
+            if realtor:
+                relationship_planner._schedule_message_from_touchpoint(message.client, realtor, touchpoint, next_date)
     
     print("RECURRENCE ENGINE: Daily scan complete.")
 
-celery_app.conf.beat_schedule['reschedule-recurring-daily'] = {
-    'task': 'celery_tasks.reschedule_recurring_messages_task',
-    'schedule': crontab(hour=2, minute=0),
+# --- CELERY BEAT SCHEDULE ---
+celery_app.conf.beat_schedule = {
+    'run-main-pipeline-every-15-minutes': {
+        'task': 'tasks.main_opportunity_pipeline',
+        'schedule': crontab(minute='*/15'),
+    },
 }

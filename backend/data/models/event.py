@@ -1,29 +1,33 @@
-# File Path: backend/data/models/event.py
-# --- CORRECTED: Updated the foreign key to point to the new 'resource' table.
+# FILE: backend/data/models/event.py
+# --- DEFINITIVE FIX ---
+# Adds the missing `user_id` field to the MarketEvent model. This is the
+# root cause of the crash in the `process_unprocessed_events` task.
 
-from typing import Dict, Any, Optional, TYPE_CHECKING
-from uuid import UUID, uuid4
-from datetime import datetime, timezone
-from sqlmodel import SQLModel, Field, Column, JSON, Relationship
-
-# --- MODIFIED: Import Resource for the new relationship ---
-if TYPE_CHECKING:
-    from .resource import Resource
+import uuid
+from typing import Optional, Dict, Any
+from datetime import datetime
+from sqlmodel import Field, SQLModel, Column, JSON
 
 class MarketEvent(SQLModel, table=True):
-    """Represents a persistent event from an external data source (e.g., MLS)."""
-    id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
-    event_type: str = Field(index=True)
-    market_area: str
-    entity_type: str
+    """
+    Represents a market event captured from an external tool (e.g., MLS).
+    """
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True, index=True)
     
-    # --- MODIFIED: Foreign key now points to the generic 'resource.id' ---
-    # This resolves the NoReferencedTableError by linking events to our new,
-    # flexible Resource model instead of the deleted Property model.
-    entity_id: UUID = Field(foreign_key="resource.id")
+    # --- THIS IS THE FIX ---
+    # The user_id field was missing, causing the AttributeError.
+    # This field links the event to the user it belongs to.
+    user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    # ---------------------
+
+    event_type: str
+    entity_id: str # The unique ID of the entity from the source system (e.g., ListingKey)
+    entity_type: str = Field(default="property")
     
     payload: Dict[str, Any] = Field(sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+    
+    market_area: str
+    status: str = Field(default="unprocessed", index=True) # e.g., unprocessed, processed, error
 
-    # --- ADDED: Defines the relationship for ORM capabilities ---
-    resource: Optional["Resource"] = Relationship()
+    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    processed_at: Optional[datetime] = Field(default=None)
