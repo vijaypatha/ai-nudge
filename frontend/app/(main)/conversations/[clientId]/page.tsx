@@ -21,6 +21,7 @@ import { MessageComposer } from '@/components/conversation/MessageComposer';
 import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
 import { Users, Menu, Phone, Video, Loader2 } from 'lucide-react';
+const POLLING_INTERVAL = 5000; // Poll every 5 seconds
 
 export interface ConversationDisplayConfig {
     client_intel: { title: string; icon: string; };
@@ -47,7 +48,7 @@ interface MessageComposerHandle {
 
 export default function ConversationPage({ params }: ConversationPageProps) {
     const { clientId } = params;
-    const { api, properties, updateClientInList, refetchScheduledMessagesForClient } = useAppContext();
+    const { api, properties, updateClientInList, refetchScheduledMessagesForClient, refreshConversations } = useAppContext();
     const { setIsSidebarOpen } = useSidebar();
     const router = useRouter();
     
@@ -75,12 +76,27 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                 api.get(`/api/messages/?client_id=${currentClientId}`),
                 refetchScheduledMessagesForClient(currentClientId)
             ]);
-            setConversationData(convoData);
-            setDisplayConfig(convoData.display_config);
-            setScheduledMessages(scheduledData);
+
+            const newConvoState = {
+                messages: convoData.messages,
+                immediate_recommendations: convoData.immediate_recommendations,
+                active_plan: convoData.active_plan,
+            };
+
+            // Use functional updates with deep comparison to prevent unnecessary re-renders
+            setConversationData(prevState => 
+                JSON.stringify(prevState) === JSON.stringify(newConvoState) ? prevState : newConvoState
+            );
+            setDisplayConfig(prevState => 
+                JSON.stringify(prevState) === JSON.stringify(convoData.display_config) ? prevState : convoData.display_config
+            );
+            setScheduledMessages(prevState =>
+                JSON.stringify(prevState) === JSON.stringify(scheduledData) ? prevState : scheduledData
+            );
+
         } catch (error) {
-            console.error("Failed to fetch conversation data:", error);
-            setConversationData({ messages: [], immediate_recommendations: null, active_plan: null });
+            console.error("Polling failed for conversation data:", error);
+            // Do not reset state on a transient polling error, which could cause a flicker.
         }
     }, [api, refetchScheduledMessagesForClient]);
 
@@ -101,6 +117,23 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         fetchClientAndConversation();
     }, [clientId, api, fetchConversationData]);
 
+    useEffect(() => {
+        let intervalId: NodeJS.Timeout;
+
+        if (pageState === 'loaded' && selectedClient) {
+            intervalId = setInterval(() => {
+                fetchConversationData(selectedClient.id);
+                refreshConversations(); // Update the sidebar
+            }, POLLING_INTERVAL);
+        }
+
+        return () => {
+            if (intervalId) {
+                clearInterval(intervalId);
+            }
+        };
+    }, [pageState, selectedClient, fetchConversationData]);
+
     const handleSendMessage = useCallback(async (content: string) => {
         if (!content.trim() || !selectedClient) return;
         setIsSending(true);
@@ -115,6 +148,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         try {
             await api.post(`/api/conversations/${selectedClient.id}/send_reply`, { content });
             setTimeout(() => fetchConversationData(selectedClient.id), 1000);
+            refreshConversations(); // Also refresh the sidebar conversations
         } catch (err) {
             console.error("Failed to send message:", err);
             setConversationData(prev => {
@@ -129,22 +163,27 @@ export default function ConversationPage({ params }: ConversationPageProps) {
 
     const handlePlanAction = useCallback(async (action: 'approve' | 'dismiss', planId: string) => {
         if (!selectedClient) return;
-        setIsPlanProcessing(true);
+        setIsPlanProcessing(true); // Spinner starts for both actions
         setIsPlanSuccess(false);
+        
         try {
             if (action === 'approve') {
                 await api.post(`/api/campaigns/${planId}/approve`, {});
-                setIsPlanSuccess(true);
-                setTimeout(() => { if(selectedClient) fetchConversationData(selectedClient.id); setIsPlanSuccess(false); }, 3000);
-            } else {
+                setIsPlanSuccess(true); // Show success message
+                // Fetch new data immediately instead of waiting
+                fetchConversationData(selectedClient.id);
+                // Hide the success message after 3 seconds, but the spinner is already stopped
+                setTimeout(() => setIsPlanSuccess(false), 3000);
+            } else { // 'dismiss'
                 await api.put(`/api/campaigns/${planId}`, { status: 'cancelled' });
-                if(selectedClient) fetchConversationData(selectedClient.id);
+                fetchConversationData(selectedClient.id);
             }
         } catch (error) {
             console.error(`Failed to ${action} plan:`, error);
             alert(`Failed to ${action} the plan.`);
         } finally {
-            if (action !== 'approve') setIsPlanProcessing(false);
+            // CRITICAL FIX: Always stop the spinner regardless of action type
+            setIsPlanProcessing(false);
         }
     }, [selectedClient, api, fetchConversationData]);
 

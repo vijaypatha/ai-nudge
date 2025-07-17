@@ -30,6 +30,12 @@ def get_user_by_id(user_id: uuid.UUID) -> Optional[User]:
     """Retrieves a single user by their unique ID."""
     with Session(engine) as session:
         return session.get(User, user_id)
+    
+def get_user_by_twilio_number(phone_number: str) -> Optional[User]:
+    """Retrieves a single user by their assigned Twilio phone number."""
+    with Session(engine) as session:
+        statement = select(User).where(User.twilio_phone_number == phone_number)
+        return session.exec(statement).first()
 
 def update_user(user_id: uuid.UUID, update_data: UserUpdate) -> Optional[User]:
     """Updates a user's record with the provided data."""

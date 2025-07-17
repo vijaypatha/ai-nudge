@@ -3,7 +3,7 @@
 
 'use client';
 
-import { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from 'react';
+import { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
 
@@ -93,6 +93,7 @@ interface AppContextType {
   login: (token: string) => Promise<User | null>;
   loginAndRedirect: (token: string) => Promise<boolean>;
   fetchDashboardData: () => Promise<void>;
+  refreshConversations: () => Promise<void>;
   updateClientInList: (updatedClient: Client) => void;
   refetchScheduledMessagesForClient: (clientId: string) => Promise<ScheduledMessage[]>;
   refreshUser: () => Promise<void>;
@@ -123,7 +124,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     router.replace('/auth/login');
   }, [router]);
   
-  const api = useCallback(() => {
+  const api = useMemo(() => {
     const request = async (endpoint: string, method: string, body?: any) => {
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       const url = `${baseUrl}${endpoint}`;
@@ -149,7 +150,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const refreshUser = useCallback(async () => {
     try {
-        const userData = await api().get('/api/users/me');
+        const userData = await api.get('/api/users/me');
         setUser(userData);
     } catch (error) {
         console.error("Failed to refresh user data:", error);
@@ -161,7 +162,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     Cookies.set('auth_token', newToken, { expires: 7, path: '/' });
     tokenRef.current = newToken;
     try {
-      const userData: User = await api().get('/api/users/me');
+      const userData: User = await api.get('/api/users/me');
       setUser(userData);
       setIsAuthenticated(true);
       return userData;
@@ -185,18 +186,43 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       return false;
   };
 
+  const refreshConversations = useCallback(async () => {
+    if (!isAuthenticated) return;
+    try {
+      const conversationsData = await api.get('/api/conversations/');
+      const sortedConversations = conversationsData.sort((a: any, b: any) => 
+        new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
+      );
+      // Use a deep comparison to prevent re-renders if the data hasn't actually changed.
+      setConversations(prevConversations => {
+        if (JSON.stringify(prevConversations) === JSON.stringify(sortedConversations)) {
+            return prevConversations;
+        }
+        return sortedConversations;
+      });
+    } catch (error) {
+      console.error("Failed to refresh conversations:", error);
+    }
+  }, [api, isAuthenticated]);
+
   const fetchDashboardData = useCallback(async () => {
     if (!isAuthenticated) return;
     try {
       const results = await Promise.allSettled([
-        api().get('/api/clients'),
-        api().get('/api/properties'),
-        api().get('/api/conversations/'),
-        api().get('/api/campaigns')
+        api.get('/api/clients'),
+        api.get('/api/properties'),
+        api.get('/api/conversations/'),
+        api.get('/api/campaigns')
       ]);
       if (results[0].status === 'fulfilled') setClients(results[0].value);
       if (results[1].status === 'fulfilled') setProperties(results[1].value);
-      if (results[2].status === 'fulfilled') setConversations(results[2].value);
+      if (results[2].status === 'fulfilled') {
+        const sortedConversations = results[2].value.sort((a: any, b: any) => 
+          new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
+        );
+        setConversations(sortedConversations);
+      }
+      
       if (results[3].status === 'fulfilled') setNudges(results[3].value);
       results.forEach((result, index) => {
         if (result.status === 'rejected') console.error(`Failed to fetch endpoint ${index}:`, result.reason);
@@ -224,7 +250,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   
   const refetchScheduledMessagesForClient = useCallback(async (clientId: string): Promise<ScheduledMessage[]> => {
     try {
-      return await api().get(`/api/scheduled-messages/?client_id=${clientId}`);
+      return await api.get(`/api/scheduled-messages/?client_id=${clientId}`);
     } catch (error) {
       console.error(`Failed to fetch scheduled messages for ${clientId}:`, error);
       return [];
@@ -241,10 +267,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     conversations,
     nudges,
     logout,
-    api: api(),
+    api: api,
     login,
     loginAndRedirect,
     fetchDashboardData,
+    refreshConversations,
     updateClientInList,
     refetchScheduledMessagesForClient,
     refreshUser,

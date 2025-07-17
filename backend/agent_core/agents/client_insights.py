@@ -12,7 +12,7 @@ async def extract_intel_from_message(content: str) -> str | None:
     print("INTELLIGENCE AGENT: Analyzing message for potential intel...")
 
     prompt = (
-        "Analyze the following text from a client to a Realtor. Your task is to identify a single, "
+        "Analyze the following text from a client to a professional. Your task is to identify a single, "
         "most important piece of new information that should be saved as a note in the client's profile. "
         "Examples include life events (getting married, new baby, new pet), changes in needs "
         "(needs a home office, looking in a new city), or key preferences (loves gardening, prefers modern architecture). "

@@ -78,19 +78,18 @@ export default function LoginForm() {
     const searchParams = useSearchParams();
     const isSignup = searchParams.get('action') === 'signup';
 
-    const handleDevLogin = async () => {
+    const handleDevLogin = async (type: 'realtor' | 'therapist') => {
         setIsLoading(true);
         setError('');
         try {
-            const demoUserId = "a8c6f1d7-8f7a-4b6e-8b0f-9e5a7d6c5b4a";
-            const data = await api.post('/api/auth/dev-login', { user_id: demoUserId });
+            const data = await api.post('/api/auth/dev-login', { user_type: type });
             if (data.access_token) {
                 await loginAndRedirect(data.access_token);
             } else {
                 throw new Error('Access token not found in dev-login response.');
             }
         } catch (err: any) {
-            setError("Developer login failed. Ensure backend is in development mode.");
+            setError(`Developer login failed for ${type}. Ensure backend is in development mode and user exists.`);
             setIsLoading(false);
         }
     };
@@ -161,7 +160,16 @@ export default function LoginForm() {
                     </div>
                   )}
                   {error && <p className="text-sm text-center text-red-400 mt-4">{error}</p>}
-                  {process.env.NODE_ENV === 'development' && (<div className="text-center mt-6"><button onClick={handleDevLogin} className="text-xs text-gray-500 hover:text-teal-400 flex items-center gap-2 mx-auto"><Bot size={14}/> Developer Login</button></div>)}
+                  {process.env.NODE_ENV === 'development' && (
+                      <div className="text-center mt-6 space-y-2">
+                          <button onClick={() => handleDevLogin('realtor')} className="text-xs text-gray-500 hover:text-teal-400 flex items-center gap-2 mx-auto">
+                              <Bot size={14}/> Developer Login (Realtor)
+                          </button>
+                          <button onClick={() => handleDevLogin('therapist')} className="text-xs text-gray-500 hover:text-teal-400 flex items-center gap-2 mx-auto">
+                              <Bot size={14}/> Developer Login (Therapist)
+                          </button>
+                      </div>
+                  )}
               </div>
           </div>
       </main>

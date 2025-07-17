@@ -27,7 +27,11 @@ function MainLayoutContent({ children }: { children: React.ReactNode }) {
 
     // When the initial conversations from context change, update our local display list
     useEffect(() => {
-        setDisplayedConversations(initialConversations);
+        // Ensure conversations are sorted by last_message_time for display
+        const sortedConversations = [...initialConversations].sort((a, b) => 
+            new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
+        );
+        setDisplayedConversations(sortedConversations);
     }, [initialConversations]);
 
     const handleConversationSearch = useCallback(async (query: string) => {

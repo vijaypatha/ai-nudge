@@ -152,7 +152,7 @@ async def handle_incoming_sms(request: Request):
         logger.info(f"Incoming SMS from {from_number} to {to_number}: '{message_body}'")
 
         # Hand off to the core processing logic
-        await twilio_incoming.process_incoming_sms(from_number=from_number, body=message_body)
+        await twilio_incoming.process_incoming_sms(from_number=from_number, to_number=to_number, body=message_body)
 
         # Return an empty TwiML response to Twilio to acknowledge receipt
         # This prevents Twilio from retrying the webhook due to an HTTP error.

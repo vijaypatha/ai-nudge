@@ -50,7 +50,7 @@ class OtpPayload(BaseModel):
     otp_code: str
 
 class DevLoginPayload(BaseModel):
-    user_id: UUID
+    user_type: UserType
 
 class AuthURLResponse(BaseModel):
     auth_url: str
@@ -171,20 +171,20 @@ async def google_callback(
 # --- Developer-Only Login Endpoint ---
 
 if os.getenv("ENVIRONMENT") == "development":
-    @router.post("/dev-login") # Changed from GET to POST for consistency
-    async def developer_login():
+    @router.post("/dev-login")
+    async def developer_login(payload: DevLoginPayload):
         """
-        [DEV ONLY] Finds the first "Realtor" user and returns a JWT.
-        This is now a one-click login that requires no payload.
+        [DEV ONLY] Finds the first user of the specified type (Realtor or Therapist)
+        and returns a JWT.
         """
-        logger.info("Attempting developer login...")
+        logger.info(f"Attempting developer login for user_type: {payload.user_type}...")
         with Session(crm_service.engine) as session:
-            statement = select(User).where(User.user_type == UserType.REALTOR).limit(1)
+            statement = select(User).where(User.user_type == payload.user_type).limit(1)
             user = session.exec(statement).first()
 
         if not user:
-            raise HTTPException(status_code=404, detail="No Realtor user found in the database to log in with.")
+            raise HTTPException(status_code=404, detail=f"No {payload.user_type.value} user found in the database to log in with.")
 
-        logger.info(f"Dev login successful for user: {user.email}")
+        logger.info(f"Dev login successful for user: {user.email} (ID: {user.id})")
         access_token = _create_access_token(data={"sub": str(user.id)})
         return {"access_token": access_token, "token_type": "bearer", "user_id": user.id}

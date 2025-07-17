@@ -46,7 +46,7 @@ async def seed_database():
             full_name="Jane Doe",
             email="jane.doe@realty.com",
             phone_number="+15558675309",
-            twilio_phone_number="+14352721987", # As requested
+            twilio_phone_number="+143527219870", # As requested
             market_focus=["St. George", "Washington", "Hurricane", "Santa Clara"],
             tool_provider=settings.MLS_PROVIDER,
             vertical="real_estate"
@@ -58,7 +58,7 @@ async def seed_database():
             full_name="Dr. Sarah Chen",
             email="sarah.chen@therapypractice.com",
             phone_number="+15558675310",
-            twilio_phone_number="+14352721988",
+            twilio_phone_number="+14352721987", # As requested
             business_name="Mindful Therapy Practice",
             bio="Licensed clinical psychologist specializing in anxiety and trauma.",
             tool_provider=None,
@@ -107,6 +107,7 @@ async def seed_database():
         # -- THERAPY CLIENTS --
         standard_therapy_client = Client(
             user_id=therapist_user.id, full_name="Jennifer Martinez",
+            phone="+13856268825",
             notes="Experiencing generalized anxiety and looking for coping mechanisms.",
             last_interaction=datetime.now(timezone.utc).isoformat()
         )
