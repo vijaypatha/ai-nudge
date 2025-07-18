@@ -132,8 +132,6 @@ useEffect(() => {
     const wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
     const wsUrl = `${wsBaseUrl}/api/ws/${clientId}`;
 
-
-
     console.log(`WS: Attempting to connect to ${wsUrl}`);
     ws.current = new WebSocket(wsUrl);
 
@@ -143,11 +141,16 @@ useEffect(() => {
         try {
             const data = JSON.parse(event.data);
             console.log('WS: Message received:', data);
+
             if (data.type === 'NEW_MESSAGE' && data.clientId === clientId) {
                 console.log('WS: New message notification received. Refetching data...');
                 // Call the handlers through the stable ref
                 handlersRef.current.fetchConversationData(clientId);
                 handlersRef.current.refreshConversations();
+            } else if (data.type === 'INTEL_UPDATED' && data.clientId === clientId) {
+                console.log('WS: Intel update notification received. Refetching conversation data...');
+                // This call will now pull the new recommendations that the backend just created.
+                handlersRef.current.fetchConversationData(clientId);
             }
         } catch (e) {
             console.error('WS: Error parsing message data', e);

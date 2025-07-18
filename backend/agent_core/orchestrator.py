@@ -6,6 +6,8 @@
 import logging
 import asyncio
 import uuid
+import json
+from api.websocket_manager import manager as websocket_manager
 from typing import Dict, Any, List
 from sqlmodel import Session, select
 
@@ -58,6 +60,18 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
                 )
                 crm_service.save_campaign_briefing(co_pilot_briefing, session=session)
                 session.commit()
+                # --- NOTIFY FRONTEND OF NEW INTEL ---
+                # After the database commit, the new recommendations are available.
+                # Broadcast an event to tell the client's UI to refetch the data.
+                try:
+                    intel_update_notification = { "type": "INTEL_UPDATED", "clientId": str(client_id) }
+                    await websocket_manager.broadcast_to_client(
+                        client_id=str(client_id),
+                        message=json.dumps(intel_update_notification)
+                    )
+                    logging.info(f"ORCHESTRATOR: Broadcasted INTEL_UPDATED event for client {client_id}")
+                except Exception as e:
+                    logging.error(f"ORCHESTRATOR: Failed to broadcast INTEL_UPDATED event. Error: {e}")
                 return {"status": "paused_and_proposed"}
 
             # --- FAQ CHECK ---
