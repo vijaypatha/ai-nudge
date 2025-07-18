@@ -616,6 +616,31 @@ def delete_scheduled_messages_for_client(client_id: uuid.UUID, user_id: uuid.UUI
         session.exec(statement)
         session.commit()
 
+def delete_scheduled_messages_by_touchpoint_ids(client_id: UUID, user_id: UUID, touchpoint_ids: List[str]):
+    """
+    Deletes all PENDING scheduled messages for a client that were created by a specific
+    list of playbook touchpoint IDs. This is used by the relationship planner
+    to clear its own plan without affecting messages from other sources.
+    """
+    if not touchpoint_ids:
+        logging.warning(f"CRM: Call to delete messages by touchpoint IDs received an empty list for client {client_id}. Aborting.")
+        return
+
+    with Session(engine) as session:
+        client_check = session.exec(select(Client.id).where(Client.id == client_id, Client.user_id == user_id)).first()
+        if not client_check:
+            logging.error(f"CRM: Permission denied. User {user_id} attempted to delete messages for client {client_id}.")
+            return
+
+        statement = delete(ScheduledMessage).where(
+            ScheduledMessage.client_id == client_id,
+            ScheduledMessage.status == MessageStatus.PENDING,
+            ScheduledMessage.playbook_touchpoint_id.in_(touchpoint_ids)
+        )
+        results = session.exec(statement)
+        session.commit()
+        logging.info(f"CRM: Deleted {results.rowcount} pending relationship plan messages for client {client_id}.")
+
 # --- Recurring & Background Task Functions ---
 
 def get_all_sent_recurring_messages() -> List[ScheduledMessage]:

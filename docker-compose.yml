@@ -40,6 +40,8 @@ services:
     # --- MODIFIED: Removed the 'environment' block ---
     # The 'env_file' directive below is the correct and sufficient way to load
     # all necessary variables from the .env file. This resolves the override conflict.
+    environment:
+    - WEBSOCKET_ALLOWED_ORIGINS=["http://localhost:3000"]
     env_file:
       - ./backend/.env
     volumes:

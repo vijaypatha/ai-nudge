@@ -86,24 +86,39 @@ async def _schedule_message_from_touchpoint(client: Client, user: User, touchpoi
 async def plan_relationship_campaign(client: Client, user: User):
     """
     (Definitive Version) Plans a campaign by finding all events in notes first,
-    then matching them to the appropriate playbook touchpoints.
+    then matching them to the appropriate playbook touchpoints. It ONLY deletes
+    messages that it is responsible for.
     """
     logging.info(f"RELATIONSHIP PLANNER: Planning campaign for client -> {client.full_name} in vertical '{user.vertical}'")
-    crm_service.delete_scheduled_messages_for_client(client_id=client.id, user_id=user.id)
 
     playbooks_for_vertical = VERTICAL_LEGACY_PLAYBOOKS_REGISTRY.get(user.vertical, [])
     if not playbooks_for_vertical:
         logging.warning(f"PLANNER: No legacy playbooks found for vertical '{user.vertical}'. Aborting.")
         return
 
+    # --- STEP 1: Identify all touchpoint IDs this planner is responsible for. ---
+    managed_touchpoint_ids = []
+    for playbook in playbooks_for_vertical:
+        for touchpoint in playbook.get("touchpoints", []):
+            if touchpoint.get("id"):
+                managed_touchpoint_ids.append(touchpoint.get("id"))
+
+    # --- STEP 2: Call the new, precise deletion function. ---
+    # This ONLY deletes pending messages that were created from the IDs above,
+    # leaving all other scheduled messages (e.g., from conversations) untouched.
+    crm_service.delete_scheduled_messages_by_touchpoint_ids(
+        client_id=client.id, 
+        user_id=user.id, 
+        touchpoint_ids=managed_touchpoint_ids
+    )
+
+    # --- STEP 3: Proceed with the existing logic to schedule new messages. ---
     notes_for_parsing = [client.notes] if client.notes else []
     all_client_tags = (client.ai_tags or []) + (client.user_tags or [])
 
-    # --- STEP 1: Find all personal and recurring events first ---
     all_parsed_events = _parse_all_personal_events_from_notes(notes_for_parsing)
     custom_frequency_days = _parse_custom_frequency(notes_for_parsing)
 
-    # --- STEP 2: Loop through playbooks to find matching rules ---
     for playbook in playbooks_for_vertical:
         triggers = playbook.get("triggers", [])
         if triggers and not any(trigger in all_client_tags for trigger in triggers):
@@ -112,7 +127,6 @@ async def plan_relationship_campaign(client: Client, user: User):
         for touchpoint in playbook.get("touchpoints", []):
             event_type = touchpoint.get("event_type")
 
-            # --- Match all found personal events to the correct touchpoint ---
             if event_type == "personal_event":
                 for event_name, scheduled_date in all_parsed_events:
                     handled_events = touchpoint.get("handled_events", [])
@@ -122,7 +136,6 @@ async def plan_relationship_campaign(client: Client, user: User):
                             scheduled_date = scheduled_date.replace(year=datetime.now().year + 1)
                         await _schedule_message_from_touchpoint(client, user, touchpoint, scheduled_date, event_name)
 
-            # --- Handle recurring and offset events separately ---
             elif event_type == "recurring" and custom_frequency_days:
                 scheduled_date = datetime.now() + timedelta(days=custom_frequency_days)
                 await _schedule_message_from_touchpoint(client, user, touchpoint, scheduled_date, "Custom Check-in")

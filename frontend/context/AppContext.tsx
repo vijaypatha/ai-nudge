@@ -257,7 +257,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [api]);
 
-  const value: AppContextType = {
+  const value = useMemo(() => ({
     loading,
     isAuthenticated,
     user,
@@ -267,7 +267,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     conversations,
     nudges,
     logout,
-    api: api,
+    api,
     login,
     loginAndRedirect,
     fetchDashboardData,
@@ -275,7 +275,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     updateClientInList,
     refetchScheduledMessagesForClient,
     refreshUser,
-  };
+  }), [
+    loading, isAuthenticated, user, clients, properties, conversations, nudges, 
+    logout, api, login, fetchDashboardData, refreshConversations, 
+    updateClientInList, refetchScheduledMessagesForClient, refreshUser
+  ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };

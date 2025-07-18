@@ -10,6 +10,8 @@ from contextlib import asynccontextmanager
 
 # --- MODIFIED: Import the central router instead of all individual routers ---
 from api.rest.router import api_router
+from common.config import get_settings
+settings = get_settings()
 from data.database import create_db_and_tables
 from data.seed import seed_database
 from agent_core import audience_builder
@@ -39,7 +41,7 @@ app = FastAPI(
     swagger_ui_parameters=swagger_ui_parameters
 )
 
-origins = ["http://localhost:3000"]
+origins = settings.WEBSOCKET_ALLOWED_ORIGINS
 
 app.add_middleware(
     CORSMiddleware,

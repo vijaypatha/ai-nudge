@@ -4,7 +4,7 @@
 from fastapi import APIRouter
 
 # --- MODIFIED: Removed 'properties' from the import list ---
-from . import admin_triggers, auth, campaigns, clients, conversations, faqs, inbox, nudges, users, scheduled_messages, community, twilio_numbers
+from . import admin_triggers, auth, campaigns, clients, conversations, faqs, inbox, nudges, users, scheduled_messages, community, twilio_numbers, websockets
 
 api_router = APIRouter()
 
@@ -21,3 +21,4 @@ api_router.include_router(users.router)
 api_router.include_router(scheduled_messages.router)
 api_router.include_router(community.router)
 api_router.include_router(twilio_numbers.router)
+api_router.include_router(websockets.router)

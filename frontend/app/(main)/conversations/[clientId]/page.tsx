@@ -56,6 +56,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     const [selectedClient, setSelectedClient] = useState<Client | null>(null);
     const [conversationData, setConversationData] = useState<Omit<ConversationData, 'display_config'> | null>(null);
     const [displayConfig, setDisplayConfig] = useState<ConversationDisplayConfig | null>(null);
+    const ws = useRef<WebSocket | null>(null);
     const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
     const [isSending, setIsSending] = useState(false);
     const [isPlanProcessing, setIsPlanProcessing] = useState(false);
@@ -117,22 +118,52 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         fetchClientAndConversation();
     }, [clientId, api, fetchConversationData]);
 
-    useEffect(() => {
-        let intervalId: NodeJS.Timeout;
+// This version uses a ref to hold callback handlers, ensuring the connection
+// is stable and does not reset on re-renders.
+const handlersRef = useRef({ fetchConversationData, refreshConversations });
 
-        if (pageState === 'loaded' && selectedClient) {
-            intervalId = setInterval(() => {
-                fetchConversationData(selectedClient.id);
-                refreshConversations(); // Update the sidebar
-            }, POLLING_INTERVAL);
-        }
+useEffect(() => {
+    handlersRef.current = { fetchConversationData, refreshConversations };
+}, [fetchConversationData, refreshConversations]);
 
-        return () => {
-            if (intervalId) {
-                clearInterval(intervalId);
+useEffect(() => {
+    if (!clientId) return;
+
+    const wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+    const wsUrl = `${wsBaseUrl}/api/ws/${clientId}`;
+
+
+
+    console.log(`WS: Attempting to connect to ${wsUrl}`);
+    ws.current = new WebSocket(wsUrl);
+
+    ws.current.onopen = () => console.log(`WS: Connection established for client ${clientId}`);
+
+    ws.current.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            console.log('WS: Message received:', data);
+            if (data.type === 'NEW_MESSAGE' && data.clientId === clientId) {
+                console.log('WS: New message notification received. Refetching data...');
+                // Call the handlers through the stable ref
+                handlersRef.current.fetchConversationData(clientId);
+                handlersRef.current.refreshConversations();
             }
-        };
-    }, [pageState, selectedClient, fetchConversationData]);
+        } catch (e) {
+            console.error('WS: Error parsing message data', e);
+        }
+    };
+
+    ws.current.onerror = (err) => console.error(`WS: Error for client ${clientId}:`, err);
+    ws.current.onclose = () => console.log(`WS: Connection closed for client ${clientId}`);
+
+    return () => {
+        if (ws.current) {
+            console.log(`WS: Closing connection for client ${clientId}`);
+            ws.current.close();
+        }
+    };
+}, [clientId]); // The dependency array is now stable
 
     const handleSendMessage = useCallback(async (content: string) => {
         if (!content.trim() || !selectedClient) return;

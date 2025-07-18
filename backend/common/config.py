@@ -2,7 +2,7 @@
 # PURPOSE: Manages all application settings from the environment.
 from pydantic_settings import BaseSettings
 from functools import lru_cache
-from typing import Optional
+from typing import Optional, List
 
 class Settings(BaseSettings):
     """
@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "production"
     FRONTEND_APP_URL: str = "http://localhost:3000"
     SECRET_KEY: str
+    # --- ADD THIS BLOCK ---
+    # WebSocket CORS
+    # A list of allowed origins for the WebSocket connection.
+    # In production, this should be set in your .env file as a comma-separated string
+    # e.g., WEBSOCKET_ALLOWED_ORIGINS=https://app.yourdomain.com,https://www.yourdomain.com
+    WEBSOCKET_ALLOWED_ORIGINS: List[str] = ["http://localhost:3000"]
+    # --- END BLOCK --- 
     RESCAN_LOOKBACK_DAYS: int = 30 # Days to look back for active events during a re-scan
 
     # FAQ Auto-Reply
