@@ -19,10 +19,12 @@ from data.models.client import Client
 from data.models.resource import Resource
 from data.models.campaign import MatchedClient
 from agent_core import llm_client
-from workflow.relationship_playbooks import ALL_PLAYBOOKS
+
 from integrations.tool_factory import get_tool_for_user
 from integrations.tool_interface import Event as ToolEvent
 from agent_core.brain.verticals import VERTICAL_CONFIGS
+from integrations.google_search import GoogleSearchTool
+
 
 
 logger = logging.getLogger(__name__)
@@ -200,11 +202,18 @@ def send_scheduled_message_task(message_id: str):
 
 @celery_app.task
 def reschedule_recurring_messages_task():
-    print("RECURRENCE ENGINE: Starting daily scan for recurring messages...")
+    """
+    Reschedules the next touchpoint for any recurring messages that have been sent.
+    """
+    # --- FIX: Imports moved inside the function to avoid circular dependency ---
+    from workflow.relationship_playbooks import ALL_PLAYBOOKS
+    from agent_core.brain import relationship_planner
+
+    logger.info("RECURRENCE ENGINE: Starting daily scan for recurring messages...")
     all_sent_messages = crm_service.get_all_sent_recurring_messages()
     
     all_touchpoints = {}
-    for playbook in relationship_planner.ALL_PLAYBOOKS:
+    for playbook in ALL_PLAYBOOKS:
         for touchpoint in playbook["touchpoints"]:
             if "id" in touchpoint:
                 all_touchpoints[touchpoint["id"]] = touchpoint
@@ -226,7 +235,52 @@ def reschedule_recurring_messages_task():
             if realtor and hasattr(message, 'client'):
                 relationship_planner._schedule_message_from_touchpoint(message.client, realtor, touchpoint, next_date)
     
-    print("RECURRENCE ENGINE: Daily scan complete.")
+    logger.info("RECURRENCE ENGINE: Daily scan complete.")
+
+@celery_app.task(name="tasks.trigger_content_discovery")
+def trigger_content_discovery_task():
+    """
+    Scheduled task to find relevant content for users based on their specialties
+    and create nudge events for the nudge_engine to process.
+    """
+    from data.database import engine
+    logging.info("CELERY_TASK: Starting trigger_content_discovery_task.")
+    db_session = Session(engine)
+    try:
+        users_to_scan = db_session.query(User).filter(User.specialties != None).all()
+
+        if not users_to_scan:
+            logging.info("CELERY_TASK: No users with specialties found to scan.")
+            return
+
+        search_tool = GoogleSearchTool()
+
+        for user in users_to_scan:
+            if not user.specialties:
+                continue
+
+            logging.info(f"CELERY_TASK: Scanning content for user {user.id} with specialties: {user.specialties}")
+            for topic in user.specialties:
+                content_results = asyncio.run(search_tool.search(topic))
+                
+                for content in content_results:
+                    # The entity_id for content is its URL to ensure uniqueness
+                    event = MarketEvent(
+                        entity_id=content['url'],
+                        event_type='content_suggestion',
+                        payload=content,
+                        source='Google Search_tool',
+                        user_id=user.id # Link event to the user
+                    )
+                    # The nudge engine is called within the same session
+                    asyncio.run(nudge_engine.process_market_event(event, user, db_session))
+        
+        db_session.commit()
+    except Exception as e:
+        logging.error(f"CELERY_TASK: Error in trigger_content_discovery_task: {e}", exc_info=True)
+        db_session.rollback()
+    finally:
+        db_session.close()
 
 # --- CELERY BEAT SCHEDULE ---
 celery_app.conf.beat_schedule = {
@@ -241,5 +295,9 @@ celery_app.conf.beat_schedule = {
     'run-recurring-message-rescheduler-daily': {
         'task': 'celery_tasks.reschedule_recurring_messages_task',
         'schedule': crontab(hour=6, minute=0),
+    },
+    'run-content-discovery-every-six-hours': {
+        'task': 'tasks.trigger_content_discovery',
+        'schedule': crontab(minute=30, hour='*/6'), # Run every 6 hours at the 30-min mark
     }
 }

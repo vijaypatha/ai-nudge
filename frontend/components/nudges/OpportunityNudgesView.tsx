@@ -9,7 +9,7 @@ import { useState, useMemo, FC, ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { CampaignBriefing } from '@/context/AppContext';
 import { ActionDeck } from './ActionDeck';
-import { BrainCircuit, Sparkles, Home, TrendingUp, RotateCcw, TimerOff, CalendarPlus, Archive, User as UserIcon } from 'lucide-react';
+import { BrainCircuit, Sparkles, Home, TrendingUp, RotateCcw, TimerOff, CalendarPlus, Archive, User as UserIcon, BookOpen } from 'lucide-react';
 
 // --- NEW: Define the shape of the config object we expect from the API ---
 export type DisplayConfig = Record<string, {
@@ -28,6 +28,7 @@ const ICONS: Record<string, ReactNode> = {
     CalendarPlus: <CalendarPlus size={16} />,
     Archive: <Archive size={16} />,
     UserIcon: <UserIcon size={16} />,
+    BookOpen: <BookOpen size={16} />, // --- ADD THIS LINE ---
     Default: <Sparkles size={16} />,
 };
 

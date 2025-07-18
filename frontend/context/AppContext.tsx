@@ -25,6 +25,7 @@ export interface User {
   mls_username?: string;
   mls_password?: string;
   license_number?: string;
+  specialties?: string[];
   faq_auto_responder_enabled: boolean;
 }
 

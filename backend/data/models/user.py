@@ -90,6 +90,7 @@ class UserUpdate(SQLModel):
     mls_username: Optional[str] = None
     mls_password: Optional[str] = None
     license_number: Optional[str] = None
+    # --- MODIFIED: Ensure 'specialties' is included for updates ---
     specialties: Optional[List[str]] = None
     faq_auto_responder_enabled: Optional[bool] = None
     twilio_phone_number: Optional[str] = None

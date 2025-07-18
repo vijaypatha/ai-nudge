@@ -8,6 +8,8 @@ import { Trash2, Edit3, Save, XCircle, Loader2, User, Briefcase, Bot, LogOut } f
 import { v4 as uuidv4 } from 'uuid';
 import { useAppContext, User as UserType } from '@/context/AppContext';
 import { TimezoneSelector } from "@/components/ui/TimezoneSelector";
+import { ContentDiscovery } from "@/components/profile/ContentDiscovery";
+
 
 export interface FaqItem {
   id: string;
@@ -109,6 +111,7 @@ export default function ProfilePage() {
     };
 
     // --- MODIFIED: Removed MLS fields from the save payload ---
+    // frontend/app/(main)/profile/page.tsx
     const handleProfileSave = async (initialData?: Partial<UserType>) => {
         const dataToSave = initialData || profile;
         if (!dataToSave) return;
@@ -117,10 +120,12 @@ export default function ProfilePage() {
         setError(null);
         
         try {
+            // This payload now correctly includes the 'specialties' field
             const payload = {
                 full_name: dataToSave.full_name,
                 email: dataToSave.email,
                 timezone: dataToSave.timezone,
+                specialties: dataToSave.specialties, // This field is now correctly typed and included
                 ...initialData
             };
             
@@ -217,16 +222,23 @@ export default function ProfilePage() {
     };
 
     // --- MODIFIED: Removed the MLS fields from the JSX for 'realtor' user type ---
+    // frontend/app/(main)/profile/page.tsx
     const renderBusinessDetails = () => {
         if (!profile) return null;
         switch(profile.user_type) {
             case 'realtor':
-                // For now, we show a message that the connection is managed.
-                // This makes it clean and ready for other vertical-specific settings.
                 return <p className="text-sm text-gray-400">Your MLS connection is managed automatically by the system.</p>;
-            // --- NEW: Added a placeholder case for 'therapist' ---
+            
             case 'therapist':
-                return <p className="text-sm text-gray-400">No business-specific settings required for this user type.</p>;
+                // The new component is rendered here, passing state down
+                return (
+                    <ContentDiscovery 
+                        initialSpecialties={profile.specialties || []}
+                        onSpecialtiesChange={(newSpecialties) => {
+                            setProfile(p => p ? { ...p, specialties: newSpecialties } : null)
+                        }}
+                    />
+                );
             default:
                 return <p className="text-sm text-gray-500">No business-specific settings available for this user type.</p>;
         }

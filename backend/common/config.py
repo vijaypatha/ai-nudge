@@ -16,6 +16,7 @@ class Settings(BaseSettings):
 
     # Google AI Settings
     GOOGLE_API_KEY: str
+    GOOGLE_CSE_ID: str
 
     # Twilio
     TWILIO_ACCOUNT_SID: str

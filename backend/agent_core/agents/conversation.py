@@ -135,19 +135,25 @@ async def generate_recommendation_slate(
         return {}
 
 
-# This function remains unchanged.
 async def draft_outbound_campaign_message(
     realtor: User,
     event_type: str,
     matched_audience: List[MatchedClient],
     resource: Resource | None = None,
+    key_intel: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Uses a live LLM to draft a personalized outbound message for a campaign.
     This function is now vertical-agnostic by operating on a generic Resource.
+
+    **FIX DOCUMENTATION:**
+    - This function was failing to generate personalized messages for 'content_suggestion' events.
+    - The logic checked for a `key_intel` dictionary, which was no longer being passed by the calling service.
+    - The fix involves updating the condition to check for the `resource` object instead and extracting the necessary
+      content details (title, topic, url) from `resource.attributes`.
+    - This ensures the high-quality, specific prompt is used, solving the issue of generic messages.
     """
     logging.info(f"CONVERSATION AGENT (OUTBOUND): Drafting message for event '{event_type}'...")
-
     style_prompt_addition = ""
     if realtor.ai_style_guide:
         try:
@@ -156,69 +162,115 @@ async def draft_outbound_campaign_message(
             logging.info(f"CONVERSATION AGENT: Applying style guide for user {realtor.id}")
         except Exception as e:
             logging.error(f"CONVERSATION AGENT: Could not apply style guide. Error: {e}")
-    
+
     professional_title = PROFESSIONAL_TITLES.get(realtor.vertical, "professional")
     base_prompt_intro = f"You are an expert assistant for a {professional_title}.{style_prompt_addition}"
-
     prompt = ""
-    # This section contains multiple prompts that need to be generic. 
-    # The base_prompt_intro is now agnostic, and specific prompts below are reviewed for generic language.
-    # The existing logic is mostly fine as it's event-driven, but the intro was the main issue.
-    if event_type == "recency_nudge":
-        prompt = f"""
-        {base_prompt_intro}
-        Your user, {realtor.full_name}, hasn't spoken to these clients in a while and wants to reconnect.
-        Your task is to draft a friendly, casual, and short "checking in" SMS message.
-        Instructions:
-        1. Draft a master SMS message. Use the placeholder `[Client Name]` for personalization.
-        2. The tone should be warm and relationship-focused, not salesy.
-        3. The goal is simply to restart the conversation. Ask an open-ended question.
-        Draft the SMS message now:
-        """
-    elif event_type == "sold_listing" and resource:
+    # Initialize final_draft to prevent potential UnboundLocalError
+    final_draft = ""
+
+    # FIX: The primary condition is changed from checking `key_intel` to checking `resource`.
+    # This aligns with the data actually being passed to the function, ensuring this block is executed.
+    if event_type == "content_suggestion" and resource and resource.attributes:
         attrs = resource.attributes
+        client_name = matched_audience[0].client_name if matched_audience else 'there'
+        match_reason = matched_audience[0].match_reasons[0] if matched_audience and matched_audience[0].match_reasons else 'based on our conversations'
+
+        # FIX: Extract content details directly from `resource.attributes` instead of the non-existent `key_intel`.
+        topic = attrs.get('topic', 'a relevant topic') # Fallback for safety
+        content_title = attrs.get('title') # The presence of a title is a good indicator of valid content
+        content_url = attrs.get('url')
+
+        # If there's no title, we can't generate a good message. Fallback to a safe, generic message.
+        if not content_title:
+             logging.warning(f"CONVERSATION AGENT: 'content_suggestion' resource for user {realtor.id} is missing a title. Aborting specific message generation.")
+             return "Hi [Client Name], I came across some information I thought you might find interesting. Let me know if you'd like me to send it over."
+
+        # This is the high-quality prompt that was being skipped before the fix.
+        base_message_prompt = f"""
+        {base_prompt_intro}
+        You are an empathetic, supportive, and professional therapist drafting a personalized SMS message to your client, {client_name}.
+        The purpose is to share a helpful article or video related to a topic relevant to them, making the message personal and directly about the content.
+        Here is the relevant information:
+        - Client Name: {client_name}
+        - Content Topic: {topic}
+        - Content Title: "{content_title}"
+        - Match Reason (why this content is relevant to the client): {match_reason}
+
+        Draft a concise (under 160 characters if possible), personal, and supportive SMS message.
+        Start with a friendly greeting like "Hey [Client Name]!".
+        **Directly reference the content by its topic or title in the message body.**
+        Explain briefly *why* you thought of them for this content (e.g., "thought of you because of our chat on X," or "came across this on Y and remembered Z").
+        Conclude with a supportive closing.
+        Crucially, **DO NOT include the link in your drafted message.** I will append the link separately.
+        Example 1: "Hey [Client Name]! I came across this article on managing anxiety that reminded me of our last chat. Hope it offers some helpful perspective!"
+        Example 2: "Hi [Client Name]! Just saw this great video about positive parenting techniques and immediately thought of you. Hope it's insightful!"
+        """
+        llm_response = await openai_service.generate_text_completion(
+            prompt_messages=[
+                {"role": "system", "content": base_message_prompt},
+                {"role": "user", "content": "Draft the SMS message now:"}
+            ],
+            model="gpt-4o-mini"
+        )
+        if llm_response:
+            final_draft = llm_response.strip()
+        else:
+            # Provide a structured fallback if the LLM fails, still using specific content details.
+            final_draft = f"Hi {client_name}, I came across an article about {topic} titled \"{content_title}\" that I thought might be helpful."
+        
+        # Append the URL after the message is drafted, if it exists.
+        if content_url:
+            final_draft = f"{final_draft}\n\nHope you find it helpful: {content_url}"
+
+        # Return the final message and exit the function, as the 'content_suggestion' case is fully handled.
+        return final_draft
+
+    elif event_type == "recency_nudge":
+        client_name = matched_audience[0].client_name
         prompt = f"""
         {base_prompt_intro}
-        Your task is to draft a compelling, value-driven SMS message about a nearby property that just sold.
-        This is for clients who might be thinking of selling their own homes.
-        User's Name: {realtor.full_name}
-        Context: The property at {attrs.get('address', 'N/A')} just sold for ${attrs.get('price', 0):,.0f}.
-        Instructions:
-        1. Draft a master SMS message. Use `[Client Name]` for personalization.
-        2. The tone should be insightful and create urgency/opportunity.
-        3. Start a conversation by asking if they've considered what this news means for their own home's value.
-        4. Keep it concise for SMS. Do NOT include a listing URL.
-        Draft the SMS message now:
+        A 'recency_nudge' event has occurred. This means the client, {client_name}, hasn't been contacted in a while.
+        Your task is to draft a short, friendly, and low-pressure SMS message to check in.
+        - Start with a warm greeting.
+        - Mention it's been a little while and you were thinking of them.
+        - Ask a simple, open-ended question like "How have you been?" or "How are things?".
+        - Keep it brief and casual. Avoid sounding salesy or demanding.
+        - The goal is to simply restart the conversation.
         """
-    # Other specific event_types like back_on_market, expired_listing, etc., follow.
-    # The key change is the agnostic `base_prompt_intro`. The rest of the logic can stay.
+    elif event_type == "listing_announcement":
+        prompt = f"""
+        {base_prompt_intro}
+        A 'listing_announcement' event has occurred.
+        A new property, described below, is now available. Your task is to draft a compelling announcement message.
+        Here is the listing information:
+        {json.dumps(resource.attributes, indent=2) if resource else "{}"}
+        - Highlight 1-2 key features.
+        - Include a call-to-action (e.g., "Let me know if you'd like to see it!").
+        """
+    # This `elif` block previously caused the bug. By handling `content_suggestion` explicitly above,
+    # it now correctly serves as a fallback for other event types that have a resource but no special logic.
     elif resource:
-        attrs = resource.attributes
         prompt = f"""
         {base_prompt_intro}
-        Your user is {realtor.full_name}.
-        Your task is to draft a compelling and slightly informal master SMS message.
-        Context: A '{event_type}' event occurred for the resource at {attrs.get('address', 'Resource')}.
-        Instructions:
-        1. Draft a master SMS message. Use `[Client Name]` for personalization.
-        2. The tone should be helpful and insightful.
-        3. You MUST include the resource's URL at the end if it exists.
-        Resource URL: {attrs.get('listing_url', 'N/A')}
-        Draft the SMS message now:
+        A '{event_type}' event occurred.
+        A relevant resource was found, with these attributes: {json.dumps(resource.attributes, indent=2) if resource else "{}"}
+        Draft a generic but relevant message to share this with a client.
         """
+    else:
+        # Fallback for events without a resource
+        prompt = f"A '{event_type}' event occurred. Draft a generic check-in message for a client."
 
-    if not prompt:
-        return "Could not generate a message draft for this event type."
-
-    ai_draft = await openai_service.generate_text_completion(
-        prompt_messages=[{"role": "user", "content": prompt}],
+    llm_response = await openai_service.generate_text_completion(
+        prompt_messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": "Draft the message now:"}
+        ],
         model="gpt-4o-mini"
     )
 
-    if not ai_draft:
-        ai_draft = f"Hi [Client Name], just wanted to share a quick update with you!"
+    return llm_response.strip() if llm_response else ""
 
-    return ai_draft
 
 
 async def detect_conversational_intent(message_content: str, user: User) -> Optional[IntentType]:

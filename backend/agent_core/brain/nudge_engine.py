@@ -77,7 +77,43 @@ async def process_market_event(event: MarketEvent, user: User, db_session: Sessi
     resource_payload = event.payload
     resource = None
 
-    if vertical_config.get("resource_type") == "property":
+    # Determine resource type from vertical config, or specifically for 'content_suggestion'
+    resource_type_from_config = vertical_config.get("resource_type")
+
+    # --- START SURGICAL MODIFICATION ---
+    if event.event_type == 'content_suggestion':
+        resource_type = "web_content"
+        entity_identifier = resource_payload.get('url')
+        if not entity_identifier:
+            logging.error(f"NUDGE_ENGINE: Content suggestion event {event.id} missing URL. Cannot create resource.")
+            return
+
+        existing_resource = db_session.query(Resource).filter(
+            Resource.entity_id == entity_identifier,
+            Resource.user_id == user.id,
+            Resource.resource_type == resource_type
+        ).first()
+
+        if existing_resource:
+            resource = existing_resource
+            logging.info(f"NUDGE_ENGINE: Re-using existing resource {resource.id} for content event {event.id}.")
+            resource.attributes.update(resource_payload)
+            db_session.add(resource)
+        else:
+            resource_create_payload = ResourceCreate(
+                resource_type=resource_type,
+                status="active",
+                attributes=resource_payload,
+                entity_id=entity_identifier
+            )
+            resource = Resource.model_validate(resource_create_payload, update={'user_id': user.id})
+            db_session.add(resource)
+            db_session.flush()
+            db_session.refresh(resource)
+            logging.info(f"NUDGE_ENGINE: Created new resource {resource.id} (type: {resource_type}) for content event {event.id}.")
+
+    # --- END SURGICAL MODIFICATION ---
+    elif resource_type_from_config == "property":
         resource = crm_service.get_resource_by_entity_id(event.entity_id, db_session)
         
         if resource:
@@ -97,27 +133,53 @@ async def process_market_event(event: MarketEvent, user: User, db_session: Sessi
             db_session.flush() # Flush to get the ID for the new resource
             db_session.refresh(resource)
 
+    elif resource_type_from_config == "client_profile":
+         resource = Resource(id=event.entity_id, attributes={"full_name": resource_payload.get('full_name', 'N/A')}, user_id=user.id)
+
+    else:
+        # If neither content_suggestion nor a configured resource_type matches, log and return
+        logging.warning(f"NUDGE_ENGINE: Unhandled event type '{event.event_type}' or resource type '{resource_type_from_config}'. Skipping resource processing.")
+        return # Exit if resource cannot be handled/created
+
+    if not resource:
+        logging.error(f"NUDGE_ENGINE: Resource could not be determined or created for event {event.id}. Skipping further processing.")
+        return
+
     # --- Generate embedding based on the final state of the resource (new or updated) ---
-    remarks = resource.attributes.get('PublicRemarks') if resource else None
-    resource_embedding = await llm_client.generate_embedding(remarks) if remarks else None
+    # This logic needs to be adapted for 'web_content'
+    resource_embedding = None
+    if resource.resource_type == "web_content" and resource.attributes.get('summary'):
+        resource_embedding = await llm_client.generate_embedding(resource.attributes['summary'])
+        logging.info(f"NUDGE_ENGINE: Generated embedding for web_content summary.")
+    elif resource.resource_type == "property":
+        remarks = resource.attributes.get('PublicRemarks')
+        if remarks:
+            resource_embedding = await llm_client.generate_embedding(remarks)
+            logging.info(f"NUDGE_ENGINE: Generated embedding for property remarks.")
+    # No embedding needed for client_profile based scoring in current setup.
 
     all_clients = crm_service.get_all_clients(user_id=user.id)
+    logging.info(f"NUDGE_ENGINE: Found {len(all_clients)} clients for user {user.id} to score against event {event.id}.")
+
     matched_audience = []
 
     for client in all_clients:
-        if vertical_config.get("resource_type") == "client_profile":
-             resource = Resource(id=client.id, attributes={"full_name": client.full_name}, user_id=user.id)
+        if crm_service.does_nudge_exist_for_client_and_resource(client_id=client.id, resource_id=resource.id, session=db_session, event_type=event.event_type):
+            logging.info(f"NUDGE_ENGINE: Nudge for event type '{event.event_type}' already exists for client {client.id} and resource {resource.id}. Skipping client {client.full_name}.")
+            continue
 
         score, reasons = _get_client_score_for_event(client, event, resource_embedding, vertical_config)
         
         if score >= MATCH_THRESHOLD:
-            if resource and crm_service.does_nudge_exist_for_client_and_resource(client_id=client.id, resource_id=resource.id, session=db_session, event_type=event.event_type):
-                logging.info(f"Nudge for event type '{event.event_type}' already exists for client {client.id} and resource {resource.id}. Skipping.")
-                continue
-
+            logging.info(f"NUDGE_ENGINE: Client {client.id} ({client.full_name}) matched event {event.id} with score {score}. Reasons: {reasons}")
             matched_audience.append(MatchedClient(
                 client_id=client.id, client_name=client.full_name, match_score=score, match_reasons=reasons
             ))
+        else:
+            logging.info(f"NUDGE_ENGINE: Client {client.id} ({client.full_name}) did not match event {event.id}. Score: {score}")
 
     if matched_audience and resource:
+        logging.info(f"NUDGE_ENGINE: Creating campaign for {len(matched_audience)} matched clients for event {event.id}.")
         await _create_campaign_from_event(event, user, resource, matched_audience, db_session=db_session)
+    else:
+        logging.info(f"NUDGE_ENGINE: No clients matched for event {event.id}. No campaign created.")

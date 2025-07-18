@@ -49,7 +49,8 @@ async def seed_database():
             twilio_phone_number="+143527219870", # As requested
             market_focus=["St. George", "Washington", "Hurricane", "Santa Clara"],
             tool_provider=settings.MLS_PROVIDER,
-            vertical="real_estate"
+            vertical="real_estate",
+            specialties=[] # Ensure specialties is an empty list if not provided
         )
         session.add(realtor_user)
         
@@ -59,6 +60,7 @@ async def seed_database():
             email="sarah.chen@therapypractice.com",
             phone_number="+15558675310",
             twilio_phone_number="+14352721987", # As requested
+            specialties=["anxiety", "parenting", "mindfulness", "grief"],
             business_name="Mindful Therapy Practice",
             bio="Licensed clinical psychologist specializing in anxiety and trauma.",
             tool_provider=None,
@@ -109,11 +111,28 @@ async def seed_database():
             user_id=therapist_user.id, full_name="Jennifer Martinez",
             phone="+13856268825",
             notes="Experiencing generalized anxiety and looking for coping mechanisms.",
-            last_interaction=datetime.now(timezone.utc).isoformat()
+            last_interaction=datetime.now(timezone.utc).isoformat(),
+            user_tags=["anxiety"]
         )
-        
+
+        parenting_client = Client(
+            user_id=therapist_user.id, full_name="Michael Carter",
+            notes="Struggling with work-life balance after the birth of his second child. Needs strategies for managing stress and being a more present parent.",
+            user_tags=["parenting", "stress"]
+        )
+        grief_client = Client(
+            user_id=therapist_user.id, full_name="Emily Rodriguez",
+            notes="Recently lost a parent and is navigating the grieving process. Looking for resources on coping with loss.",
+            user_tags=["grief", "loss"]
+        )
+        mindfulness_client = Client(
+            user_id=therapist_user.id, full_name="David Lee",
+            notes="Wants to learn about mindfulness and meditation to improve focus and reduce daily stress.",
+            user_tags=["mindfulness", "stress"]
+        )
+
+        therapy_clients = [standard_therapy_client, parenting_client, grief_client, mindfulness_client]
         realty_clients = [buyer_client, seller_client, investor_client, luxury_client]
-        therapy_clients = [standard_therapy_client]
         
         session.add_all(realty_clients)
         session.add_all(therapy_clients)
