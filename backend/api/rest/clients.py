@@ -105,6 +105,16 @@ async def update_client_intel_endpoint(
         tags_to_add=payload.tags_to_add,
         notes_to_add=payload.notes_to_add
     )
+    # If notes were added via an accepted AI suggestion, we must re-run the
+    # relationship planner to parse those notes for any actionable dates.
+    if payload.notes_to_add and updated_client:
+        try:
+            from agent_core.brain import relationship_planner
+            logging.info(f"API: Notes added via intel, triggering relationship planner for client {client_id}")
+            await relationship_planner.plan_relationship_campaign(client=updated_client, user=current_user)
+        except Exception as e:
+            # Log the error but do not fail the request, as the intel was still saved.
+            logging.error(f"API: Failed to trigger relationship planner after intel update for client {client_id}: {e}")
 
     if not updated_client:
         raise HTTPException(status_code=404, detail="Client not found or failed to update.")
@@ -209,16 +219,31 @@ async def update_client_details(
     current_user: User = Depends(get_current_user_from_token)
 ):
     """
-    Updates a client's details, including preferences, notes, or timezone.
+    Updates a client's details and, if notes were changed,
+    automatically triggers the relationship planner.
     """
-    # --- MODIFIED: Added 'await' for the async CRM function ---
-    updated_client = await crm_service.update_client(
+    logging.info(f"API: Received PUT request for client {client_id} with payload: {client_data.model_dump(exclude_unset=True)}")
+
+    updated_client, notes_were_updated = await crm_service.update_client(
         client_id=client_id, 
         update_data=client_data, 
         user_id=current_user.id
     )
     if not updated_client:
         raise HTTPException(status_code=404, detail="Client not found.")
+
+    # --- AUTOMATIC TRIGGER (DEFINITIVE FIX) ---
+    # The API endpoint now orchestrates the trigger, which is more reliable.
+    if notes_were_updated:
+        try:
+            from agent_core.brain import relationship_planner
+            logging.info(f"API: Notes updated, automatically triggering relationship planner for client {client_id}")
+            # We can run this directly as the API call can wait for the planning to finish.
+            await relationship_planner.plan_relationship_campaign(client=updated_client, user=current_user)
+        except Exception as e:
+            # Log the error but don't fail the entire request, as the client was still updated.
+            logging.error(f"API: Failed to automatically trigger relationship planner for client {client_id}: {e}")
+
     return updated_client
 
 @router.delete("/{client_id}/scheduled-messages", status_code=status.HTTP_204_NO_CONTENT)

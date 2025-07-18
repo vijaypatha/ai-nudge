@@ -1,7 +1,5 @@
 // frontend/app/(main)/nudges/page.tsx
-// --- AGNOSTIC VERSION ---
-// This version now fetches a `display_config` from the API and passes
-// it down to its children, making the entire view data-driven.
+// --- DEFINITIVE FIX: Fetches its own list of clients to prevent stale data.
 
 'use client';
 
@@ -15,9 +13,9 @@ import { ScheduledNudgesView } from '@/components/nudges/ScheduledNudgesView';
 import { InstantNudgeView } from '@/components/nudges/InstantNudgeView';
 
 export default function NudgesPage() {
-    const { user, clients, api, loading, fetchDashboardData: refetchOpportunities } = useAppContext();
-    
-    // --- NEW: State for nudges and display_config ---
+    // --- REMOVED: No longer taking `clients` from the global context ---
+    const { user, api, loading, fetchDashboardData: refetchOpportunities } = useAppContext();
+
     const [nudges, setNudges] = useState<CampaignBriefing[]>([]);
     const [displayConfig, setDisplayConfig] = useState<DisplayConfig>({});
     const [isNudgesLoading, setIsNudgesLoading] = useState(true);
@@ -27,18 +25,20 @@ export default function NudgesPage() {
     const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
     const [isScheduledLoading, setIsScheduledLoading] = useState(true);
 
+    // --- NEW: State management for this page's own client list ---
+    const [clients, setClients] = useState<Client[]>([]);
+    const [isClientsLoading, setIsClientsLoading] = useState(true);
+
     const tabOptions: TabOption[] = [ 
         { id: 'ai_suggestions', label: 'AI Suggestions' },
         { id: 'instant_nudge', label: 'Instant Nudge' }, 
         { id: 'scheduled', label: 'Scheduled' },
     ];
 
-    // --- NEW: Fetching logic now expects the new API response shape ---
     const fetchNudgesAndConfig = useCallback(() => {
         setIsNudgesLoading(true);
         api.get('/api/campaigns?status=DRAFT')
             .then(data => {
-                // Expects data in the format: { nudges: [], display_config: {} }
                 setNudges(data.nudges || []);
                 setDisplayConfig(data.display_config || {});
             })
@@ -46,6 +46,14 @@ export default function NudgesPage() {
             .finally(() => setIsNudgesLoading(false));
     }, [api]);
 
+    // --- NEW: Function to fetch a fresh list of all clients ---
+    const fetchClients = useCallback(() => {
+        setIsClientsLoading(true);
+        api.get('/api/clients')
+            .then(setClients)
+            .catch(err => console.error("Failed to fetch clients:", err))
+            .finally(() => setIsClientsLoading(false));
+    }, [api]);
 
     const refetchScheduled = useCallback(() => {
         setIsScheduledLoading(true);
@@ -60,15 +68,16 @@ export default function NudgesPage() {
     }, [api]);
 
     useEffect(() => {
+        // Fetch all necessary data when the page loads
         fetchNudgesAndConfig();
-    }, [fetchNudgesAndConfig]);
+        fetchClients(); 
+    }, [fetchNudgesAndConfig, fetchClients]);
 
     useEffect(() => {
         if (activeTab === 'scheduled') {
             refetchScheduled();
         }
     }, [activeTab, refetchScheduled]);
-
 
     const handleAction = async (briefing: CampaignBriefing, action: 'dismiss' | 'send') => {
         try {
@@ -78,14 +87,13 @@ export default function NudgesPage() {
             } else {
                 await api.put(`/api/campaigns/${briefing.id}`, { status: 'dismissed' });
             }
-            fetchNudgesAndConfig(); // Refetch data after action
+            fetchNudgesAndConfig();
         } catch (error) {
             console.error(`Failed to ${action} nudge:`, error);
             alert(`Error: Could not ${action} the nudge.`);
         }
     };
-    
-    // This function is passed down but the logic for updating the briefing array is managed within ActionDeck
+
     const handleBriefingUpdate = (updatedBriefing: CampaignBriefing) => {
         setNudges(prevNudges => prevNudges.map(n => n.id === updatedBriefing.id ? updatedBriefing : n));
     };
@@ -99,7 +107,7 @@ export default function NudgesPage() {
                 </div>
                 <Tabs options={tabOptions} activeTab={activeTab} setActiveTab={setActiveTab} />
             </header>
-            
+
             <div>
                 {activeTab === 'ai_suggestions' && (
                     <OpportunityNudgesView 
@@ -107,13 +115,15 @@ export default function NudgesPage() {
                         isLoading={isNudgesLoading}
                         onAction={handleAction}
                         onBriefingUpdate={handleBriefingUpdate}
-                        displayConfig={displayConfig} // Pass the config down
+                        displayConfig={displayConfig}
                     />
                 )}
                 {activeTab === 'scheduled' && (
                     <ScheduledNudgesView 
                         messages={scheduledMessages} 
-                        isLoading={isScheduledLoading} 
+                        // --- MODIFIED: Use combined loading state ---
+                        isLoading={isScheduledLoading || isClientsLoading} 
+                        // --- MODIFIED: Pass the fresh client list from this page's state ---
                         clients={clients}
                         user={user}
                         onAction={refetchScheduled}

@@ -74,39 +74,38 @@ def get_all_clients(user_id: uuid.UUID) -> List[Client]:
         statement = select(Client).where(Client.user_id == user_id)
         return session.exec(statement).all()
     
-def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tuple[Client, bool]:
+async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUID) -> tuple[Optional[Client], bool]:
     """
-    Creates a new client or updates an existing one based on deduplication logic.
+    Generically updates a client record and regenerates the embedding if notes change.
+    Returns the updated client and a boolean indicating if notes were updated.
     """
+    notes_updated = False
     with Session(engine) as session:
-        logging.info(f"CRM: Processing contact '{client_data.full_name}' for user {user_id}")
+        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
+        if not client:
+            return None, False
 
-        existing_client = find_strong_duplicate(db=session, user_id=user_id, new_contact=client_data)
+        update_dict = update_data.model_dump(exclude_unset=True)
+        if 'notes' in update_dict:
+            notes_updated = True
 
-        if existing_client:
-            logging.info(f"CRM: Found duplicate. Merging '{client_data.full_name}' into existing client ID {existing_client.id}")
-            is_updated = False
-            if not existing_client.email and client_data.email:
-                existing_client.email = client_data.email
-                is_updated = True
-            if not existing_client.phone and client_data.phone:
-                existing_client.phone = client_data.phone
-                is_updated = True
-            if is_updated:
-                session.add(existing_client)
-                session.commit()
-                session.refresh(existing_client)
-                logging.info(f"CRM: Successfully enriched client ID {existing_client.id}.")
-            return existing_client, False
-        else:
-            logging.info(f"CRM: No duplicate found. Creating new client '{client_data.full_name}' for user {user_id}.")
-            new_client_data = client_data.model_dump()
-            new_client = Client(**new_client_data, user_id=user_id)
-            session.add(new_client)
-            session.commit()
-            session.refresh(new_client)
-            logging.info(f"CRM: Successfully created new client with ID {new_client.id}")
-            return new_client, True
+        for key, value in update_dict.items():
+            setattr(client, key, value)
+        
+        if notes_updated:
+            notes_content = update_dict.get('notes')
+            if notes_content and notes_content.strip():
+                logging.info(f"CRM: Regenerating notes embedding for client {client.id} via generic update...")
+                embedding = await llm_client.generate_embedding(notes_content)
+                client.notes_embedding = embedding
+            else:
+                client.notes_embedding = None
+
+        session.add(client)
+        session.commit()
+        session.refresh(client)
+                
+        return client, notes_updated
 
 def update_last_interaction(client_id: uuid.UUID, user_id: uuid.UUID, session: Optional[Session] = None) -> Optional[Client]:
     """
@@ -233,36 +232,6 @@ async def update_client_intel(
             except Exception as e:
                 logging.error(f"CRM: Failed to trigger re-scan task for client {client.id}: {e}", exc_info=True)
         
-        return client
-
-async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUID) -> Optional[Client]:
-    """
-    Generically updates a client record. Regenerates embedding if notes change.
-    NOW ASYNCHRONOUS to support embedding calls.
-    """
-    with Session(engine) as session:
-        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
-        if not client:
-            return None
-
-        update_dict = update_data.model_dump(exclude_unset=True)
-        notes_updated = 'notes' in update_dict
-
-        for key, value in update_dict.items():
-            setattr(client, key, value)
-        
-        if notes_updated:
-            notes_content = update_dict.get('notes')
-            if notes_content and notes_content.strip():
-                logging.info(f"CRM: Regenerating notes embedding for client {client.id} via generic update...")
-                embedding = await llm_client.generate_embedding(notes_content)
-                client.notes_embedding = embedding
-            else:
-                client.notes_embedding = None
-
-        session.add(client)
-        session.commit()
-        session.refresh(client)
         return client
 
 
