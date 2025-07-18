@@ -61,8 +61,6 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
                 crm_service.save_campaign_briefing(co_pilot_briefing, session=session)
                 session.commit()
                 # --- NOTIFY FRONTEND OF NEW INTEL ---
-                # After the database commit, the new recommendations are available.
-                # Broadcast an event to tell the client's UI to refetch the data.
                 try:
                     intel_update_notification = { "type": "INTEL_UPDATED", "clientId": str(client_id) }
                     await websocket_manager.broadcast_to_client(
@@ -104,8 +102,6 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
 
             # 2. Detect intent and create a long-term plan if applicable
             detected_intent = await conversation_agent.detect_conversational_intent(incoming_message.content, user)
-            
-            # --- FIX: Pass the user's vertical to the playbook getter function ---
             playbook = get_playbook_for_intent(detected_intent, user.vertical) if detected_intent else None
 
             if playbook:
@@ -132,6 +128,19 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
                 logging.info(f"ORCHESTRATOR: Saved new pre-computed Nudge Plan.")
 
             session.commit()
+
+            # --- NOTIFY FRONTEND OF NEW INTEL (STANDARD PATH) ---
+            if recommendation_data or playbook:
+                try:
+                    intel_update_notification = { "type": "INTEL_UPDATED", "clientId": str(client_id) }
+                    await websocket_manager.broadcast_to_client(
+                        client_id=str(client_id),
+                        message=json.dumps(intel_update_notification)
+                    )
+                    logging.info(f"ORCHESTRATOR: Broadcasted INTEL_UPDATED event for client {client_id}")
+                except Exception as e:
+                    logging.error(f"ORCHESTRATOR: Failed to broadcast INTEL_UPDATED event. Error: {e}")
+
     except Exception as e:
         logging.error(f"ORCHESTRATOR: Unhandled error in handle_incoming_message: {e}", exc_info=True)
         return {"status": "error"}
