@@ -574,6 +574,48 @@ def get_conversation_summaries(user_id: uuid.UUID) -> List[Dict[str, Any]]:
     summaries.sort(key=lambda x: x['last_message_time'], reverse=True)
     return summaries
 
+def get_conversation_summaries_for_clients(client_ids: List[UUID], user_id: UUID) -> List[Dict[str, Any]]:
+    """
+    Generates a list of conversation summaries for a specific list of clients.
+    """
+    if not client_ids:
+        return []
+        
+    summaries = []
+    with Session(engine) as session:
+        # Ensure the requested clients belong to the user for security.
+        clients = session.exec(
+            select(Client).where(Client.user_id == user_id, Client.id.in_(client_ids))
+        ).all()
+        
+        for client in clients:
+            last_message_statement = select(Message).where(Message.client_id == client.id).order_by(Message.created_at.desc()).limit(1)
+            last_message = session.exec(last_message_statement).first()
+            
+            summary = {
+                "id": f"conv-{client.id}",
+                "client_id": client.id,
+                "client_name": client.full_name,
+                "last_message": last_message.content if last_message else "No messages yet.",
+                "last_message_time": last_message.created_at.isoformat() if last_message else datetime.now(timezone.utc).isoformat(),
+                "unread_count": 0
+            }
+            summaries.append(summary)
+    
+    summaries.sort(key=lambda x: x['last_message_time'], reverse=True)
+    return summaries
+
+def find_clients_by_name_keyword(query: str, user_id: UUID) -> List[Client]:
+    """
+    Finds clients by a case-insensitive match on their full name.
+    """
+    with Session(engine) as session:
+        statement = select(Client).where(
+            Client.user_id == user_id,
+            Client.full_name.ilike(f"%{query}%")
+        )
+        return session.exec(statement).all()
+
 
 # --- Scheduled Message Functions ---
 

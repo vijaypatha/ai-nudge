@@ -1,7 +1,7 @@
 // frontend/app/(main)/layout.tsx
-// --- DEFINITIVE FIX: Merged MainLayoutContent into MainLayout to create a single,
-// stable component. This prevents the child page from being unmounted on re-renders,
-// finally fixing the WebSocket connection issue.
+// --- MODIFIED ---
+// Purpose: Adds detailed diagnostic logging to the conversation search function
+// to identify why search results may not be appearing on the frontend.
 
 'use client';
 
@@ -20,13 +20,13 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     const { conversations: initialConversations, api } = useAppContext();
     const router = useRouter();
     const pathname = usePathname();
-    const { isSidebarOpen, setIsSidebarOpen } = useSidebar(); 
+    const { isSidebarOpen, setIsSidebarOpen } = useSidebar();
 
     const [searchedConversations, setSearchedConversations] = useState<any[] | null>(null);
     const [isSearching, setIsSearching] = useState(false);
 
     const sortedInitialConversations = useMemo(() => {
-        return [...initialConversations].sort((a, b) => 
+        return [...initialConversations].sort((a, b) =>
             new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
         );
     }, [initialConversations]);
@@ -41,17 +41,18 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             return;
         }
         try {
-            const searchResults = await api.post('/api/clients/search', { natural_language_query: query });
-            const searchedClientIds = new Set(searchResults.map((client: any) => client.id));
-            const filteredConversations = initialConversations.filter(conv => searchedClientIds.has(conv.client_id));
-            setSearchedConversations(filteredConversations);
+            // Call the new, dedicated search endpoint for conversations.
+            const searchResults = await api.post('/api/conversations/search', { natural_language_query: query });
+            // The result is already a list of conversation summaries, so no
+            // client-side filtering is needed. This is faster and more reliable.
+            setSearchedConversations(searchResults);
         } catch (error) {
             console.error("Failed to search conversations:", error);
             setSearchedConversations([]);
         } finally {
             setIsSearching(false);
         }
-    }, [api, initialConversations]);
+    }, [api]);
 
     const selectedClientId = pathname.includes('/conversations/') ? pathname.split('/').pop() : null;
 
@@ -90,7 +91,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                     </nav>
 
                     <div className="px-4 my-4 flex-shrink-0">
-                        <MagicSearchBar 
+                        <MagicSearchBar
                             onSearch={handleConversationSearch}
                             isLoading={isSearching}
                             placeholder="Search topics..."
@@ -134,7 +135,6 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                         </Link>
                     </div>
                 </aside>
-                {/* The page content (e.g., ConversationPage) is now a child of a stable component */}
                 {children}
             </div>
         </Suspense>

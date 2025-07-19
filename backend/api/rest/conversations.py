@@ -13,8 +13,10 @@ from data.models.campaign import RecommendationSlateResponse, CampaignBriefing
 from pydantic import BaseModel
 from data import crm as crm_service
 from agent_core import orchestrator
+from agent_core import audience_builder
 
-router = APIRouter(tags=["Conversations"])
+
+router = APIRouter(prefix="/conversations", tags=["Conversations"])
 
 class ConversationSummary(BaseModel):
     id: str
@@ -34,6 +36,9 @@ class ConversationDetailResponse(BaseModel):
 
 class SendReplyPayload(BaseModel):
     content: str
+
+class ConversationSearchQuery(BaseModel):
+    natural_language_query: str
 
 
 @router.get("/conversations/", response_model=List[ConversationSummary])
@@ -149,3 +154,44 @@ async def get_scheduled_messages(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch scheduled messages: {str(e)}")
+    
+
+@router.post("/search")
+async def search_conversations(
+    query: ConversationSearchQuery,
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Performs a HYBRID search for clients (semantic + name keyword) and returns
+    their corresponding conversation summaries.
+    """
+    search_query = query.natural_language_query
+    logging.info(f"API: Hybrid searching conversations for user '{current_user.id}' with query: '{search_query}'")
+    
+    # --- Step 1: Perform SEMANTIC search ---
+    semantic_match_ids = await audience_builder.find_clients_by_semantic_query(
+        search_query, 
+        user_id=current_user.id
+    )
+    
+    # --- Step 2: Perform KEYWORD search on client names ---
+    keyword_match_clients = crm_service.find_clients_by_name_keyword(
+        query=search_query,
+        user_id=current_user.id
+    )
+    keyword_match_ids = [client.id for client in keyword_match_clients]
+    
+    # --- Step 3: Combine the results ---
+    # Use a set to automatically handle duplicates.
+    combined_ids = set(semantic_match_ids).union(set(keyword_match_ids))
+    
+    if not combined_ids:
+        return []
+
+    # Step 4: Fetch the conversation summaries for the combined list of matched clients.
+    summaries = crm_service.get_conversation_summaries_for_clients(
+        client_ids=list(combined_ids),
+        user_id=current_user.id
+    )
+    
+    return summaries
