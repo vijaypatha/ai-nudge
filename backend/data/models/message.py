@@ -24,6 +24,15 @@ class MessageDirection(str, Enum):
     INBOUND = "inbound"
     OUTBOUND = "outbound"
 
+class MessageSource(str, Enum):
+    MANUAL = "manual"
+    SCHEDULED = "scheduled"
+    FAQ_AUTO_RESPONSE = "faq_auto_response"
+
+class MessageSenderType(str, Enum):
+    USER = "user"
+    SYSTEM = "system"
+
 class Message(SQLModel, table=True):
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id", index=True)
@@ -31,13 +40,11 @@ class Message(SQLModel, table=True):
     content: str
     direction: MessageDirection = Field(index=True)
     status: MessageStatus
+    source: MessageSource = Field(default=MessageSource.MANUAL, index=True)
+    sender_type: MessageSenderType = Field(default=MessageSenderType.USER, index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
-    
     client: Optional["Client"] = Relationship(back_populates="messages")
     user: Optional["User"] = Relationship(back_populates="messages")
-    
-    # --- DEFINITIVE FIX: A Message can now have multiple AI suggestions (the inline slate AND the plan). ---
-    # This changes the relationship to a list to correctly support our "Do Both" strategy.
     ai_drafts: List["CampaignBriefing"] = Relationship(back_populates="parent_message")
 
 class ScheduledMessage(SQLModel, table=True):
@@ -58,6 +65,7 @@ class ScheduledMessage(SQLModel, table=True):
     user: Optional["User"] = Relationship(back_populates="scheduled_messages")
     parent_plan: Optional["CampaignBriefing"] = Relationship(back_populates="scheduled_messages")
 
+# Replace with this updated Pydantic model
 class MessageWithDraft(BaseModel):
     """API model for a Message that includes its optional AI suggestions."""
     id: UUID
@@ -66,6 +74,10 @@ class MessageWithDraft(BaseModel):
     content: str
     direction: MessageDirection
     status: MessageStatus
+    # --- NEW FIELDS START ---
+    source: MessageSource
+    sender_type: MessageSenderType
+    # --- NEW FIELDS END ---
     created_at: datetime
     # --- DEFINITIVE FIX: Updated to reflect the one-to-many relationship ---
     ai_drafts: List["RecommendationSlateResponse"] = []

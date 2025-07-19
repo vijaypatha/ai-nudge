@@ -11,7 +11,13 @@ from data import crm as crm_service
 from data.database import engine
 from data.models.client import Client
 from data.models.faq import Faq
-from data.models.message import Message, MessageDirection, MessageStatus
+from data.models.message import (
+    Message,
+    MessageDirection,
+    MessageStatus,
+    MessageSource,
+    MessageSenderType,
+)
 from data.models.user import User
 from integrations import twilio_outgoing
 from integrations.gemini import match_faq_with_gemini
@@ -68,15 +74,18 @@ async def process_incoming_sms(from_number: str, to_number: str, body: str):
         logging.info(f"TWILIO: Logged incoming message from client {found_client.id}")
 
         # --- NEW: Broadcast a notification after successfully saving. ---
+        # Replace with this updated block
         try:
             notification = {
                 "type": "NEW_MESSAGE",
                 "clientId": str(found_client.id)
             }
-            await websocket_manager.broadcast_to_client(
+            # FIX: Using the correct broadcast method name and arguments
+            await websocket_manager.broadcast_json_to_client(
                 client_id=str(found_client.id),
-                message=json.dumps(notification)
+                data=notification
             )
+            logging.info(f"TWILIO: Broadcasted WebSocket notification for client {found_client.id}")
         except Exception as e:
             logging.error(f"TWILIO: Failed to broadcast WebSocket notification for client {found_client.id}. Error: {e}")
 
@@ -101,6 +110,7 @@ async def process_incoming_sms(from_number: str, to_number: str, body: str):
                         from_number=to_number, # Reply from the number that was texted
                     )
 
+                    # Replace with this updated block
                     if sms_sent_successfully:
                         outgoing_message = Message(
                             client_id=found_client.id,
@@ -108,6 +118,10 @@ async def process_incoming_sms(from_number: str, to_number: str, body: str):
                             content=faq_response[:320],
                             direction=MessageDirection.OUTBOUND,
                             status=MessageStatus.SENT,
+                            # --- NEW FIELDS START ---
+                            source=MessageSource.FAQ_AUTO_RESPONSE, # Mark as an automated response
+                            sender_type=MessageSenderType.SYSTEM,    # Mark as sent by the system
+                            # --- NEW FIELDS END ---
                         )
                         crm_service.save_message(outgoing_message)
                         logging.info(f"TWILIO: Logged outgoing FAQ response for client {found_client.id}")

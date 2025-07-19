@@ -20,7 +20,15 @@ from data.models.client import Client
 from data.models.resource import Resource
 from data.models.campaign import MatchedClient
 from agent_core import llm_client
-from data.models.message import ScheduledMessage, Message, MessageDirection, MessageStatus
+# Replace with this updated import
+from data.models.message import (
+    ScheduledMessage,
+    Message,
+    MessageDirection,
+    MessageStatus,
+    MessageSource,
+    MessageSenderType,
+)
 from datetime import datetime, timezone
 from api.websocket_manager import manager
 
@@ -245,12 +253,17 @@ def send_scheduled_message_task(message_id: str):
             scheduled_message.sent_at = datetime.now(timezone.utc)
             session.add(scheduled_message)
 
+            # Replace with this updated block
             conversation_log_entry = Message(
                 user_id=scheduled_message.user_id,
                 client_id=scheduled_message.client_id,
                 content=scheduled_message.content,
                 direction=MessageDirection.OUTBOUND,
                 status=MessageStatus.SENT,
+                # --- NEW FIELDS START ---
+                source=MessageSource.SCHEDULED,      # Mark as a scheduled message
+                sender_type=MessageSenderType.SYSTEM, # Mark as sent by the system
+                # --- NEW FIELDS END ---
             )
             session.add(conversation_log_entry)
             session.commit()

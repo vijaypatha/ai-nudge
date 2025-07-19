@@ -62,7 +62,20 @@ export interface CampaignBriefing {
     parent_message_id?: string;
 }
 
-export interface Message { id:string; client_id: string; content: string; direction: 'inbound' | 'outbound'; status: string; created_at: string; ai_drafts?: CampaignBriefing[]; }
+// Replace with this updated interface
+export interface Message {
+  id: string;
+  client_id: string;
+  content: string;
+  direction: 'inbound' | 'outbound';
+  status: string;
+  created_at: string;
+  ai_drafts?: CampaignBriefing[];
+  // --- NEW FIELDS START ---
+  source: 'manual' | 'scheduled' | 'faq_auto_response';
+  sender_type: 'user' | 'system';
+  // --- NEW FIELDS END ---
+}
 export interface Conversation { id: string; client_id: string; client_name: string; last_message: string; last_message_time: string; unread_count: number; }
 
 export interface ScheduledMessage {

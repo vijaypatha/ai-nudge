@@ -1,5 +1,5 @@
 # Docker Compose configuration for AI Nudge application
-# --- DEFINITIVE FIX: Removes conflicting 'environment' block from backend service ---
+# --- FINAL VERSION: Reverts CORS to specific origin ---
 
 services:
   # PostgreSQL Database Service
@@ -37,11 +37,9 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8001:8000"
-    # --- MODIFIED: Removed the 'environment' block ---
-    # The 'env_file' directive below is the correct and sufficient way to load
-    # all necessary variables from the .env file. This resolves the override conflict.
+    # --- THIS BLOCK IS REVERTED TO THE SECURE SETTING ---
     environment:
-    - WEBSOCKET_ALLOWED_ORIGINS=["http://localhost:3000"]
+      WEBSOCKET_ALLOWED_ORIGINS: '["http://localhost:3000"]'
     env_file:
       - ./backend/.env
     volumes:

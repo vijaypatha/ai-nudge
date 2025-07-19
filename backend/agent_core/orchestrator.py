@@ -1,7 +1,5 @@
 # File Path: backend/agent_core/orchestrator.py
-# --- HARDENED & AGNOSTIC VERSION ---
-# This version fixes the TypeError by passing the user's vertical to the
-# playbook function and refactors variable names to be generic.
+# --- MODIFIED: Fixes broadcast method call and adds AI tag processing ---
 
 import logging
 import asyncio
@@ -14,7 +12,14 @@ from sqlmodel import Session, select
 from data.database import engine
 from data.models.user import User
 from data.models.client import Client
-from data.models.message import Message
+
+from data.models.message import (
+    Message,
+    MessageDirection,
+    MessageStatus,
+    MessageSource,
+    MessageSenderType,
+)
 from data.models.campaign import CampaignBriefing, CampaignStatus, CoPilotAction
 from data import crm as crm_service
 from agent_core.agents import conversation as conversation_agent
@@ -63,9 +68,10 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
                 # --- NOTIFY FRONTEND OF NEW INTEL ---
                 try:
                     intel_update_notification = { "type": "INTEL_UPDATED", "clientId": str(client_id) }
-                    await websocket_manager.broadcast_to_client(
+                    # [FIX] Corrected method name and argument
+                    await websocket_manager.broadcast_json_to_client(
                         client_id=str(client_id),
-                        message=json.dumps(intel_update_notification)
+                        data=intel_update_notification
                     )
                     logging.info(f"ORCHESTRATOR: Broadcasted INTEL_UPDATED event for client {client_id}")
                 except Exception as e:
@@ -85,10 +91,19 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
             client = crm_service.get_client_by_id(client_id, user_id=user.id)
             if not client: raise ValueError(f"Client {client_id} not found.")
 
-            # 1. Generate immediate recommendations
+            # 1. Generate immediate recommendations (includes drafts AND tags)
             recommendation_data = await conversation_agent.generate_recommendation_slate(
                 user, client_id, incoming_message, conversation_history
             )
+
+            # [NEW] Check for extracted tags and add them to the client record
+            if recommendation_data and recommendation_data.get("tags"):
+                tags_to_add = recommendation_data.get("tags")
+                if isinstance(tags_to_add, list) and len(tags_to_add) > 0:
+                    logging.info(f"ORCHESTRATOR: Extracted tags from message: {tags_to_add}. Updating client intel.")
+                    await crm_service.update_client_intel(client_id=client_id, user_id=user.id, tags_to_add=tags_to_add)
+
+            # Process recommendations for the UI
             if recommendation_data:
                 draft_rec = next((r for r in recommendation_data.get("recommendations", []) if r.get("type") == "SUGGEST_DRAFT"), None)
                 draft_text = draft_rec["payload"]["text"] if draft_rec and draft_rec.get("payload") else "Could not generate draft."
@@ -133,9 +148,10 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
             if recommendation_data or playbook:
                 try:
                     intel_update_notification = { "type": "INTEL_UPDATED", "clientId": str(client_id) }
-                    await websocket_manager.broadcast_to_client(
+                    # [FIX] Corrected method name and argument
+                    await websocket_manager.broadcast_json_to_client(
                         client_id=str(client_id),
-                        message=json.dumps(intel_update_notification)
+                        data=intel_update_notification
                     )
                     logging.info(f"ORCHESTRATOR: Broadcasted INTEL_UPDATED event for client {client_id}")
                 except Exception as e:
@@ -148,8 +164,14 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
     return {"status": "processed"}
 
 
+# --- THIS ENTIRE FUNCTION HAS BEEN REPLACED ---
 async def orchestrate_send_message_now(client_id: uuid.UUID, content: str, user_id: uuid.UUID) -> bool:
-    logging.info(f"ORCHESTRATOR: Orchestrating immediate send for client {client_id} for user {user_id}")
+    """
+    Sends a message immediately, logs it to the conversation history, and updates client interaction timestamps.
+    """
+    logging.info(f"ORCHSTRATOR: Orchestrating immediate send for client {client_id} for user {user_id}")
+
+    # Section for slate management remains unchanged
     with Session(engine) as session:
         all_active_slates = crm_service.get_all_active_slates_for_client(client_id, user_id, session)
         immediate_slate = next((s for s in all_active_slates if not s.is_plan), None)
@@ -158,6 +180,7 @@ async def orchestrate_send_message_now(client_id: uuid.UUID, content: str, user_
             crm_service.update_slate_status(immediate_slate.id, CampaignStatus.COMPLETED, user_id, session)
         session.commit()
     
+    # Section for retrieving user and client remains unchanged
     user = crm_service.get_user_by_id(user_id)
     client = crm_service.get_client_by_id(client_id, user_id=user_id)
     if not user or not user.twilio_phone_number:
@@ -167,11 +190,31 @@ async def orchestrate_send_message_now(client_id: uuid.UUID, content: str, user_
         logging.error(f"ORCHESTRATOR ERROR: Client {client_id} not found for user {user_id} or has no phone number.")
         return False
         
+    # Section for personalizing and sending SMS remains unchanged
     first_name = client.full_name.strip().split(' ')[0]
     personalized_content = content.replace("[Client Name]", first_name)
     was_sent = twilio_outgoing.send_sms(from_number=user.twilio_phone_number, to_number=client.phone, body=personalized_content)
     
+    # --- NEW MESSAGE LOGGING LOGIC ---
     if was_sent:
-        crm_service.update_last_interaction(client_id, user_id=user_id)
+        logging.info(f"ORCHESTRATOR: Message sent successfully via Twilio. Now logging to database for client {client_id}.")
+        # Create the universal message log entry
+        message_log = Message(
+            user_id=user_id,
+            client_id=client_id,
+            content=personalized_content,
+            direction=MessageDirection.OUTBOUND,
+            status=MessageStatus.SENT,
+            source=MessageSource.MANUAL, # Mark as manually sent by a user
+            sender_type=MessageSenderType.USER,
+        )
+        # Save the log entry to the database
+        crm_service.save_message(message_log)
         
+        # Update the client's last interaction timestamp
+        crm_service.update_last_interaction(client_id, user_id=user_id)
+        logging.info(f"ORCHESTRATOR: Database updated for manual message to client {client_id}.")
+    else:
+        logging.error(f"ORCHESTRATOR: Failed to send SMS for client {client_id}. Message will not be logged.")
+
     return was_sent

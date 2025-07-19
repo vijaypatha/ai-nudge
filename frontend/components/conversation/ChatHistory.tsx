@@ -59,14 +59,29 @@ export const ChatHistory = ({
                             {/* Render the message bubble */}
                             <div className={clsx("flex items-end gap-3", msg.direction === 'inbound' ? 'justify-start' : 'justify-end')}>
                                 {msg.direction === 'inbound' && <Avatar name={selectedClient.full_name} className="w-8 h-8 text-xs" />}
+                                
                                 <div className={clsx("p-3 px-4 rounded-t-xl max-w-lg", {
                                     'bg-gray-800 text-brand-text-muted rounded-br-xl': msg.direction === 'inbound',
                                     'bg-primary-action text-brand-dark font-medium rounded-bl-xl': msg.direction === 'outbound'
                                 })}>
                                     <p className="whitespace-pre-wrap">{msg.content}</p>
-                                    <p className="text-right text-xs mt-1 opacity-70">
-                                        {new Date(msg.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                                    </p>
+                                    {/* --- NEW METADATA DISPLAY LOGIC --- */}
+                                    <div className="flex items-center justify-end text-xs mt-1 opacity-70 gap-2">
+                                        {msg.direction === 'outbound' && msg.source === 'scheduled' && (
+                                            <span className="flex items-center gap-1 font-semibold">
+                                                🕒 <span className='opacity-80'>Scheduled</span>
+                                            </span>
+                                        )}
+                                        {msg.direction === 'outbound' && msg.source === 'faq_auto_response' && (
+                                            <span className="flex items-center gap-1 font-semibold">
+                                                ✨ <span className='opacity-80'>Auto-Response</span>
+                                            </span>
+                                        )}
+                                        <span>
+                                            {new Date(msg.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                        </span>
+                                    </div>
+                                    {/* --- END NEW LOGIC --- */}
                                 </div>
                             </div>
                             

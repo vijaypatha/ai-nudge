@@ -76,7 +76,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         if (!api) return;
         try {
             const [convoData, scheduledData] = await Promise.all([
-                api.get(`/api/messages/?client_id=${currentClientId}`),
+                api.get(`/api/conversations/messages/?client_id=${currentClientId}`),
                 refetchScheduledMessagesForClient(currentClientId)
             ]);
 
@@ -134,7 +134,7 @@ useEffect(() => {
 
     const wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
     // FIX: Append the correct auth token as a query parameter
-    const wsUrl = `${wsBaseUrl}/ws/${clientId}?token=${token}`;
+    const wsUrl = `${wsBaseUrl}/api/ws/${clientId}?token=${token}`;
 
     console.log(`WS: Attempting to connect to ${wsUrl}`);
     ws.current = new WebSocket(wsUrl);
@@ -173,7 +173,8 @@ useEffect(() => {
     const handleSendMessage = useCallback(async (content: string) => {
         if (!content.trim() || !selectedClient) return;
         setIsSending(true);
-        const optimisticMessage: Message = { id: `agent-${Date.now()}`, client_id: selectedClient.id, content, direction: 'outbound', status: 'pending', created_at: new Date().toISOString() };
+        // Replace with this updated object definition
+        const optimisticMessage: Message = { id: `agent-${Date.now()}`, client_id: selectedClient.id, content, direction: 'outbound', status: 'pending', created_at: new Date().toISOString(), source: 'manual', sender_type: 'user' };
         
         setConversationData(prevData => ({
             ...(prevData || { messages: [], immediate_recommendations: null, active_plan: null }),
