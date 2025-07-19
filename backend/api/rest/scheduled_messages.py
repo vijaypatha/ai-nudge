@@ -1,20 +1,28 @@
 # File Path: backend/api/rest/scheduled_messages.py
-# File Path: backend/api/rest/scheduled_messages.py
+# --- FULLY REVISED AND HARDENED ---
 
-from fastapi import APIRouter, HTTPException, Depends, status
+import logging
+from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
-from data.models.user import User
-from data.models.message import ScheduledMessage, ScheduledMessageUpdate, ScheduledMessageCreate
-from data import crm as crm_service
+
+import pytz
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlmodel import Session
+
 from api.security import get_current_user_from_token
-from celery_tasks import send_scheduled_message_task
-import logging
+from celery_worker import celery_app
+from data import crm as crm_service
+from data.database import engine
+from data.models.message import (MessageStatus, ScheduledMessage,
+                                 ScheduledMessageCreate, ScheduledMessageUpdate)
+from data.models.user import User
 
 router = APIRouter(
     prefix="/scheduled-messages",
     tags=["Scheduled Messages"]
 )
+
 
 @router.post("", response_model=ScheduledMessage, status_code=status.HTTP_201_CREATED)
 async def create_scheduled_message(
@@ -22,51 +30,56 @@ async def create_scheduled_message(
     current_user: User = Depends(get_current_user_from_token)
 ):
     """
-    Schedules a new message to be sent at a future time.
+    Schedules a new message, handling time zones and creating a Celery task.
     """
     try:
-        # Verify the client belongs to the user before scheduling
+        # 1. Validate timezone and client ownership
+        try:
+            tz = pytz.timezone(message_data.timezone)
+        except pytz.UnknownTimeZoneError:
+            raise HTTPException(status_code=400, detail=f"Unknown timezone: '{message_data.timezone}'")
+
         client = crm_service.get_client_by_id(client_id=message_data.client_id, user_id=current_user.id)
         if not client:
             raise HTTPException(status_code=404, detail="Client not found.")
 
-        new_message = crm_service.create_scheduled_message(
-            message_data=message_data,
-            user_id=current_user.id
+        # 2. Convert local time from frontend to UTC for storage
+        local_time = message_data.scheduled_at_local
+        if local_time.tzinfo is None:
+            local_time = tz.localize(local_time)
+
+        utc_time = local_time.astimezone(pytz.utc)
+
+        # 3. Create the Celery task
+        from celery_tasks import send_scheduled_message_task
+        task = send_scheduled_message_task.apply_async(
+            (str(client.id), message_data.content, str(current_user.id)),
+            eta=utc_time
         )
+        logging.info(f"API: Scheduled message task {task.id} for client {client.id} at {utc_time} UTC.")
 
-        # Schedule the Celery task to send the message at the specified time
-        send_scheduled_message_task.apply_async(
-            (str(new_message.id),),
-            eta=new_message.scheduled_at
-        )
-        logging.info(f"Scheduled message {new_message.id} for client {new_message.client_id} at {new_message.scheduled_at}")
-
-        return new_message
-    except Exception as e:
-        logging.error(f"Failed to schedule message: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to schedule message: {str(e)}")
-
-
-@router.get("", response_model=List[ScheduledMessage])
-async def get_scheduled_messages(
-    client_id: Optional[UUID] = None,
-    current_user: User = Depends(get_current_user_from_token)
-):
-    """
-    Get scheduled messages. If client_id is provided, it filters for that client.
-    Otherwise, it returns all scheduled messages for the current user.
-    """
-    try:
-        if client_id:
-            return crm_service.get_scheduled_messages_for_client(
+        # 4. Save the record to our database with the task_id
+        with Session(engine) as session:
+            db_message = ScheduledMessage(
+                client_id=message_data.client_id,
                 user_id=current_user.id,
-                client_id=client_id
+                content=message_data.content,
+                scheduled_at_utc=utc_time,
+                timezone=message_data.timezone,
+                celery_task_id=task.id,
+                status=MessageStatus.PENDING,
             )
-        else:
-            return crm_service.get_all_scheduled_messages(user_id=current_user.id)
+            session.add(db_message)
+            session.commit()
+            session.refresh(db_message)
+            return db_message
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch scheduled messages: {str(e)}")
+        logging.error(f"API: Failed to schedule message: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error while scheduling message.")
+
 
 @router.put("/{message_id}", response_model=ScheduledMessage)
 async def update_scheduled_message(
@@ -75,40 +88,96 @@ async def update_scheduled_message(
     current_user: User = Depends(get_current_user_from_token)
 ):
     """
-    Updates a scheduled message. This can be used to change content, time, or status (e.g., to 'cancelled').
+    Updates a pending scheduled message. Revokes the old Celery task and creates a new one.
     """
-    message = crm_service.get_scheduled_message_by_id(message_id)
-    if not message or message.user_id != current_user.id:
-         raise HTTPException(status_code=404, detail="Scheduled message not found.")
+    with Session(engine) as session:
+        db_message = crm_service.get_scheduled_message_by_id(message_id)
+        if not db_message or db_message.user_id != current_user.id:
+             raise HTTPException(status_code=404, detail="Scheduled message not found.")
 
-    updated_message = crm_service.update_scheduled_message(
-        message_id=message_id,
-        update_data=message_data.model_dump(exclude_unset=True),
-        user_id=current_user.id
-    )
-    
-    if not updated_message:
-        raise HTTPException(status_code=404, detail="Scheduled message not found during update.")
-    
-    # If the scheduled time was changed, you would ideally revoke the old task and schedule a new one.
-    # This simplified example does not handle task revocation.
-    
-    return updated_message
+        if db_message.status != MessageStatus.PENDING:
+            raise HTTPException(status_code=400, detail="Can only edit messages that are pending.")
 
-@router.delete("/{message_id}", status_code=204)
-async def delete_scheduled_message(
+        # 1. Revoke the old Celery task
+        if db_message.celery_task_id:
+            celery_app.control.revoke(db_message.celery_task_id)
+            logging.info(f"API: Revoked old task {db_message.celery_task_id} for message {message_id}.")
+
+        # 2. Update fields
+        update_dict = message_data.model_dump(exclude_unset=True)
+        db_message.content = update_dict.get("content", db_message.content)
+        new_timezone_str = update_dict.get("timezone", db_message.timezone)
+
+        # 3. Recalculate UTC time if time or timezone changed
+        new_local_time = update_dict.get("scheduled_at_local")
+        if new_local_time:
+            try:
+                tz = pytz.timezone(new_timezone_str)
+                if new_local_time.tzinfo is None:
+                    new_local_time = tz.localize(new_local_time)
+                db_message.scheduled_at_utc = new_local_time.astimezone(pytz.utc)
+                db_message.timezone = new_timezone_str
+            except pytz.UnknownTimeZoneError:
+                raise HTTPException(status_code=400, detail=f"Unknown timezone: '{new_timezone_str}'")
+
+        # 4. Schedule a new task with the updated info
+        from celery_tasks import send_scheduled_message_task
+        new_task = send_scheduled_message_task.apply_async(
+            (str(db_message.client_id), db_message.content, str(db_message.user_id)),
+            eta=db_message.scheduled_at_utc
+        )
+        db_message.celery_task_id = new_task.id
+        logging.info(f"API: Scheduled new task {new_task.id} for updated message {message_id}.")
+
+        session.add(db_message)
+        session.commit()
+        session.refresh(db_message)
+        return db_message
+
+
+@router.delete("/{message_id}", status_code=200, response_model=ScheduledMessage)
+async def cancel_scheduled_message(
     message_id: UUID,
     current_user: User = Depends(get_current_user_from_token)
 ):
     """
-    Permanently deletes a scheduled message.
+    Cancels a pending scheduled message by updating its status to 'cancelled'
+    and revoking its Celery task. This is a soft delete for audit purposes.
     """
-    message = crm_service.get_scheduled_message_by_id(message_id)
-    if not message or message.user_id != current_user.id:
-         raise HTTPException(status_code=404, detail="Scheduled message not found.")
+    db_message = crm_service.get_scheduled_message_by_id(message_id)
+    if not db_message or db_message.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Scheduled message not found.")
 
-    # Note: Also consider revoking the Celery task if it was scheduled.
-    success = crm_service.delete_scheduled_message(message_id=message_id, user_id=current_user.id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Scheduled message not found during deletion.")
-    return
+    if db_message.status != MessageStatus.PENDING:
+        raise HTTPException(status_code=400, detail="Message is not pending and cannot be cancelled.")
+
+    # 1. Revoke the Celery task
+    if db_message.celery_task_id:
+        celery_app.control.revoke(db_message.celery_task_id)
+        logging.info(f"API: Revoked task {db_message.celery_task_id} for cancelled message {message_id}.")
+
+    # 2. Use the CRM function for soft-delete
+    cancelled_message = crm_service.cancel_scheduled_message(message_id=message_id, user_id=current_user.id)
+    if not cancelled_message:
+         # This case should be rare given the checks above, but good for safety
+         raise HTTPException(status_code=404, detail="Failed to cancel message.")
+
+    return cancelled_message
+
+
+@router.get("", response_model=List[ScheduledMessage])
+async def get_all_scheduled_messages(
+    client_id: Optional[UUID] = None,
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Get all scheduled messages for the user, optionally filtered by client.
+    """
+    try:
+        # This logic remains correct.
+        if client_id:
+            return crm_service.get_scheduled_messages_for__client(user_id=current_user.id, client_id=client_id)
+        else:
+            return crm_service.get_all_scheduled_messages(user_id=current_user.id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to fetch scheduled messages.")

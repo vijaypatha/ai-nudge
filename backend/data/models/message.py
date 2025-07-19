@@ -28,9 +28,11 @@ class MessageSource(str, Enum):
     MANUAL = "manual"
     SCHEDULED = "scheduled"
     FAQ_AUTO_RESPONSE = "faq_auto_response"
+    INSTANT_NUDGE = "instant_nudge" # Added for Instant Nudge attribution
 
 class MessageSenderType(str, Enum):
     USER = "user"
+    AI = "ai" # Added for AI-generated messages
     SYSTEM = "system"
 
 class Message(SQLModel, table=True):
@@ -53,10 +55,12 @@ class ScheduledMessage(SQLModel, table=True):
     client_id: UUID = Field(foreign_key="client.id")
     parent_plan_id: Optional[UUID] = Field(default=None, foreign_key="campaignbriefing.id", index=True)
     content: str
-    scheduled_at: datetime = Field(index=True)
+    scheduled_at_utc: datetime = Field(index=True) # Renamed for clarity that this is always UTC
+    timezone: str = Field(index=True) # Added to store the original scheduling timezone
     status: MessageStatus = Field(default=MessageStatus.PENDING, index=True)
     sent_at: Optional[datetime] = Field(default=None)
     error_message: Optional[str] = Field(default=None)
+    celery_task_id: Optional[str] = Field(default=None, index=True) # Added to manage the Celery task
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     playbook_touchpoint_id: Optional[str] = Field(default=None, index=True)
     is_recurring: bool = Field(default=False, index=True)
@@ -88,7 +92,8 @@ class MessageWithDraft(BaseModel):
 class ScheduledMessageCreate(SQLModel):
     client_id: UUID
     content: str
-    scheduled_at: datetime
+    scheduled_at_local: datetime # Frontend sends local time
+    timezone: str # Frontend sends timezone string e.g., "America/New_York"
 
 class SendMessageImmediate(SQLModel):
     client_id: UUID
@@ -100,5 +105,5 @@ class IncomingMessage(SQLModel):
 
 class ScheduledMessageUpdate(SQLModel):
     content: Optional[str] = None
-    scheduled_at: Optional[datetime] = None
-    status: Optional[MessageStatus] = None
+    scheduled_at_local: Optional[datetime] = None # Frontend sends local time
+    timezone: Optional[str] = None

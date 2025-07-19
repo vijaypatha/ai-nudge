@@ -8,7 +8,7 @@ import uuid
 from sqlmodel import Session
 from data.models.user import User
 from api.security import get_current_user_from_token
-from data.models.message import Message, MessageWithDraft
+from data.models.message import Message, MessageWithDraft, MessageSource
 from data.models.campaign import RecommendationSlateResponse, CampaignBriefing
 from pydantic import BaseModel
 from data import crm as crm_service
@@ -96,43 +96,33 @@ async def get_conversation_history_by_client_id(
 
 
 
-@router.post("/conversations/{client_id}/send_reply/", response_model=Message)
+@router.post("/{client_id}/send_reply", response_model=Message)
 async def send_reply(
     client_id: uuid.UUID,
     payload: SendReplyPayload,
     current_user: User = Depends(get_current_user_from_token)
 ):
     """Sends a new message from the user to a client."""
-    # This function remains unchanged, but is included for completeness of the file.
     try:
-        client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
-        if not client:
-            raise HTTPException(status_code=404, detail="Client not found.")
-
-        was_sent = await orchestrator.orchestrate_send_message_now(
+        # Orchestrator now handles the entire process, including saving the message.
+        # It returns the saved message object or None on failure.
+        saved_message = await orchestrator.orchestrate_send_message_now(
             client_id=client_id,
             content=payload.content,
-            user_id=current_user.id
+            user_id=current_user.id,
+            source=MessageSource.MANUAL # Explicitly set source for manual replies
         )
 
-        if not was_sent:
+        if not saved_message:
             raise HTTPException(status_code=500, detail="Failed to send message.")
 
-        # Create a new message record after sending.
-        new_message = Message(
-            client_id=client_id,
-            user_id=current_user.id,
-            content=payload.content,
-            direction='outbound',
-            status='sent'
-        )
-        crm_service.save_message(new_message)
-        return new_message
+        # The message is already saved by the orchestrator. We just return it.
+        # This fixes the double-saving bug.
+        return saved_message
 
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to send reply: {str(e)}")
+        logging.error(f"API send_reply failed for client {client_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred.")
 
 
 @router.get("/scheduled-messages/", response_model=List)

@@ -11,7 +11,7 @@ from sqlmodel import Session
 
 from data.models.user import User
 from api.security import get_current_user_from_token
-from data.models.message import SendMessageImmediate
+from data.models.message import SendMessageImmediate, Message
 from data.models.campaign import CampaignBriefing, CampaignUpdate, RecommendationSlateResponse, CampaignStatus
 from agent_core.brain.verticals import VERTICAL_CONFIGS
 from agent_core.agents import conversation as conversation_agent
@@ -158,18 +158,23 @@ async def plan_relationship_campaign_endpoint(payload: PlanRelationshipPayload, 
     return {"status": "success", "message": f"Relationship campaign planning started for {client.full_name}."}
 
 
-@router.post("/messages/send-now", status_code=200)
-async def send_message_now(message_data: SendMessageImmediate, current_user: User = Depends(get_current_user_from_token)):
+@router.post("/messages/send-now", status_code=200, response_model=Message)
+async def send_instant_nudge_now(message_data: SendMessageImmediate, current_user: User = Depends(get_current_user_from_token)):
+    """ Sends an instant nudge and logs it with the correct source. """
     from agent_core import orchestrator
-    success = await orchestrator.orchestrate_send_message_now(
+    from data.models.message import MessageSource
+
+    saved_message = await orchestrator.orchestrate_send_message_now(
         client_id=message_data.client_id,
         content=message_data.content,
-        user_id=current_user.id
+        user_id=current_user.id,
+        source=MessageSource.INSTANT_NUDGE # Pass the correct source
     )
-    if success:
-        return {"message": "Message sent successfully!", "client_id": message_data.client_id}
+
+    if saved_message:
+        return saved_message
     else:
-        raise HTTPException(status_code=500, detail="Failed to send message.")
+        raise HTTPException(status_code=500, detail="Failed to send instant nudge.")
 
 
 @router.put("/{campaign_id}", response_model=CampaignBriefing)

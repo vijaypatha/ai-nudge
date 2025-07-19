@@ -659,14 +659,22 @@ def update_scheduled_message(message_id: uuid.UUID, update_data: Dict[str, Any],
         session.refresh(message)
         return message
 
-def delete_scheduled_message(message_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+def cancel_scheduled_message(message_id: uuid.UUID, user_id: uuid.UUID) -> Optional[ScheduledMessage]:
+    """
+    Cancels a scheduled message by updating its status. Does not delete the record.
+    """
     with Session(engine) as session:
         message = session.exec(select(ScheduledMessage).where(ScheduledMessage.id == message_id, ScheduledMessage.user_id == user_id)).first()
-        if not message:
-            return False
-        session.delete(message)
+        if not message or message.status != MessageStatus.PENDING:
+            # Can only cancel pending messages
+            return None
+
+        message.status = MessageStatus.CANCELLED
+        session.add(message)
         session.commit()
-        return True
+        session.refresh(message)
+        logging.info(f"CRM: Cancelled scheduled message {message_id} for user {user_id}. Record retained for audit.")
+        return message
 
 def get_scheduled_messages_for_client(client_id: uuid.UUID, user_id: uuid.UUID) -> List[ScheduledMessage]:
     with Session(engine) as session:

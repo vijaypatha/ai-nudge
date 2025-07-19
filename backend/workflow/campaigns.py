@@ -97,19 +97,26 @@ async def approve_and_schedule_precomputed_plan(plan_id: UUID, user_id: UUID) ->
                 logging.warning(f"CAMPAIGN WORKFLOW: Step '{step.get('name')}' is missing a pre-computed draft. Skipping.")
                 continue
 
-            scheduled_at = datetime.now(timezone.utc) + timedelta(days=step.get('delay_days', 0))
+            # This correctly calculates a future datetime object in UTC.
+            scheduled_time_in_utc = datetime.now(timezone.utc) + timedelta(days=step.get('delay_days', 0))
+
+            # --- FIX IS HERE ---
+            # The ScheduledMessage object now requires 'scheduled_at_utc' and 'timezone'.
             scheduled_message = ScheduledMessage(
                 user_id=user_id,
                 client_id=plan.client_id,
                 parent_plan_id=plan.id,
                 content=generated_draft,
-                scheduled_at=scheduled_at,
+                scheduled_at_utc=scheduled_time_in_utc, # Use the correct field name
+                timezone="UTC", # Provide a default value as this is a system-generated plan
                 status=MessageStatus.PENDING,
                 playbook_touchpoint_id=step.get('name'),
                 is_recurring=False
+                # Note: Celery task scheduling is handled by a separate process for manually scheduled messages.
+                # This function directly saves to the DB; a separate worker will need to pick these up.
             )
             session.add(scheduled_message)
-        
+
         plan.status = CampaignStatus.ACTIVE
         session.add(plan)
         session.commit()

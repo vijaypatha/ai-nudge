@@ -6,7 +6,7 @@ import asyncio
 import uuid
 import json
 from api.websocket_manager import manager as websocket_manager
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from sqlmodel import Session, select
 
 from data.database import engine
@@ -164,57 +164,60 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
     return {"status": "processed"}
 
 
-# --- THIS ENTIRE FUNCTION HAS BEEN REPLACED ---
-async def orchestrate_send_message_now(client_id: uuid.UUID, content: str, user_id: uuid.UUID) -> bool:
+async def orchestrate_send_message_now(
+    client_id: uuid.UUID, 
+    content: str, 
+    user_id: uuid.UUID,
+    source: MessageSource = MessageSource.MANUAL
+) -> Optional[Message]:
     """
-    Sends a message immediately, logs it to the conversation history, and updates client interaction timestamps.
+    Sends a message immediately, logs it with correct source, and returns the created message object.
     """
-    logging.info(f"ORCHSTRATOR: Orchestrating immediate send for client {client_id} for user {user_id}")
+    logging.info(f"ORCHESTRATOR: Orchestrating immediate send for client {client_id} (Source: {source.value})")
 
-    # Section for slate management remains unchanged
     with Session(engine) as session:
+        # Slate management logic remains, no changes needed here.
         all_active_slates = crm_service.get_all_active_slates_for_client(client_id, user_id, session)
         immediate_slate = next((s for s in all_active_slates if not s.is_plan), None)
         if immediate_slate:
             logging.info(f"ORCHESTRATOR: Message sent, marking active slate {immediate_slate.id} as 'completed'.")
             crm_service.update_slate_status(immediate_slate.id, CampaignStatus.COMPLETED, user_id, session)
-        session.commit()
-    
-    # Section for retrieving user and client remains unchanged
-    user = crm_service.get_user_by_id(user_id)
-    client = crm_service.get_client_by_id(client_id, user_id=user_id)
-    if not user or not user.twilio_phone_number:
-        logging.error(f"ORCHESTRATOR ERROR: User {user_id} not found or has no Twilio number.")
-        return False
-    if not client or not client.phone:
-        logging.error(f"ORCHESTRATOR ERROR: Client {client_id} not found for user {user_id} or has no phone number.")
-        return False
-        
-    # Section for personalizing and sending SMS remains unchanged
-    first_name = client.full_name.strip().split(' ')[0]
-    personalized_content = content.replace("[Client Name]", first_name)
-    was_sent = twilio_outgoing.send_sms(from_number=user.twilio_phone_number, to_number=client.phone, body=personalized_content)
-    
-    # --- NEW MESSAGE LOGGING LOGIC ---
-    if was_sent:
-        logging.info(f"ORCHESTRATOR: Message sent successfully via Twilio. Now logging to database for client {client_id}.")
-        # Create the universal message log entry
+
+        # User and Client retrieval logic remains, no changes needed here.
+        user = crm_service.get_user_by_id(user_id)
+        client = crm_service.get_client_by_id(client_id, user_id=user_id)
+        if not user or not user.twilio_phone_number:
+            logging.error(f"ORCHESTRATOR ERROR: User {user_id} not found or has no Twilio number.")
+            return None
+        if not client or not client.phone:
+            logging.error(f"ORCHESTRATOR ERROR: Client {client_id} not found for user {user_id} or has no phone number.")
+            return None
+
+        # Sending logic remains, no changes needed here.
+        first_name = client.full_name.strip().split(' ')[0]
+        personalized_content = content.replace("[Client Name]", first_name)
+        was_sent = twilio_outgoing.send_sms(from_number=user.twilio_phone_number, to_number=client.phone, body=personalized_content)
+
+        if not was_sent:
+            logging.error(f"ORCHESTRATOR: Failed to send SMS for client {client_id}. Message will not be logged.")
+            # We do not commit session changes if SMS fails
+            return None
+
+        # --- REVISED MESSAGE LOGGING ---
         message_log = Message(
             user_id=user_id,
             client_id=client_id,
             content=personalized_content,
             direction=MessageDirection.OUTBOUND,
             status=MessageStatus.SENT,
-            source=MessageSource.MANUAL, # Mark as manually sent by a user
+            source=source, # Use the dynamic source parameter
             sender_type=MessageSenderType.USER,
         )
-        # Save the log entry to the database
-        crm_service.save_message(message_log)
-        
-        # Update the client's last interaction timestamp
-        crm_service.update_last_interaction(client_id, user_id=user_id)
-        logging.info(f"ORCHESTRATOR: Database updated for manual message to client {client_id}.")
-    else:
-        logging.error(f"ORCHESTRATOR: Failed to send SMS for client {client_id}. Message will not be logged.")
+        session.add(message_log)
+        crm_service.update_last_interaction(client_id, user_id=user_id, session=session)
 
-    return was_sent
+        session.commit()
+        session.refresh(message_log) # Refresh to get DB-generated values like created_at
+
+        logging.info(f"ORCHESTRATOR: Database updated for message to client {client_id}.")
+        return message_log
