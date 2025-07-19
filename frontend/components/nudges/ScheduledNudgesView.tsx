@@ -130,7 +130,7 @@ export const ScheduledNudgesView: FC<ScheduledNudgesViewProps> = ({ messages, is
                                                             {clientName}
                                                         </p>
                                                         <p className="text-sm font-semibold text-cyan-400">
-                                                            {formatDisplayDateTime(msg.scheduled_at_utc, msg.timezone)}
+                                                            {formatDisplayDateTime(msg.scheduled_at_utc, userTimezone)}
                                                         </p>
                                                     </div>
                                                     <p className="text-brand-text-muted mt-2 italic">"{msg.content}"</p>

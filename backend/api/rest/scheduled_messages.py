@@ -50,15 +50,7 @@ async def create_scheduled_message(
 
         utc_time = local_time.astimezone(pytz.utc)
 
-        # 3. Create the Celery task
-        from celery_tasks import send_scheduled_message_task
-        task = send_scheduled_message_task.apply_async(
-            (str(client.id), message_data.content, str(current_user.id)),
-            eta=utc_time
-        )
-        logging.info(f"API: Scheduled message task {task.id} for client {client.id} at {utc_time} UTC.")
-
-        # 4. Save the record to our database with the task_id
+        # 3. Save the record to our database first
         with Session(engine) as session:
             db_message = ScheduledMessage(
                 client_id=message_data.client_id,
@@ -66,9 +58,23 @@ async def create_scheduled_message(
                 content=message_data.content,
                 scheduled_at_utc=utc_time,
                 timezone=message_data.timezone,
-                celery_task_id=task.id,
                 status=MessageStatus.PENDING,
             )
+            session.add(db_message)
+            session.commit()
+            session.refresh(db_message)
+
+        # 4. Create the Celery task with the message ID
+        from celery_tasks import send_scheduled_message_task
+        task = send_scheduled_message_task.apply_async(
+            (str(db_message.id),),  # Only pass the message ID
+            eta=utc_time
+        )
+        logging.info(f"API: Scheduled message task {task.id} for message {db_message.id} at {utc_time} UTC.")
+
+        # 5. Update the message with the task ID
+        with Session(engine) as session:
+            db_message.celery_task_id = task.id
             session.add(db_message)
             session.commit()
             session.refresh(db_message)
@@ -120,10 +126,10 @@ async def update_scheduled_message(
             except pytz.UnknownTimeZoneError:
                 raise HTTPException(status_code=400, detail=f"Unknown timezone: '{new_timezone_str}'")
 
-        # 4. Schedule a new task with the updated info
+        # 4. Schedule a new task with the message ID
         from celery_tasks import send_scheduled_message_task
         new_task = send_scheduled_message_task.apply_async(
-            (str(db_message.client_id), db_message.content, str(db_message.user_id)),
+            (str(db_message.id),),  # Only pass the message ID
             eta=db_message.scheduled_at_utc
         )
         db_message.celery_task_id = new_task.id

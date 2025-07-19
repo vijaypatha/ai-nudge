@@ -84,7 +84,10 @@ export const ChatHistory = ({
                                             </span>
                                         )}
                                         <span>
-                                            {new Date(msg.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                            {msg.source === 'scheduled' && msg.originally_scheduled_at 
+                                                ? new Date(msg.originally_scheduled_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+                                                : new Date(msg.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+                                            }
                                         </span>
                                     </div>
                                     {/* --- END REVISED LOGIC --- */}

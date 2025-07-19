@@ -558,20 +558,63 @@ def get_conversation_summaries(user_id: uuid.UUID) -> List[Dict[str, Any]]:
     with Session(engine) as session:
         clients = session.exec(select(Client).where(Client.user_id == user_id)).all()
         for client in clients:
+            # Get the last message for this client
             last_message_statement = select(Message).where(Message.client_id == client.id).order_by(Message.created_at.desc()).limit(1)
             last_message = session.exec(last_message_statement).first()
             
-            summary = {
-                "id": f"conv-{client.id}",
-                "client_id": client.id,
-                "client_name": client.full_name,
-                "last_message": last_message.content if last_message else "No messages yet.",
-                "last_message_time": last_message.created_at.isoformat() if last_message else datetime.now(timezone.utc).isoformat(),
-                "unread_count": 0
-            }
-            summaries.append(summary)
+            # Get unread count (messages from client that haven't been read)
+            unread_statement = select(Message).where(
+                Message.client_id == client.id,
+                Message.direction == 'inbound',
+                Message.status == 'received'  # Assuming unread messages have 'received' status
+            )
+            unread_messages = session.exec(unread_statement).all()
+            unread_count = len(unread_messages)
+            
+            # Determine if client is online (simple heuristic: active in last 5 minutes)
+            is_online = False
+            if last_message and last_message.direction == 'inbound':
+                # Ensure both datetimes are timezone-aware
+                message_time = last_message.created_at.replace(tzinfo=timezone.utc) if last_message.created_at.tzinfo is None else last_message.created_at
+                current_time = datetime.now(timezone.utc)
+                time_diff = current_time - message_time
+                is_online = time_diff.total_seconds() < 300  # 5 minutes
+            
+            # Get message preview
+            if last_message:
+                message_preview = last_message.content[:50] + "..." if len(last_message.content) > 50 else last_message.content
+                # Ensure timestamp is timezone-aware UTC
+                if last_message.created_at.tzinfo is None:
+                    last_message_time = last_message.created_at.replace(tzinfo=timezone.utc)
+                else:
+                    last_message_time = last_message.created_at
+            else:
+                message_preview = "No messages yet"
+                last_message_time = datetime.now(timezone.utc)
+            
+            # Only include clients who have messages (like iMessage behavior)
+            if last_message:
+                summary = {
+                    "id": f"conv-{client.id}",
+                    "client_id": client.id,
+                    "client_name": client.full_name,
+                    "client_phone": client.phone,
+                    "last_message": message_preview,
+                    "last_message_time": last_message_time.isoformat(),
+                    "unread_count": unread_count,
+                    "is_online": is_online,
+                    "has_messages": last_message is not None,
+                    "last_message_direction": last_message.direction if last_message else None,
+                    "last_message_source": last_message.source if last_message else None
+                }
+                summaries.append(summary)
     
-    summaries.sort(key=lambda x: x['last_message_time'], reverse=True)
+    # Sort by: 1) Has messages, 2) Last message time, 3) Client name
+    summaries.sort(key=lambda x: (
+        not x['has_messages'],  # Clients with messages first
+        x['last_message_time'],  # Most recent first
+        x['client_name'].lower()  # Alphabetical by name
+    ), reverse=True)
     return summaries
 
 def get_conversation_summaries_for_clients(client_ids: List[UUID], user_id: UUID) -> List[Dict[str, Any]]:

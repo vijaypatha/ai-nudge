@@ -40,14 +40,15 @@ def schedule_message(message_data: ScheduledMessageCreate) -> ScheduledMessage:
     new_scheduled_msg = ScheduledMessage(
         client_id=message_data.client_id,
         content=message_data.content,
-        scheduled_at=message_data.scheduled_at,
+        scheduled_at_utc=message_data.scheduled_at_local,
+        timezone=message_data.timezone,
         status="pending" # All newly scheduled messages start as 'pending'
     )
     # Add the newly created scheduled message to our in-memory database.
     mock_scheduled_messages_db.append(new_scheduled_msg)
     
     # Print a confirmation message to the console for debugging/observability.
-    print(f"COMM TOOL: Scheduled message '{new_scheduled_msg.content[:30]}...' for client {new_scheduled_msg.client_id} at {new_scheduled_msg.scheduled_at.isoformat()}")
+    print(f"COMM TOOL: Scheduled message '{new_scheduled_msg.content[:30]}...' for client {new_scheduled_msg.client_id} at {new_scheduled_msg.scheduled_at_utc.isoformat()}")
     
     # Return the created scheduled message object.
     return new_scheduled_msg

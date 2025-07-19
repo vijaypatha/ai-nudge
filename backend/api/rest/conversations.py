@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Optional
 import uuid
-from sqlmodel import Session
+from sqlmodel import Session, select
 from data.models.user import User
 from api.security import get_current_user_from_token
 from data.models.message import Message, MessageWithDraft, MessageSource
@@ -41,7 +41,7 @@ class ConversationSearchQuery(BaseModel):
     natural_language_query: str
 
 
-@router.get("/conversations/", response_model=List[ConversationSummary])
+@router.get("/", response_model=List[ConversationSummary])
 async def get_conversation_list(current_user: User = Depends(get_current_user_from_token)):
     """Retrieves a summary of all conversations for the logged-in user."""
     try:
@@ -185,3 +185,39 @@ async def search_conversations(
     )
     
     return summaries
+
+@router.post("/{client_id}/mark-read")
+async def mark_conversation_as_read(
+    client_id: uuid.UUID,
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """Marks all inbound messages for a client as read."""
+    try:
+        # Verify the client belongs to the user
+        client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found")
+        
+        # Mark all inbound messages as read
+        with Session(crm_service.engine) as session:
+            statement = select(Message).where(
+                Message.client_id == client_id,
+                Message.direction == 'inbound',
+                Message.status == 'received'
+            )
+            unread_messages = session.exec(statement).all()
+            
+            for message in unread_messages:
+                message.status = 'sent'  # Mark as read
+            
+            session.add_all(unread_messages)
+            session.commit()
+            
+        logging.info(f"API: Marked {len(unread_messages)} messages as read for client {client_id}")
+        return {"success": True, "messages_marked": len(unread_messages)}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"API: Failed to mark messages as read for client {client_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to mark messages as read: {str(e)}")

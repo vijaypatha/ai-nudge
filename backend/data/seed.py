@@ -42,6 +42,7 @@ async def seed_database():
 
         # --- Step 1: Create Users for Each Vertical ---
         realtor_user = User(
+            id="75411688-5705-4dd8-9b47-5355a34d15ec",  # Fixed ID to match existing user
             user_type=UserType.REALTOR,
             full_name="Jane Doe",
             email="jane.doe@realty.com",
@@ -55,6 +56,7 @@ async def seed_database():
         session.add(realtor_user)
         
         therapist_user = User(
+            id="98d7acdc-362d-4682-b2e7-8a42e0c05a9f",  # Fixed ID to match current user
             user_type=UserType.THERAPIST,
             full_name="Dr. Sarah Chen",
             email="sarah.chen@therapypractice.com",

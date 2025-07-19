@@ -142,13 +142,19 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
         }
         setIsScheduling(true);
         const recipients = Array.from(selectedClients);
-        const scheduled_at_iso = new Date(scheduleDateTime).toISOString();
+        
+        // Convert the datetime-local input to a proper datetime object
+        const scheduledDateTime = new Date(scheduleDateTime);
+        
+        // Get the user's timezone (default to UTC if not available)
+        const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
         const schedulePromises = recipients.map(clientId =>
             api.post('/api/scheduled-messages', {
                 client_id: clientId,
                 content: message,
-                scheduled_at: scheduled_at_iso,
+                scheduled_at_local: scheduledDateTime.toISOString(),
+                timezone: userTimezone,
             })
         );
         try {

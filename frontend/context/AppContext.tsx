@@ -69,13 +69,26 @@ export interface Message {
   direction: 'inbound' | 'outbound';
   status: string;
   created_at: string;
+  originally_scheduled_at?: string;  // Store original scheduled time for scheduled messages
   ai_drafts?: CampaignBriefing[];
   // --- REVISED FIELDS ---
   source: 'manual' | 'scheduled' | 'faq_auto_response' | 'instant_nudge';
   sender_type: 'user' | 'system' | 'ai';
   // --- END REVISED FIELDS ---
 }
-export interface Conversation { id: string; client_id: string; client_name: string; last_message: string; last_message_time: string; unread_count: number; }
+export interface Conversation { 
+  id: string; 
+  client_id: string; 
+  client_name: string; 
+  client_phone: string;
+  last_message: string; 
+  last_message_time: string; 
+  unread_count: number;
+  is_online: boolean;
+  has_messages: boolean;
+  last_message_direction?: 'inbound' | 'outbound';
+  last_message_source?: 'manual' | 'scheduled' | 'faq_auto_response' | 'instant_nudge';
+}
 
 export interface ScheduledMessage {
   id: string;

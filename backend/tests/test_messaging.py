@@ -34,7 +34,8 @@ def scheduled_message(session: Session, test_user: User) -> ScheduledMessage:
         user_id=test_user.id,
         client_id=uuid.uuid4(),
         content="Original scheduled message.",
-        scheduled_at=datetime.now(timezone.utc) + timedelta(days=1),
+        scheduled_at_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        timezone="UTC",
         status=MessageStatus.PENDING
     )
     session.add(msg)

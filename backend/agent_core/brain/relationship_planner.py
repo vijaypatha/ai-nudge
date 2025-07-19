@@ -75,7 +75,8 @@ async def _schedule_message_from_touchpoint(client: Client, user: User, touchpoi
             client_id=client.id,
             user_id=user.id,
             content=ai_draft,
-            scheduled_at=scheduled_date,
+            scheduled_at_utc=scheduled_date,
+            timezone=user.timezone or "UTC",
             status=MessageStatus.PENDING,
             playbook_touchpoint_id=touchpoint.get("id"),
             is_recurring=is_recurring

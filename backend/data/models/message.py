@@ -45,6 +45,7 @@ class Message(SQLModel, table=True):
     source: MessageSource = Field(default=MessageSource.MANUAL, index=True)
     sender_type: MessageSenderType = Field(default=MessageSenderType.USER, index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+    originally_scheduled_at: Optional[datetime] = Field(default=None, index=True)  # Store original scheduled time
     client: Optional["Client"] = Relationship(back_populates="messages")
     user: Optional["User"] = Relationship(back_populates="messages")
     ai_drafts: List["CampaignBriefing"] = Relationship(back_populates="parent_message")

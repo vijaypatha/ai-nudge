@@ -263,6 +263,7 @@ def send_scheduled_message_task(message_id: str):
                 # --- NEW FIELDS START ---
                 source=MessageSource.SCHEDULED,      # Mark as a scheduled message
                 sender_type=MessageSenderType.SYSTEM, # Mark as sent by the system
+                originally_scheduled_at=scheduled_message.scheduled_at_utc,  # Store original scheduled time
                 # --- NEW FIELDS END ---
             )
             session.add(conversation_log_entry)
