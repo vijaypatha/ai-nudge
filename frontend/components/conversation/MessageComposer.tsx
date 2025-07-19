@@ -13,7 +13,8 @@ import { Paperclip, Send } from 'lucide-react';
  * @param isSending - Boolean to disable the composer while a message is in flight.
  */
 interface MessageComposerProps {
-    onSendMessage: (content: string) => Promise<void>;
+    onSendMessage: (content: string) => void;
+    onScheduleMessage: (content: string, scheduledAt: string) => void;
     isSending: boolean;
 }
 

@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAppContext, CampaignBriefing, Client, ScheduledMessage, User } from '@/context/AppContext';
 import { Tabs, TabOption } from '@/components/ui/Tabs';
+import { motion, AnimatePresence } from 'framer-motion';
 
 import { OpportunityNudgesView, DisplayConfig } from '@/components/nudges/OpportunityNudgesView';
 import { ScheduledNudgesView } from '@/components/nudges/ScheduledNudgesView';
@@ -106,28 +107,36 @@ export default function NudgesPage() {
                 <Tabs options={tabOptions} activeTab={activeTab} setActiveTab={setActiveTab} />
             </header>
 
-            <div>
-                {activeTab === 'ai_suggestions' && (
-                    <OpportunityNudgesView
-                        nudges={nudges}
-                        isLoading={isNudgesLoading}
-                        onAction={handleAction}
-                        onBriefingUpdate={handleBriefingUpdate}
-                        displayConfig={displayConfig}
-                    />
-                )}
-                {activeTab === 'scheduled' && (
-                    <ScheduledNudgesView
-                        messages={scheduledMessages}
-                        isLoading={isScheduledLoading || isClientsLoading}
-                        clients={clients}
-                        user={user}
-                        onAction={refetchScheduled}
-                    />
-                )}
-                {/* --- DEFINITIVE FIX: Pass the 'clients' array as a prop --- */}
-                {activeTab === 'instant_nudge' && <InstantNudgeView clients={clients} />}
-            </div>
+            <AnimatePresence mode="wait">
+                <motion.div
+                    key={activeTab}
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25 }}
+                >
+                    {activeTab === 'ai_suggestions' && (
+                        <OpportunityNudgesView
+                            nudges={nudges}
+                            isLoading={isNudgesLoading}
+                            onAction={handleAction}
+                            onBriefingUpdate={handleBriefingUpdate}
+                            displayConfig={displayConfig}
+                        />
+                    )}
+                    {activeTab === 'scheduled' && (
+                        <ScheduledNudgesView
+                            messages={scheduledMessages}
+                            isLoading={isScheduledLoading || isClientsLoading}
+                            clients={clients}
+                            user={user}
+                            onAction={refetchScheduled}
+                        />
+                    )}
+                    {/* --- DEFINITIVE FIX: Pass the 'clients' array as a prop --- */}
+                    {activeTab === 'instant_nudge' && <InstantNudgeView clients={clients} onScheduleSuccess={refetchScheduled} />}
+                </motion.div>
+            </AnimatePresence>
         </main>
     );
 }

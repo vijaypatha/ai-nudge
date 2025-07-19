@@ -1,7 +1,4 @@
 // frontend/components/nudges/InstantNudgeView.tsx
-// --- DEFINITIVE FIX ---
-// Purpose: This component now receives a fresh list of clients via props,
-// ensuring that the TagFilter has data and renders correctly.
 
 'use client';
 
@@ -10,15 +7,16 @@ import { useAppContext, Client } from '@/context/AppContext';
 import { MagicSearchBar } from '@/components/ui/MagicSearchBar';
 import { TagFilter } from '@/components/ui/TagFilter';
 import { Avatar } from '@/components/ui/Avatar';
-import { Loader2, Bot, Send } from 'lucide-react';
+import { Loader2, Bot, Send, Calendar, Users } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import clsx from 'clsx';
 
-// --- NEW: Define props interface ---
 interface InstantNudgeViewProps {
     clients: Client[];
+    onScheduleSuccess: () => void;
 }
 
-export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients }) => {
-    // --- MODIFIED: 'clients' now comes from props. Only 'api' is needed from context.
+export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onScheduleSuccess }) => {
     const { api } = useAppContext();
 
     const [filteredClients, setFilteredClients] = useState<Client[]>(clients);
@@ -31,8 +29,9 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients }) => {
 
     const [searchQuery, setSearchQuery] = useState('');
     const [filterTags, setFilterTags] = useState<string[]>([]);
+    const [scheduleDateTime, setScheduleDateTime] = useState('');
+    const [isScheduling, setIsScheduling] = useState(false);
 
-    // --- NEW: useEffect to sync filtered clients when the props change ---
     useEffect(() => {
         setFilteredClients(clients);
     }, [clients]);
@@ -111,6 +110,7 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients }) => {
         }
     };
 
+    // --- THIS FUNCTION WAS MISSING ---
     const handleSendInstantNudge = async () => {
         if (selectedClients.size === 0 || !message.trim()) {
             alert("Please select at least one recipient and write a message.");
@@ -135,65 +135,155 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients }) => {
         }
     };
 
+    const handleScheduleInstantNudge = async () => {
+        if (selectedClients.size === 0 || !message.trim() || !scheduleDateTime.trim()) {
+            alert("Please select recipients, write a message, and pick a future date and time.");
+            return;
+        }
+        setIsScheduling(true);
+        const recipients = Array.from(selectedClients);
+        const scheduled_at_iso = new Date(scheduleDateTime).toISOString();
+
+        const schedulePromises = recipients.map(clientId =>
+            api.post('/api/scheduled-messages', {
+                client_id: clientId,
+                content: message,
+                scheduled_at: scheduled_at_iso,
+            })
+        );
+        try {
+            await Promise.all(schedulePromises);
+            alert(`Successfully scheduled message for ${recipients.length} client(s).`);
+
+            setSelectedClients(new Set());
+            setMessage('');
+            setTopic('');
+            setScheduleDateTime('');
+            onScheduleSuccess();
+        } catch (error) {
+            console.error("Failed to schedule instant nudge:", error);
+            alert("An error occurred while scheduling the message. Please check the console.");
+        } finally {
+            setIsScheduling(false);
+        }
+    };
+
     return (
-        <div className="space-y-8 max-w-4xl mx-auto">
-            <section>
-                <div className="flex items-center gap-3 mb-4">
-                    <span className="flex items-center justify-center w-8 h-8 rounded-full bg-brand-accent text-brand-dark font-bold">1</span>
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 items-start">
+            <motion.section 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="lg:col-span-2"
+            >
+                <div className="flex items-center gap-4 mb-4">
+                    <span className="flex items-center justify-center w-10 h-10 rounded-full bg-primary-action text-brand-dark font-bold text-lg">1</span>
                     <h2 className="text-2xl font-bold">Target Your Audience</h2>
                 </div>
-                <div className="p-6 bg-brand-primary border border-white/10 rounded-xl space-y-4">
-                    <label className="text-sm font-semibold text-brand-text-muted">Natural Language Audience Builder ✨</label>
-                    <MagicSearchBar onSearch={setSearchQuery} isLoading={isSearching} placeholder="e.g., My clients who are avid golfers..." />
+                <div className="p-6 bg-brand-primary border border-white/10 rounded-xl space-y-5">
+                    <div>
+                        <label className="text-sm font-semibold text-brand-text-muted mb-2 block">Natural Language Audience Builder ✨</label>
+                        <MagicSearchBar onSearch={setSearchQuery} isLoading={isSearching} placeholder="e.g., My clients who are avid golfers..." />
+                    </div>
 
                     <TagFilter allTags={allTags} onFilterChange={setFilterTags} />
 
-                    <div className="border border-white/10 rounded-lg max-h-64 overflow-y-auto">
-                        <div className="p-3 border-b border-white/10 sticky top-0 bg-brand-primary/80 backdrop-blur-sm">
-                            <label className="flex items-center gap-3 text-sm">
-                                <input type="checkbox" className="h-4 w-4 rounded bg-white/10 border-white/20 text-brand-accent focus:ring-brand-accent" checked={selectedClients.size > 0 && selectedClients.size === filteredClients.length && filteredClients.length > 0} onChange={handleSelectAll} />
+                    <div className="border border-white/10 rounded-lg">
+                        <div className="p-3 border-b border-white/10 sticky top-0 bg-brand-primary/80 backdrop-blur-sm z-10">
+                            <label className="flex items-center gap-3 text-sm font-medium">
+                                <input type="checkbox" className="h-4 w-4 rounded bg-white/10 border-white/20 text-brand-accent focus:ring-brand-accent focus:ring-offset-0" checked={selectedClients.size > 0 && selectedClients.size === filteredClients.length && filteredClients.length > 0} onChange={handleSelectAll} />
                                 Select All Filtered ({selectedClients.size}/{filteredClients.length})
                             </label>
                         </div>
-                        {isSearching ? (
-                            <div className="flex justify-center items-center p-8 text-brand-text-muted"><Loader2 className="animate-spin mr-2" /> Searching...</div>
-                        ) : filteredClients.map(client => (
-                            <div key={client.id} className="border-b border-white/10 last:border-b-0">
-                                <label className="flex items-center gap-3 p-3 hover:bg-white/5 cursor-pointer">
-                                    <input type="checkbox" className="h-4 w-4 rounded bg-white/10 border-white/20 text-brand-accent focus:ring-brand-accent" checked={selectedClients.has(client.id)} onChange={() => handleSelectClient(client.id)} />
-                                    <Avatar name={client.full_name} className="w-8 h-8 text-xs"/>
-                                    {client.full_name}
-                                </label>
-                            </div>
-                        ))}
+                        <div className="max-h-64 overflow-y-auto p-2">
+                            {isSearching ? (
+                                <div className="flex justify-center items-center p-8 text-brand-text-muted"><Loader2 className="animate-spin mr-2" /> Searching...</div>
+                            ) : filteredClients.length === 0 ? (
+                                <div className="flex flex-col text-center items-center p-8 text-brand-text-muted">
+                                    <Users size={32} className="mb-2"/>
+                                    <p className="font-semibold">No Clients Found</p>
+                                    <p className="text-sm">Try adjusting your search or filters.</p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {filteredClients.map(client => (
+                                        <div key={client.id} className="relative">
+                                            <input type="checkbox" id={`client-${client.id}`} className="absolute opacity-0 w-full h-full cursor-pointer" checked={selectedClients.has(client.id)} onChange={() => handleSelectClient(client.id)} />
+                                            <label htmlFor={`client-${client.id}`} className={clsx("flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all", selectedClients.has(client.id) ? "bg-primary-action/20 border-primary-action" : "bg-white/5 border-transparent hover:bg-white/10")}>
+                                                <div className={clsx("w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center", selectedClients.has(client.id) ? "bg-primary-action border-primary-action" : "border-white/20")}>
+                                                    {selectedClients.has(client.id) && <Send size={12} className="text-brand-dark" />}
+                                                </div>
+                                                <Avatar name={client.full_name} className="w-8 h-8 text-xs"/>
+                                                <span className="font-medium truncate">{client.full_name}</span>
+                                            </label>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
-            </section>
-            <section>
-                <div className="flex items-center gap-3 mb-4">
-                    <span className="flex items-center justify-center w-8 h-8 rounded-full bg-brand-accent text-brand-dark font-bold">2</span>
-                    <h2 className="text-2xl font-bold">Draft and Send Nudge</h2>
+            </motion.section>
+            <motion.section 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="lg:col-span-3"
+            >
+                <div className="flex items-center gap-4 mb-4">
+                    <span className="flex items-center justify-center w-10 h-10 rounded-full bg-primary-action text-brand-dark font-bold text-lg">2</span>
+                    <h2 className="text-2xl font-bold">Draft Your Nudge</h2>
                 </div>
-                <div className="p-6 bg-brand-primary border border-white/10 rounded-xl space-y-4">
+                <div className="p-6 bg-brand-primary border border-white/10 rounded-xl space-y-5">
                     <div>
                         <label className="text-sm font-semibold text-brand-text-muted" htmlFor="topic">Topic / Goal (for AI draft)</label>
                         <input id="topic" type="text" value={topic} onChange={e => setTopic(e.target.value)} placeholder="e.g., End of quarter market update" className="w-full mt-2 bg-black/20 border border-white/20 rounded-lg p-3"/>
                     </div>
                     <div>
                         <label className="text-sm font-semibold text-brand-text-muted" htmlFor="message">Message</label>
-                        <textarea id="message" rows={5} value={message} onChange={e => setMessage(e.target.value)} placeholder="Click 'Draft with AI' or write your own message..." className="w-full mt-2 bg-black/20 border border-white/20 rounded-lg p-3"></textarea>
+                        <textarea id="message" rows={6} value={message} onChange={e => setMessage(e.target.value)} placeholder="Click 'Draft with AI' or write your own message..." className="w-full mt-2 bg-black/20 border border-white/20 rounded-lg p-3"></textarea>
                     </div>
-                    <div className="flex flex-wrap items-center gap-4">
-                        <button onClick={handleDraftWithAI} disabled={isDrafting || !topic.trim()} className="flex items-center gap-2 p-3 bg-white/10 rounded-md font-semibold hover:bg-white/20 disabled:opacity-50">
-                            {isDrafting ? <Loader2 size={18} className="animate-spin" /> : <Bot size={18} />}
+                    <div className="flex flex-col gap-4 pt-2">
+                        <button onClick={handleDraftWithAI} disabled={isDrafting || !topic.trim()} className="flex items-center justify-center gap-2 p-3 bg-white/10 rounded-lg font-semibold hover:bg-white/20 disabled:opacity-50 w-full transition-colors">
+                            {isDrafting ? <Loader2 size={20} className="animate-spin" /> : <Bot size={20} />}
                             {isDrafting ? 'Drafting...' : 'Draft with AI'}
                         </button>
-                        <button onClick={handleSendInstantNudge} disabled={isSending || selectedClients.size === 0 || !message.trim()} className="flex items-center gap-2 p-3 bg-primary-action text-brand-dark rounded-md font-semibold hover:brightness-110 disabled:opacity-50">
-                            {isSending ? 'Sending...' : <><Send size={18} /> Send to {selectedClients.size} recipients</>}
-                        </button>
+                        
+                        <div className="h-px bg-white/10"></div>
+
+                        <AnimatePresence mode="wait">
+                        {scheduleDateTime ? (
+                            <motion.div key="schedule" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
+                                <label className="text-sm font-semibold text-brand-text-muted">Schedule for later</label>
+                                <input 
+                                    type="datetime-local" 
+                                    value={scheduleDateTime}
+                                    onChange={e => setScheduleDateTime(e.target.value)}
+                                    className="p-3 w-full bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
+                                />
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => setScheduleDateTime('')} className="p-3 bg-white/10 rounded-lg font-semibold hover:bg-white/20 w-full">Cancel</button>
+                                    <button onClick={handleScheduleInstantNudge} disabled={isScheduling || selectedClients.size === 0 || !message.trim()} className="p-3 bg-cyan-500 text-brand-dark rounded-lg font-semibold hover:bg-cyan-400 disabled:opacity-50 whitespace-nowrap w-full flex items-center justify-center gap-2">
+                                        {isScheduling ? <Loader2 size={20} className="animate-spin" /> : <Calendar size={20} />}
+                                        {isScheduling ? 'Scheduling...' : `Confirm (${selectedClients.size})`}
+                                    </button>
+                                </div>
+                            </motion.div>
+                        ) : (
+                            <motion.div key="send" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-2 gap-3">
+                                <button onClick={() => setScheduleDateTime(new Date().toISOString().slice(0, 16))} className="p-3 bg-white/10 rounded-lg font-semibold hover:bg-white/20 disabled:opacity-50 w-full flex items-center justify-center gap-2">
+                                    <Calendar size={20} /> Schedule
+                                </button>
+                                <button onClick={handleSendInstantNudge} disabled={isSending || selectedClients.size === 0 || !message.trim()} className="p-3 bg-primary-action text-brand-dark rounded-lg font-semibold hover:brightness-110 disabled:opacity-50 w-full flex items-center justify-center gap-2">
+                                    {isSending ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+                                    {isSending ? 'Sending...' : `Send Now (${selectedClients.size})`}
+                                </button>
+                            </motion.div>
+                        )}
+                        </AnimatePresence>
                     </div>
                 </div>
-            </section>
+            </motion.section>
         </div>
     );
 };

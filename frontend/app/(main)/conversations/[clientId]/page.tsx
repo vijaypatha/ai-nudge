@@ -22,6 +22,8 @@ import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
 import { Users, Menu, Phone, Video, Loader2 } from 'lucide-react';
 const POLLING_INTERVAL = 5000; // Poll every 5 seconds
+import { fromZonedTime } from 'date-fns-tz';
+
 
 export interface ConversationDisplayConfig {
     client_intel: { title: string; icon: string; };
@@ -48,7 +50,7 @@ interface MessageComposerHandle {
 
 export default function ConversationPage({ params }: ConversationPageProps) {
     const { clientId } = params;
-    const { api, properties, updateClientInList, refetchScheduledMessagesForClient, refreshConversations } = useAppContext();
+    const { user, api, token, properties, updateClientInList, refetchScheduledMessagesForClient, refreshConversations } = useAppContext();
     const { setIsSidebarOpen } = useSidebar();
     const router = useRouter();
     
@@ -127,10 +129,12 @@ useEffect(() => {
 }, [fetchConversationData, refreshConversations]);
 
 useEffect(() => {
-    if (!clientId) return;
+    // Use the top-level 'token' from context, not 'api.token'
+    if (!clientId || !token) return;
 
     const wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
-    const wsUrl = `${wsBaseUrl}/api/ws/${clientId}`;
+    // FIX: Append the correct auth token as a query parameter
+    const wsUrl = `${wsBaseUrl}/ws/${clientId}?token=${token}`;
 
     console.log(`WS: Attempting to connect to ${wsUrl}`);
     ws.current = new WebSocket(wsUrl);
@@ -142,14 +146,12 @@ useEffect(() => {
             const data = JSON.parse(event.data);
             console.log('WS: Message received:', data);
 
-            if (data.type === 'NEW_MESSAGE' && data.clientId === clientId) {
-                console.log('WS: New message notification received. Refetching data...');
-                // Call the handlers through the stable ref
+            if ((data.type === 'NEW_MESSAGE' || data.type === 'MESSAGE_SENT') && data.clientId === clientId) {
+                console.log(`WS: ${data.type} notification received. Refetching data...`);
                 handlersRef.current.fetchConversationData(clientId);
                 handlersRef.current.refreshConversations();
             } else if (data.type === 'INTEL_UPDATED' && data.clientId === clientId) {
                 console.log('WS: Intel update notification received. Refetching conversation data...');
-                // This call will now pull the new recommendations that the backend just created.
                 handlersRef.current.fetchConversationData(clientId);
             }
         } catch (e) {
@@ -158,7 +160,7 @@ useEffect(() => {
     };
 
     ws.current.onerror = (err) => console.error(`WS: Error for client ${clientId}:`, err);
-    ws.current.onclose = () => console.log(`WS: Connection closed for client ${clientId}`);
+    ws.current.onclose = (event) => console.log(`WS: Connection closed for client ${clientId}. Code: ${event.code}`);
 
     return () => {
         if (ws.current) {
@@ -166,7 +168,7 @@ useEffect(() => {
             ws.current.close();
         }
     };
-}, [clientId]); // The dependency array is now stable
+}, [clientId, token]); // <-- Update dependency array to use 'token'
 
     const handleSendMessage = useCallback(async (content: string) => {
         if (!content.trim() || !selectedClient) return;
@@ -194,6 +196,32 @@ useEffect(() => {
             setIsSending(false);
         }
     }, [selectedClient, api, fetchConversationData]);
+
+    const handleScheduleMessage = useCallback(async (content: string, scheduledAt: string) => {
+        if (!content.trim() || !scheduledAt || !selectedClient) return;
+        try {
+            // FIX: Use a robust library for timezone conversion
+            // Assume the user's timezone is available, falling back to browser's guess
+            const userTimezone = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            // Convert the local datetime string to a true ZonedDateTime object
+            const zonedTime = fromZonedTime(scheduledAt, userTimezone);
+            // Format that ZonedDateTime into a UTC ISO string for the backend
+            const scheduled_at_iso = zonedTime.toISOString();
+    
+            await api.post('/api/scheduled-messages', {
+                client_id: selectedClient.id,
+                content,
+                scheduled_at: scheduled_at_iso,
+            });
+    
+            refetchScheduledMessagesForClient(selectedClient.id);
+            alert("Message scheduled successfully!");
+    
+        } catch (error) {
+            console.error("Failed to schedule message:", error);
+            alert("Could not schedule the message. Please try again.");
+        }
+    }, [api, selectedClient, user, refetchScheduledMessagesForClient]); // <-- Added 'user' to dependency array
 
     const handlePlanAction = useCallback(async (action: 'approve' | 'dismiss', planId: string) => {
         if (!selectedClient) return;
@@ -308,7 +336,12 @@ useEffect(() => {
                         onSendMessage={handleSendMessage}
                         messageComposerRef={messageComposerRef}
                     />
-                    <MessageComposer onSendMessage={handleSendMessage} isSending={isSending} ref={messageComposerRef} />
+                    <MessageComposer
+                    onSendMessage={handleSendMessage}
+                    onScheduleMessage={handleScheduleMessage}
+                    isSending={isSending}
+                    ref={messageComposerRef}
+                />
                 </div>
                 
                 {/* This is the intel view for mobile only */}

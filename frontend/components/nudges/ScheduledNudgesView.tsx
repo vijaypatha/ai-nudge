@@ -26,11 +26,14 @@ const groupMessagesByDate = (messages: ScheduledMessage[], localTimeZone: string
     const todayStr = dateFormatter.format(new Date());
 
     messages.forEach(msg => {
-        const msgDate = new Date(msg.scheduled_at);
+        // FIX: Ensure the date string from the backend is explicitly parsed as UTC
+        const utcDateString = msg.scheduled_at.endsWith('Z') ? msg.scheduled_at : `${msg.scheduled_at}Z`;
+        const msgDate = new Date(utcDateString);
+
         const msgDateStr = dateFormatter.format(msgDate);
         const diffDays = Math.round((new Date(msgDateStr).getTime() - new Date(todayStr).getTime()) / 86400000);
 
-        if (diffDays < 0) groups.Later.push(msg);
+        if (diffDays < 0) groups.Later.push(msg); // Should not happen with pending filter
         else if (diffDays === 0) groups.Today.push(msg);
         else if (diffDays === 1) groups.Tomorrow.push(msg);
         else if (diffDays > 1 && diffDays <= 7) groups['This Week'].push(msg);
@@ -40,6 +43,10 @@ const groupMessagesByDate = (messages: ScheduledMessage[], localTimeZone: string
 };
 
 const formatDateTimezone = (dateString: string, timeZone: string) => {
+    // FIX: Ensure the date string from the backend is explicitly parsed as UTC.
+    // The 'Z' suffix tells the JavaScript Date object that the time is UTC.
+    const utcDateString = dateString.endsWith('Z') ? dateString : `${dateString}Z`;
+
     const options: Intl.DateTimeFormatOptions = {
         month: 'long',
         day: 'numeric',
@@ -49,9 +56,10 @@ const formatDateTimezone = (dateString: string, timeZone: string) => {
         timeZone: timeZone,
     };
     try {
-        return new Intl.DateTimeFormat('en-US', options).format(new Date(dateString));
+        return new Intl.DateTimeFormat('en-US', options).format(new Date(utcDateString));
     } catch (e) {
-        return new Date(dateString).toLocaleString();
+        // Fallback for any unexpected errors
+        return new Date(utcDateString).toLocaleString();
     }
 };
 
