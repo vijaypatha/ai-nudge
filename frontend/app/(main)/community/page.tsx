@@ -1,16 +1,30 @@
 // frontend/app/(main)/community/page.tsx
-// DEFINITIVE FIX: Adds a conditional prompt to allow users who skipped
-// the Google import during onboarding to perform it later.
+// --- MODIFIED ---
+// Purpose: Integrates the new TagFilter component and updates data fetching
+// to support combined natural language and tag-based filtering.
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { useAppContext } from '@/context/AppContext';
-import { Users, Filter, Plus, UserCheck, UserX, MessageSquare, Bot, Mail } from 'lucide-react';
+import { useAppContext, Client } from '@/context/AppContext';
+import { Users, Plus, UserCheck, UserX, MessageSquare, Bot, Mail } from 'lucide-react';
 import { MagicSearchBar } from '@/components/ui/MagicSearchBar';
+import { TagFilter } from '@/components/ui/TagFilter'; // NEW IMPORT
+
+// --- HELPER TYPES & COMPONENTS (Unchanged) ---
+
+type CommunityMember = {
+    client_id: string;
+    full_name: string;
+    user_tags: string[];
+    ai_tags?: string[];
+    last_interaction_days: number | null;
+    health_score: number;
+};
 
 const GoogleImportPrompt = () => {
+    // ... (Component implementation is unchanged)
     const { api, token } = useAppContext();
     const [isLoading, setIsLoading] = useState(false);
 
@@ -51,13 +65,13 @@ const GoogleImportPrompt = () => {
     );
 };
 
-type CommunityMember = { client_id: string; full_name: string; user_tags: string[]; ai_tags?: string[]; last_interaction_days: number | null; health_score: number; };
 const HealthBar = ({ score }: { score: number }) => {
   const getColor = () => {
     if (score > 70) return 'bg-green-500'; if (score > 40) return 'bg-yellow-500'; return 'bg-red-500';
   };
   return <div className="w-full bg-white/10 rounded-full h-1.5 mt-2"><div className={`h-1.5 rounded-full ${getColor()}`} style={{ width: `${score}%` }} /></div>;
 };
+
 const CommunityCard = ({ member }: { member: CommunityMember }) => (
   <Link href={`/conversations/${member.client_id}`} className="block bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 hover:border-white/20 transition-all duration-200 animate-in fade-in-0 zoom-in-95">
     <div className="flex flex-col h-full">
@@ -66,40 +80,115 @@ const CommunityCard = ({ member }: { member: CommunityMember }) => (
         <p className="text-xs text-brand-text-muted mt-1">{member.last_interaction_days !== null ? `Last contact: ${member.last_interaction_days} days ago` : 'No interactions yet'}</p>
         <HealthBar score={member.health_score} />
       </div>
-      <div className="mt-4 flex flex-wrap gap-1.5">{member.user_tags.slice(0, 3).map(tag => <span key={tag} className="text-xs font-semibold bg-primary-action/20 text-brand-accent px-2 py-0.5 rounded-full">{tag}</span>)}</div>
+      <div className="mt-4 flex flex-wrap gap-1.5">
+        {[...member.user_tags, ...(member.ai_tags || [])].slice(0, 3).map(tag => <span key={tag} className="text-xs font-semibold bg-primary-action/20 text-brand-accent px-2 py-0.5 rounded-full">{tag}</span>)}
+      </div>
     </div>
   </Link>
 );
+
+
+// --- MAIN PAGE COMPONENT ---
 
 export default function CommunityPage() {
   const { api, user } = useAppContext();
   const [community, setCommunity] = useState<CommunityMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // State for search and filter values
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterTags, setFilterTags] = useState<string[]>([]);
+  
+  // State to hold the complete, unfiltered list of clients
+  const [allClients, setAllClients] = useState<CommunityMember[]>([]);
 
-  const fetchCommunityData = useCallback(async (searchQuery = '') => {
+  // Memoize all unique tags from the full client list for the filter component.
+  const allTags = useMemo(() => {
+    const tags = new Set<string>();
+    allClients.forEach(client => {
+      client.user_tags?.forEach(tag => tags.add(tag));
+      client.ai_tags?.forEach(tag => tags.add(tag));
+    });
+    return Array.from(tags).sort();
+  }, [allClients]);
+
+  // Fetch the full community list on initial load to populate the tag filter.
+  useEffect(() => {
+    const fetchInitialData = async () => {
+        setLoading(true);
+        try {
+            const data = await api.get('/api/community');
+            setAllClients(data);
+            setCommunity(data); // Initially, the displayed community is the full list.
+        } catch (err: any) {
+            setError(err.message || "Failed to load initial data.");
+        } finally {
+            setLoading(false);
+        }
+    };
+    fetchInitialData();
+  }, [api]);
+
+  // This function now handles all filtering logic.
+  const fetchFilteredData = useCallback(async () => {
+    // Prevent running during the initial data load.
+    if (loading && allClients.length === 0) return;
+
     setLoading(true);
     setError(null);
+
+    const hasQuery = searchQuery.trim().length > 0;
+    const hasTags = filterTags.length > 0;
+
+    // If no filters are active, display the full client list and exit.
+    if (!hasQuery && !hasTags) {
+        setCommunity(allClients);
+        setLoading(false);
+        return;
+    }
+
     try {
-      let data;
-      if (searchQuery.trim()) {
-        data = await api.post('/api/clients/search', { natural_language_query: searchQuery });
-        data = data.map((client: any) => ({ ...client, client_id: client.id, health_score: 50, last_interaction_days: null }));
-      } else {
-        data = await api.get('/api/community');
-      }
-      setCommunity(data);
+      // The /api/clients/search endpoint handles combined queries.
+      const payload: { natural_language_query?: string; tags?: string[] } = {};
+      if (hasQuery) payload.natural_language_query = searchQuery;
+      if (hasTags) payload.tags = filterTags;
+      
+      const results: Client[] = await api.post('/api/clients/search', payload);
+      
+      // The search endpoint returns basic Client objects. We need to enrich them
+      // with the health metrics for display in the Community view.
+      const enrichedResults = results.map((client: Client) => {
+        const fullClientData = allClients.find(c => c.client_id === client.id);
+        return fullClientData || { 
+            ...client, 
+            client_id: client.id, 
+            health_score: 50, // Default fallback score
+            last_interaction_days: null 
+        };
+      });
+
+      setCommunity(enrichedResults);
+
     } catch (err: any) {
-      setError(err.message || "Failed to load data.");
+      setError(err.message || "Failed to load filtered data.");
+      setCommunity([]);
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, searchQuery, filterTags, allClients, loading]);
 
+  // Use a single debounced useEffect to trigger the search/filter action.
   useEffect(() => {
-    fetchCommunityData();
-  }, [fetchCommunityData]);
-
+    const handler = setTimeout(() => {
+      // Avoid triggering on initial render before data is loaded.
+      if (!loading) {
+        fetchFilteredData();
+      }
+    }, 500); // Debounce input to avoid excessive API calls
+    return () => clearTimeout(handler);
+  }, [searchQuery, filterTags, loading, fetchFilteredData]);
+  
   const showImportPrompt = user && user.onboarding_complete && !user.onboarding_state?.google_sync_complete;
 
   const stats = {
@@ -124,11 +213,15 @@ export default function CommunityPage() {
       </div>
 
       <div className="flex justify-between items-center mb-6 gap-4">
-        <MagicSearchBar onSearch={fetchCommunityData} isLoading={loading} className="flex-grow" placeholder="e.g., Clients who bought over 5 years ago..."/>
+        {/* MagicSearchBar now updates state, which triggers the debounced useEffect */}
+        <MagicSearchBar onSearch={setSearchQuery} isLoading={loading} className="flex-grow" placeholder="e.g., Clients who bought over 5 years ago..."/>
         <button className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-primary-action text-brand-dark rounded-md hover:brightness-110 flex-shrink-0"><Plus size={16} /> Add Contact</button>
       </div>
+      
+      {/* NEW: The TagFilter component is now rendered here */}
+      <TagFilter allTags={allTags} onFilterChange={setFilterTags} />
 
-      {loading && !community.length ? (<div className="p-8 text-center">Loading Community...</div>)
+      {loading && !community.length ? (<div className="p-8 text-center text-brand-text-muted">Loading Community...</div>)
        : error ? (<div className="p-8 text-center text-red-400">Error: {error}</div>)
        : community.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
@@ -138,7 +231,7 @@ export default function CommunityPage() {
         <div className="text-center py-20 border-2 border-dashed border-white/10 rounded-xl">
           <MessageSquare size={48} className="mx-auto text-brand-text-muted" />
           <h3 className="mt-4 text-xl font-bold">No Matching Clients Found</h3>
-          <p className="text-brand-text-muted">Try clearing your search or adding new contacts.</p>
+          <p className="text-brand-text-muted">Try clearing your search or adjusting your filters.</p>
         </div>
       )}
     </main>

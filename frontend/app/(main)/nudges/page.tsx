@@ -1,5 +1,7 @@
 // frontend/app/(main)/nudges/page.tsx
-// --- DEFINITIVE FIX: Fetches its own list of clients to prevent stale data.
+// --- MODIFIED ---
+// Purpose: Passes the locally fetched client list down to the InstantNudgeView
+// to ensure it has the fresh data required to render its filters.
 
 'use client';
 
@@ -13,7 +15,6 @@ import { ScheduledNudgesView } from '@/components/nudges/ScheduledNudgesView';
 import { InstantNudgeView } from '@/components/nudges/InstantNudgeView';
 
 export default function NudgesPage() {
-    // --- REMOVED: No longer taking `clients` from the global context ---
     const { user, api, loading, fetchDashboardData: refetchOpportunities } = useAppContext();
 
     const [nudges, setNudges] = useState<CampaignBriefing[]>([]);
@@ -25,13 +26,12 @@ export default function NudgesPage() {
     const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
     const [isScheduledLoading, setIsScheduledLoading] = useState(true);
 
-    // --- NEW: State management for this page's own client list ---
     const [clients, setClients] = useState<Client[]>([]);
     const [isClientsLoading, setIsClientsLoading] = useState(true);
 
-    const tabOptions: TabOption[] = [ 
+    const tabOptions: TabOption[] = [
         { id: 'ai_suggestions', label: 'AI Suggestions' },
-        { id: 'instant_nudge', label: 'Instant Nudge' }, 
+        { id: 'instant_nudge', label: 'Instant Nudge' },
         { id: 'scheduled', label: 'Scheduled' },
     ];
 
@@ -46,7 +46,6 @@ export default function NudgesPage() {
             .finally(() => setIsNudgesLoading(false));
     }, [api]);
 
-    // --- NEW: Function to fetch a fresh list of all clients ---
     const fetchClients = useCallback(() => {
         setIsClientsLoading(true);
         api.get('/api/clients')
@@ -68,9 +67,8 @@ export default function NudgesPage() {
     }, [api]);
 
     useEffect(() => {
-        // Fetch all necessary data when the page loads
         fetchNudgesAndConfig();
-        fetchClients(); 
+        fetchClients();
     }, [fetchNudgesAndConfig, fetchClients]);
 
     useEffect(() => {
@@ -110,8 +108,8 @@ export default function NudgesPage() {
 
             <div>
                 {activeTab === 'ai_suggestions' && (
-                    <OpportunityNudgesView 
-                        nudges={nudges} 
+                    <OpportunityNudgesView
+                        nudges={nudges}
                         isLoading={isNudgesLoading}
                         onAction={handleAction}
                         onBriefingUpdate={handleBriefingUpdate}
@@ -119,17 +117,16 @@ export default function NudgesPage() {
                     />
                 )}
                 {activeTab === 'scheduled' && (
-                    <ScheduledNudgesView 
-                        messages={scheduledMessages} 
-                        // --- MODIFIED: Use combined loading state ---
-                        isLoading={isScheduledLoading || isClientsLoading} 
-                        // --- MODIFIED: Pass the fresh client list from this page's state ---
+                    <ScheduledNudgesView
+                        messages={scheduledMessages}
+                        isLoading={isScheduledLoading || isClientsLoading}
                         clients={clients}
                         user={user}
                         onAction={refetchScheduled}
                     />
                 )}
-                {activeTab === 'instant_nudge' && <InstantNudgeView />}
+                {/* --- DEFINITIVE FIX: Pass the 'clients' array as a prop --- */}
+                {activeTab === 'instant_nudge' && <InstantNudgeView clients={clients} />}
             </div>
         </main>
     );

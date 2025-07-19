@@ -62,6 +62,20 @@ def get_client_by_id(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Clien
         statement = select(Client).where(Client.id == client_id, Client.user_id == user_id)
         return session.exec(statement).first()
 
+def get_clients_by_ids(client_ids: List[UUID], user_id: UUID) -> List[Client]:
+    """
+    Retrieves a list of clients by their unique IDs, ensuring they belong to the user.
+    --- NEW ---
+    """
+    if not client_ids:
+        return []
+    with Session(engine) as session:
+        statement = select(Client).where(
+            Client.id.in_(client_ids),
+            Client.user_id == user_id
+        )
+        return session.exec(statement).all()
+
 def get_client_by_phone(phone_number: str, user_id: uuid.UUID) -> Optional[Client]:
     """Retrieves a single client by their phone number, ensuring it belongs to the user."""
     with Session(engine) as session:
@@ -683,62 +697,69 @@ def _get_all_clients_for_system_indexing() -> List[Client]:
         statement = select(Client)
         return session.exec(statement).all()
 
-# Community 
+# --- Community Functions ---
+
+def enrich_clients_for_community_view(clients: List[Client]) -> List[Dict[str, Any]]:
+    """
+    Takes a list of clients and enriches them with calculated health metrics.
+    --- NEW HELPER FUNCTION ---
+    """
+    community_list = []
+    for client in clients:
+        health_score = 0
+        
+        last_interaction_days = None
+        if client.last_interaction:
+            try:
+                last_interaction_dt = datetime.fromisoformat(client.last_interaction).replace(tzinfo=timezone.utc)
+                delta = datetime.now(timezone.utc) - last_interaction_dt
+                last_interaction_days = delta.days
+                if last_interaction_days <= 7:
+                    health_score += 50
+                elif last_interaction_days <= 30:
+                    health_score += 30
+                elif last_interaction_days <= 90:
+                    health_score += 10
+            except (ValueError, TypeError):
+                logging.warning(f"CRM: Could not parse last_interaction for client {client.id}: {client.last_interaction}")
+
+        if client.email and client.phone:
+            health_score += 30
+        elif client.email or client.phone:
+            health_score += 15
+
+        tag_count = len(client.user_tags) + len(client.ai_tags)
+        if tag_count > 5:
+            health_score += 20
+        elif tag_count > 0:
+            health_score += 10
+        
+        member_data = {
+            "client_id": client.id,
+            "full_name": client.full_name,
+            "email": client.email,
+            "phone": client.phone,
+            "user_tags": client.user_tags,
+            "ai_tags": client.ai_tags,
+            "last_interaction_days": last_interaction_days,
+            "health_score": min(health_score, 100)
+        }
+        community_list.append(member_data)
+        
+    community_list.sort(key=lambda x: x['health_score'], reverse=True)
+    return community_list
 
 def get_community_overview(user_id: uuid.UUID) -> List[Dict[str, Any]]:
     """
     Retrieves all clients for a user and calculates health metrics for each.
+    --- REFACTORED to use the new helper function ---
     """
     logging.info(f"CRM: Calculating community overview for user_id: {user_id}")
     
     with Session(engine) as session:
-        statement = select(Client).where(Client.user_id == user_id)
-        clients = session.exec(statement).all()
-        
-        community_list = []
-        for client in clients:
-            health_score = 0
-            
-            last_interaction_days = None
-            if client.last_interaction:
-                try:
-                    last_interaction_dt = datetime.fromisoformat(client.last_interaction).replace(tzinfo=timezone.utc)
-                    delta = datetime.now(timezone.utc) - last_interaction_dt
-                    last_interaction_days = delta.days
-                    if last_interaction_days <= 7:
-                        health_score += 50
-                    elif last_interaction_days <= 30:
-                        health_score += 30
-                    elif last_interaction_days <= 90:
-                        health_score += 10
-                except (ValueError, TypeError):
-                    logging.warning(f"CRM: Could not parse last_interaction for client {client.id}: {client.last_interaction}")
+        clients = session.exec(select(Client).where(Client.user_id == user_id)).all()
+        return enrich_clients_for_community_view(clients)
 
-            if client.email and client.phone:
-                health_score += 30
-            elif client.email or client.phone:
-                health_score += 15
-
-            tag_count = len(client.user_tags) + len(client.ai_tags)
-            if tag_count > 5:
-                health_score += 20
-            elif tag_count > 0:
-                health_score += 10
-            
-            member_data = {
-                "client_id": client.id,
-                "full_name": client.full_name,
-                "email": client.email,
-                "phone": client.phone,
-                "user_tags": client.user_tags,
-                "ai_tags": client.ai_tags,
-                "last_interaction_days": last_interaction_days,
-                "health_score": min(health_score, 100)
-            }
-            community_list.append(member_data)
-            
-        community_list.sort(key=lambda x: x['health_score'], reverse=True)
-        return community_list
 
 def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
     """
