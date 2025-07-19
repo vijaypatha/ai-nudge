@@ -53,7 +53,7 @@ export const EditMessageModal = ({ isOpen, onClose, message }: EditMessageModalP
                         <input
                             type="text"
                             readOnly
-                            value={new Date(message.scheduled_at).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                            value={new Date(message.scheduled_at_utc).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                             className="w-full bg-black/20 border border-white/10 rounded-lg p-2 text-sm text-gray-300"
                         />
                     </div>

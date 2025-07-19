@@ -1,7 +1,5 @@
 // frontend/app/(main)/conversations/[clientId]/page.tsx
-// --- FINAL, ROBUST VERSION (LAYOUT FIX) ---
-// This version refactors the JSX to correctly implement a two-column layout
-// on desktop (Chat + Intel Sidebar) and a tabbed view on mobile.
+// --- CORRECTED VERSION ---
 
 'use client';
 
@@ -18,12 +16,10 @@ import { ClientIntelCard } from '@/components/conversation/ClientIntelCard';
 import { RelationshipCampaignCard } from '@/components/conversation/RelationshipCampaignCard';
 import { ChatHistory } from '@/components/conversation/ChatHistory';
 import { MessageComposer } from '@/components/conversation/MessageComposer';
+import { ScheduleMessageModal } from '@/components/modals/ScheduleMessageModal';
 import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
 import { Users, Menu, Phone, Video, Loader2 } from 'lucide-react';
-const POLLING_INTERVAL = 5000; // Poll every 5 seconds
-import { fromZonedTime } from 'date-fns-tz';
-
 
 export interface ConversationDisplayConfig {
     client_intel: { title: string; icon: string; };
@@ -64,6 +60,9 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     const [isPlanProcessing, setIsPlanProcessing] = useState(false);
     const [isPlanSuccess, setIsPlanSuccess] = useState(false);
     
+    const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+    const [composerContent, setComposerContent] = useState('');
+
     const [activeTab, setActiveTab] = useState<'messages' | 'intel'>('messages');
     const messageComposerRef = useRef<MessageComposerHandle>(null);
 
@@ -86,7 +85,6 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                 active_plan: convoData.active_plan,
             };
 
-            // Use functional updates with deep comparison to prevent unnecessary re-renders
             setConversationData(prevState => 
                 JSON.stringify(prevState) === JSON.stringify(newConvoState) ? prevState : newConvoState
             );
@@ -99,7 +97,6 @@ export default function ConversationPage({ params }: ConversationPageProps) {
 
         } catch (error) {
             console.error("Polling failed for conversation data:", error);
-            // Do not reset state on a transient polling error, which could cause a flicker.
         }
     }, [api, refetchScheduledMessagesForClient]);
 
@@ -120,60 +117,48 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         fetchClientAndConversation();
     }, [clientId, api, fetchConversationData]);
 
-// This version uses a ref to hold callback handlers, ensuring the connection
-// is stable and does not reset on re-renders.
-const handlersRef = useRef({ fetchConversationData, refreshConversations });
+    const handlersRef = useRef({ fetchConversationData, refreshConversations });
 
-useEffect(() => {
-    handlersRef.current = { fetchConversationData, refreshConversations };
-}, [fetchConversationData, refreshConversations]);
+    useEffect(() => {
+        handlersRef.current = { fetchConversationData, refreshConversations };
+    }, [fetchConversationData, refreshConversations]);
 
-useEffect(() => {
-    // Use the top-level 'token' from context, not 'api.token'
-    if (!clientId || !token) return;
+    useEffect(() => {
+        if (!clientId || !token) return;
 
-    const wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
-    // FIX: Append the correct auth token as a query parameter
-    const wsUrl = `${wsBaseUrl}/api/ws/${clientId}?token=${token}`;
+        const wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+        const wsUrl = `${wsBaseUrl}/api/ws/${clientId}?token=${token}`;
 
-    console.log(`WS: Attempting to connect to ${wsUrl}`);
-    ws.current = new WebSocket(wsUrl);
+        console.log(`WS: Attempting to connect to ${wsUrl}`);
+        ws.current = new WebSocket(wsUrl);
 
-    ws.current.onopen = () => console.log(`WS: Connection established for client ${clientId}`);
+        ws.current.onopen = () => console.log(`WS: Connection established for client ${clientId}`);
 
-    ws.current.onmessage = (event) => {
-        try {
-            const data = JSON.parse(event.data);
-            console.log('WS: Message received:', data);
-
-            if ((data.type === 'NEW_MESSAGE' || data.type === 'MESSAGE_SENT') && data.clientId === clientId) {
-                console.log(`WS: ${data.type} notification received. Refetching data...`);
-                handlersRef.current.fetchConversationData(clientId);
-                handlersRef.current.refreshConversations();
-            } else if (data.type === 'INTEL_UPDATED' && data.clientId === clientId) {
-                console.log('WS: Intel update notification received. Refetching conversation data...');
-                handlersRef.current.fetchConversationData(clientId);
+        ws.current.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if ((data.type === 'NEW_MESSAGE' || data.type === 'MESSAGE_SENT') && data.clientId === clientId) {
+                    handlersRef.current.fetchConversationData(clientId);
+                    handlersRef.current.refreshConversations();
+                } else if (data.type === 'INTEL_UPDATED' && data.clientId === clientId) {
+                    handlersRef.current.fetchConversationData(clientId);
+                }
+            } catch (e) {
+                console.error('WS: Error parsing message data', e);
             }
-        } catch (e) {
-            console.error('WS: Error parsing message data', e);
-        }
-    };
+        };
 
-    ws.current.onerror = (err) => console.error(`WS: Error for client ${clientId}:`, err);
-    ws.current.onclose = (event) => console.log(`WS: Connection closed for client ${clientId}. Code: ${event.code}`);
+        ws.current.onerror = (err) => console.error(`WS: Error for client ${clientId}:`, err);
+        ws.current.onclose = (event) => console.log(`WS: Connection closed for client ${clientId}. Code: ${event.code}`);
 
-    return () => {
-        if (ws.current) {
-            console.log(`WS: Closing connection for client ${clientId}`);
-            ws.current.close();
-        }
-    };
-}, [clientId, token]); // <-- Update dependency array to use 'token'
+        return () => {
+            if (ws.current) ws.current.close();
+        };
+    }, [clientId, token]);
 
     const handleSendMessage = useCallback(async (content: string) => {
         if (!content.trim() || !selectedClient) return;
         setIsSending(true);
-        // Replace with this updated object definition
         const optimisticMessage: Message = { id: `agent-${Date.now()}`, client_id: selectedClient.id, content, direction: 'outbound', status: 'pending', created_at: new Date().toISOString(), source: 'manual', sender_type: 'user' };
         
         setConversationData(prevData => ({
@@ -185,59 +170,41 @@ useEffect(() => {
         try {
             await api.post(`/api/conversations/${selectedClient.id}/send_reply`, { content });
             setTimeout(() => fetchConversationData(selectedClient.id), 1000);
-            refreshConversations(); // Also refresh the sidebar conversations
+            refreshConversations();
         } catch (err) {
             console.error("Failed to send message:", err);
-            setConversationData(prev => {
-                if (!prev) return null;
-                return { ...prev, messages: prev.messages.filter(m => m.id !== optimisticMessage.id) };
-            });
+            setConversationData(prev => prev ? { ...prev, messages: prev.messages.filter(m => m.id !== optimisticMessage.id) } : null);
             alert("Failed to send message.");
         } finally {
             setIsSending(false);
         }
-    }, [selectedClient, api, fetchConversationData]);
+    }, [selectedClient, api, fetchConversationData, refreshConversations]);
 
-    const handleScheduleMessage = useCallback(async (content: string, scheduledAt: string) => {
-        if (!content.trim() || !scheduledAt || !selectedClient) return;
-        try {
-            // FIX: Use a robust library for timezone conversion
-            // Assume the user's timezone is available, falling back to browser's guess
-            const userTimezone = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-            // Convert the local datetime string to a true ZonedDateTime object
-            const zonedTime = fromZonedTime(scheduledAt, userTimezone);
-            // Format that ZonedDateTime into a UTC ISO string for the backend
-            const scheduled_at_iso = zonedTime.toISOString();
-    
-            await api.post('/api/scheduled-messages', {
-                client_id: selectedClient.id,
-                content,
-                scheduled_at: scheduled_at_iso,
-            });
-    
+    const handleOpenScheduleModal = useCallback((content: string) => {
+        setComposerContent(content);
+        setIsScheduleModalOpen(true);
+    }, []);
+
+    const handleScheduleSuccess = useCallback(() => {
+        setIsScheduleModalOpen(false);
+        if (selectedClient) {
             refetchScheduledMessagesForClient(selectedClient.id);
-            alert("Message scheduled successfully!");
-    
-        } catch (error) {
-            console.error("Failed to schedule message:", error);
-            alert("Could not schedule the message. Please try again.");
         }
-    }, [api, selectedClient, user, refetchScheduledMessagesForClient]); // <-- Added 'user' to dependency array
+        alert("Message scheduled successfully!");
+    }, [selectedClient, refetchScheduledMessagesForClient]);
 
     const handlePlanAction = useCallback(async (action: 'approve' | 'dismiss', planId: string) => {
         if (!selectedClient) return;
-        setIsPlanProcessing(true); // Spinner starts for both actions
+        setIsPlanProcessing(true);
         setIsPlanSuccess(false);
         
         try {
             if (action === 'approve') {
                 await api.post(`/api/campaigns/${planId}/approve`, {});
-                setIsPlanSuccess(true); // Show success message
-                // Fetch new data immediately instead of waiting
+                setIsPlanSuccess(true);
                 fetchConversationData(selectedClient.id);
-                // Hide the success message after 3 seconds, but the spinner is already stopped
                 setTimeout(() => setIsPlanSuccess(false), 3000);
-            } else { // 'dismiss'
+            } else {
                 await api.put(`/api/campaigns/${planId}`, { status: 'cancelled' });
                 fetchConversationData(selectedClient.id);
             }
@@ -245,7 +212,6 @@ useEffect(() => {
             console.error(`Failed to ${action} plan:`, error);
             alert(`Failed to ${action} the plan.`);
         } finally {
-            // CRITICAL FIX: Always stop the spinner regardless of action type
             setIsPlanProcessing(false);
         }
     }, [selectedClient, api, fetchConversationData]);
@@ -261,27 +227,15 @@ useEffect(() => {
     }, [fetchConversationData, selectedClient]);
 
     if (pageState === 'loading') {
-        return (
-            <div className="flex-1 flex flex-col items-center justify-center h-full text-brand-text-muted p-4">
-                <Loader2 className="w-12 h-12 animate-spin mb-4" />
-                <p>Loading Conversation...</p>
-            </div>
-        );
+        return <div className="flex-1 flex flex-col items-center justify-center h-full"><Loader2 className="w-12 h-12 animate-spin" /></div>;
     }
     
     if (pageState === 'error' || !selectedClient) {
-        return (
-            <div className="flex-1 flex flex-col items-center justify-center h-full text-brand-text-muted p-4">
-                <Users className="w-16 h-16 mb-4" />
-                <h1 className="text-xl font-medium text-center">Client Not Found</h1>
-                <p className="text-sm text-center">The selected client could not be found.</p>
-            </div>
-        );
+        return <div className="flex-1 flex flex-col items-center justify-center h-full"><Users className="w-16 h-16" /><h1 className="text-xl">Client Not Found</h1></div>;
     }
     
     const activePlan = conversationData?.active_plan;
     
-    // --- LAYOUT FIX: The Intel sidebar is now a sibling to the main content area ---
     const IntelSidebarContent = () => (
         <>
             <DynamicTaggingCard client={selectedClient} onUpdate={handleClientUpdate} />
@@ -306,6 +260,13 @@ useEffect(() => {
 
     return (
         <div className="flex-1 flex min-w-0 h-full">
+            <ScheduleMessageModal
+                isOpen={isScheduleModalOpen}
+                onClose={() => setIsScheduleModalOpen(false)}
+                onScheduleSuccess={handleScheduleSuccess}
+                clientId={clientId}
+                initialContent={composerContent}
+            />
             <main className="flex-1 flex flex-col min-w-0 lg:border-l lg:border-r border-white/10">
                 <header className="flex items-center justify-between p-4 border-b border-white/10 bg-brand-dark/50 backdrop-blur-sm sticky top-0 z-10">
                     <div className="flex items-center gap-4">
@@ -325,29 +286,34 @@ useEffect(() => {
                 <div className="flex-shrink-0 p-2 border-b border-white/10 lg:hidden">
                     <Tabs options={tabOptions} activeTab={activeTab} setActiveTab={(id) => setActiveTab(id as 'messages' | 'intel')} />
                 </div>
-
-                {/* --- LAYOUT FIX: Conditional rendering for mobile vs. desktop --- */}
-                <div className={clsx("flex flex-col flex-grow min-h-0", activeTab === 'messages' ? 'flex' : 'hidden lg:flex')}>
-                    <ChatHistory 
-                        messages={conversationData?.messages || []}
-                        selectedClient={selectedClient}
-                        recommendations={conversationData?.immediate_recommendations || null}
-                        onActionComplete={handleClientUpdate}
-                        onCoPilotActionSuccess={handleCoPilotActionSuccess}
-                        onSendMessage={handleSendMessage}
-                        messageComposerRef={messageComposerRef}
-                    />
-                    <MessageComposer
-                    onSendMessage={handleSendMessage}
-                    onScheduleMessage={handleScheduleMessage}
-                    isSending={isSending}
-                    ref={messageComposerRef}
-                />
-                </div>
                 
-                {/* This is the intel view for mobile only */}
-                <div className={clsx("p-6 space-y-6 overflow-y-auto lg:hidden", activeTab === 'intel' ? 'block' : 'hidden')}>
-                    <IntelSidebarContent />
+                {/* --- CORRECTED JSX STRUCTURE --- */}
+                {/* This wrapper div contains both the main content areas for mobile tabs */}
+                <div className="flex-1 flex flex-col min-h-0">
+                    {/* Mobile: Messages Tab */}
+                    <div className={clsx("flex flex-col flex-grow min-h-0", activeTab === 'messages' ? 'flex' : 'hidden lg:flex')}>
+                        <ChatHistory 
+                            messages={conversationData?.messages || []}
+                            selectedClient={selectedClient}
+                            recommendations={conversationData?.immediate_recommendations || null}
+                            onActionComplete={handleClientUpdate}
+                            onCoPilotActionSuccess={handleCoPilotActionSuccess}
+                            onSendMessage={handleSendMessage}
+                            messageComposerRef={messageComposerRef}
+                        />
+                        <MessageComposer
+                            onSendMessage={handleSendMessage}
+                            onScheduleMessage={handleOpenScheduleModal}
+                            onOpenScheduleModal={handleOpenScheduleModal}
+                            isSending={isSending}
+                            ref={messageComposerRef}
+                        />
+                    </div>
+                    
+                    {/* Mobile: Intel Tab */}
+                    <div className={clsx("p-6 space-y-6 overflow-y-auto lg:hidden", activeTab === 'intel' ? 'block' : 'hidden')}>
+                        <IntelSidebarContent />
+                    </div>
                 </div>
             </main>
 

@@ -1,64 +1,62 @@
-// frontend/components/modals/EditMessageModal.tsx
-// --- FINAL, CORRECTED VERSION ---
-// This version uses the correct 'scheduled_at_utc' property and provides full editing functionality.
-
+// frontend/components/modals/ScheduleMessageModal.tsx
 'use client';
 
 import { useState, FC, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ScheduledMessage, useAppContext } from '@/context/AppContext';
+import { useAppContext } from '@/context/AppContext';
 import { Button } from '@/components/ui/Button';
 import { TimezoneSelector } from '@/components/ui/TimezoneSelector';
-import { X, Loader2, Save } from 'lucide-react';
-import { formatInTimeZone } from 'date-fns-tz';
+import { X, Loader2, CalendarClock } from 'lucide-react';
 
-interface EditMessageModalProps {
+interface ScheduleMessageModalProps {
     isOpen: boolean;
     onClose: () => void;
-    message: ScheduledMessage | null;
-    onSaveSuccess: () => void;
+    onScheduleSuccess: () => void;
+    clientId: string;
+    initialContent?: string;
 }
 
-export const EditMessageModal: FC<EditMessageModalProps> = ({ isOpen, onClose, message, onSaveSuccess }) => {
-    const { api } = useAppContext();
+export const ScheduleMessageModal: FC<ScheduleMessageModalProps> = ({ isOpen, onClose, onScheduleSuccess, clientId, initialContent = '' }) => {
+    const { api, user } = useAppContext();
     const [content, setContent] = useState('');
-    const [localDate, setLocalDate] = useState('');
-    const [timezone, setTimezone] = useState('');
+    const [date, setDate] = useState('');
+    const [timezone, setTimezone] = useState(user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
-        if (message) {
-            setContent(message.content);
-            setTimezone(message.timezone);
-
-            // --- THE FIX IS HERE ---
-            // This now correctly uses 'message.scheduled_at_utc' which exists on the type.
-            // The previous code was still referencing 'message.scheduled_at', causing the build to fail.
-            const scheduledTimeInOriginalTZ = formatInTimeZone(message.scheduled_at_utc, message.timezone, "yyyy-MM-dd'T'HH:mm");
-            setLocalDate(scheduledTimeInOriginalTZ);
+        if (isOpen) {
+            // Set default time to 30 mins in the future
+            const futureDate = new Date(Date.now() + 30 * 60 * 1000);
+            const localISOString = new Date(futureDate.getTime() - (futureDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+            setDate(localISOString);
+            setContent(initialContent); // Use initial content if provided
         }
-    }, [message]);
+    }, [isOpen, initialContent]);
 
-    const handleSave = async () => {
-        if (!message || !content || !localDate || !timezone) return;
+    const handleSchedule = async () => {
+        if (!content || !date || !timezone || !clientId) {
+            alert("Please fill out all fields.");
+            return;
+        }
         setIsSaving(true);
         try {
-            // The API call correctly sends the local date string and the timezone.
-            await api.put(`/api/scheduled-messages/${message.id}`, {
-                content,
-                scheduled_at_local: localDate,
+            // The backend expects the local datetime string and a separate timezone string.
+            await api.post(`/api/scheduled-messages`, {
+                client_id: clientId,
+                content: content,
+                scheduled_at_local: date,
                 timezone: timezone,
             });
-            onSaveSuccess();
+            onScheduleSuccess();
         } catch (error) {
-            console.error("Failed to save message:", error);
-            alert("Could not save changes. Please try again.");
+            console.error("Failed to schedule message:", error);
+            alert("Could not schedule the message. Please try again.");
         } finally {
             setIsSaving(false);
         }
     };
 
-    if (!isOpen || !message) return null;
+    if (!isOpen) return null;
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -68,7 +66,7 @@ export const EditMessageModal: FC<EditMessageModalProps> = ({ isOpen, onClose, m
                 className="bg-brand-primary border border-white/10 rounded-xl shadow-lg w-full max-w-lg flex flex-col"
             >
                 <header className="flex items-center justify-between p-4 border-b border-white/10">
-                    <h2 className="font-bold text-lg text-white">Edit Scheduled Message</h2>
+                    <h2 className="font-bold text-lg text-white">Schedule a Message</h2>
                     <Button variant="ghost" size="sm" onClick={onClose}><X className="w-5 h-5" /></Button>
                 </header>
                 <main className="p-6 space-y-4">
@@ -78,21 +76,22 @@ export const EditMessageModal: FC<EditMessageModalProps> = ({ isOpen, onClose, m
                             value={content}
                             onChange={(e) => setContent(e.target.value)}
                             className="w-full h-32 p-3 bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-primary-action"
+                            placeholder="Write your message here..."
                         />
                     </div>
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                         <div>
                             <label className="text-sm font-semibold text-gray-300 mb-2 block">Date & Time</label>
                             <input
                                 type="datetime-local"
-                                value={localDate}
-                                onChange={(e) => setLocalDate(e.target.value)}
+                                value={date}
+                                onChange={(e) => setDate(e.target.value)}
                                 className="w-full p-3 bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-primary-action"
                             />
                         </div>
                         <div>
                             <label className="text-sm font-semibold text-gray-300 mb-2 block">Time Zone</label>
-                             <TimezoneSelector
+                            <TimezoneSelector
                                 value={timezone}
                                 onChange={(e) => setTimezone(e.target.value)}
                                 className="w-full p-3 bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-primary-action"
@@ -102,9 +101,9 @@ export const EditMessageModal: FC<EditMessageModalProps> = ({ isOpen, onClose, m
                 </main>
                 <footer className="flex justify-end gap-3 p-4 bg-black/20 border-t border-white/10">
                     <Button variant="secondary" onClick={onClose} disabled={isSaving}>Cancel</Button>
-                    <Button onClick={handleSave} disabled={isSaving}>
-                        {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                        Save Changes
+                    <Button onClick={handleSchedule} disabled={isSaving || !content || !date || !timezone}>
+                        {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CalendarClock className="w-4 h-4 mr-2" />}
+                        Schedule Message
                     </Button>
                 </footer>
             </motion.div>

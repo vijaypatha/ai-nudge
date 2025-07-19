@@ -1,5 +1,6 @@
 // frontend/components/conversation/ChatHistory.tsx
-// --- DEFINITIVE FIX: This component now renders recommendations and actions inline. ---
+// --- FINAL VERSION ---
+// This version correctly renders all message source labels and inline recommendations.
 
 'use client';
 
@@ -26,9 +27,9 @@ interface ChatHistoryProps {
     messageComposerRef: React.RefObject<MessageComposerHandle>;
 }
 
-export const ChatHistory = ({ 
-    messages, 
-    selectedClient, 
+export const ChatHistory = ({
+    messages,
+    selectedClient,
     recommendations,
     onActionComplete,
     onCoPilotActionSuccess,
@@ -59,14 +60,19 @@ export const ChatHistory = ({
                             {/* Render the message bubble */}
                             <div className={clsx("flex items-end gap-3", msg.direction === 'inbound' ? 'justify-start' : 'justify-end')}>
                                 {msg.direction === 'inbound' && <Avatar name={selectedClient.full_name} className="w-8 h-8 text-xs" />}
-                                
+
                                 <div className={clsx("p-3 px-4 rounded-t-xl max-w-lg", {
                                     'bg-gray-800 text-brand-text-muted rounded-br-xl': msg.direction === 'inbound',
                                     'bg-primary-action text-brand-dark font-medium rounded-bl-xl': msg.direction === 'outbound'
                                 })}>
                                     <p className="whitespace-pre-wrap">{msg.content}</p>
-                                    {/* --- NEW METADATA DISPLAY LOGIC --- */}
+                                    {/* --- REVISED METADATA DISPLAY LOGIC --- */}
                                     <div className="flex items-center justify-end text-xs mt-1 opacity-70 gap-2">
+                                        {msg.direction === 'outbound' && msg.source === 'instant_nudge' && (
+                                            <span className="flex items-center gap-1 font-semibold text-cyan-400">
+                                                ⚡️ <span className='opacity-80'>Instant Nudge</span>
+                                            </span>
+                                        )}
                                         {msg.direction === 'outbound' && msg.source === 'scheduled' && (
                                             <span className="flex items-center gap-1 font-semibold">
                                                 🕒 <span className='opacity-80'>Scheduled</span>
@@ -81,7 +87,7 @@ export const ChatHistory = ({
                                             {new Date(msg.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                                         </span>
                                     </div>
-                                    {/* --- END NEW LOGIC --- */}
+                                    {/* --- END REVISED LOGIC --- */}
                                 </div>
                             </div>
                             

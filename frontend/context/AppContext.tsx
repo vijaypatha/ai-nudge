@@ -62,7 +62,6 @@ export interface CampaignBriefing {
     parent_message_id?: string;
 }
 
-// Replace with this updated interface
 export interface Message {
   id: string;
   client_id: string;
@@ -71,10 +70,10 @@ export interface Message {
   status: string;
   created_at: string;
   ai_drafts?: CampaignBriefing[];
-  // --- NEW FIELDS START ---
-  source: 'manual' | 'scheduled' | 'faq_auto_response';
-  sender_type: 'user' | 'system';
-  // --- NEW FIELDS END ---
+  // --- REVISED FIELDS ---
+  source: 'manual' | 'scheduled' | 'faq_auto_response' | 'instant_nudge';
+  sender_type: 'user' | 'system' | 'ai';
+  // --- END REVISED FIELDS ---
 }
 export interface Conversation { id: string; client_id: string; client_name: string; last_message: string; last_message_time: string; unread_count: number; }
 
@@ -83,9 +82,12 @@ export interface ScheduledMessage {
   user_id: string;
   client_id: string;
   content: string;
-  scheduled_at: string;
+  scheduled_at_utc: string; // Corrected field name
+  timezone: string; // Added field
   status: 'pending' | 'sent' | 'failed' | 'cancelled';
+  celery_task_id: string | null; // Added field
   playbook_touchpoint_id?: string;
+  is_recurring: boolean; // Added field
 }
 
 interface AppContextType {

@@ -1,7 +1,5 @@
 // frontend/app/(main)/nudges/page.tsx
-// --- MODIFIED ---
-// Purpose: Passes the locally fetched client list down to the InstantNudgeView
-// to ensure it has the fresh data required to render its filters.
+// --- CORRECTED VERSION ---
 
 'use client';
 
@@ -60,7 +58,9 @@ export default function NudgesPage() {
         api.get('/api/scheduled-messages/')
             .then(data => {
                 const pendingMessages = data.filter((msg: ScheduledMessage) => msg.status === 'pending');
-                pendingMessages.sort((a: ScheduledMessage, b: ScheduledMessage) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
+                // --- FIX IS HERE ---
+                // Sort by 'scheduled_at_utc' instead of the old 'scheduled_at' property.
+                pendingMessages.sort((a: ScheduledMessage, b: ScheduledMessage) => new Date(a.scheduled_at_utc).getTime() - new Date(b.scheduled_at_utc).getTime());
                 setScheduledMessages(pendingMessages);
             })
             .catch(err => console.error("Failed to fetch scheduled messages:", err))
@@ -133,7 +133,6 @@ export default function NudgesPage() {
                             onAction={refetchScheduled}
                         />
                     )}
-                    {/* --- DEFINITIVE FIX: Pass the 'clients' array as a prop --- */}
                     {activeTab === 'instant_nudge' && <InstantNudgeView clients={clients} onScheduleSuccess={refetchScheduled} />}
                 </motion.div>
             </AnimatePresence>
