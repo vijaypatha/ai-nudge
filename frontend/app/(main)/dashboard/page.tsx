@@ -7,12 +7,23 @@
 
 import { Suspense } from 'react';
 import { MessageSquare, Users } from 'lucide-react';
+import { formatInTimeZone } from 'date-fns-tz';
 
 /**
  * The content for the main dashboard/community overview.
  * It's kept clean and only shows a prompt.
  */
 function DashboardPageContent() {
+  const formatDashboardTime = (timestamp: string) => {
+    try {
+        const date = new Date(timestamp);
+        return formatInTimeZone(date, Intl.DateTimeFormat().resolvedOptions().timeZone, "h:mm a");
+    } catch (e) {
+        console.error("Dashboard time formatting failed:", e);
+        return timestamp;
+    }
+  };
+
   return (
     // The parent layout provides the flex container, so we just need to fill the space.
     <div className="flex-1 flex min-w-0">
@@ -299,7 +310,7 @@ export default function DashboardPage() {
 //           <ul className="space-y-1 pt-2">
 //             {messages.map(msg => (
 //               <li key={msg.id} onClick={() => setEditingMessage(msg)} className="group flex items-center justify-between hover:bg-white/5 -mx-2 px-2 py-2 rounded-md cursor-pointer transition-all">
-//                 <div className="flex items-start gap-4"><div className="mt-1 flex-shrink-0">{getIconForMessage(msg.content)}</div><div><p className="font-semibold text-sm text-brand-text-main">{new Date(msg.scheduled_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</p><p className="text-xs text-brand-text-muted break-words whitespace-pre-wrap">{msg.content.split('\n')[0]}</p></div></div>
+//                 <div className="flex items-start gap-4"><div className="mt-1 flex-shrink-0">{getIconForMessage(msg.content)}</div><div><p className="font-semibold text-sm text-brand-text-main">{new Date(new Date(msg.scheduled_at).toISOString()).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</p><p className="text-xs text-brand-text-muted break-words whitespace-pre-wrap">{msg.content.split('\n')[0]}</p></div></div>
 //                 <div className="opacity-0 group-hover:opacity-100 transition-opacity pr-1"><Edit2 size={14} className="text-brand-text-muted" /></div>
 //               </li>
 //             ))}
@@ -474,7 +485,7 @@ export default function DashboardPage() {
 //           <div className="px-4 my-4 relative flex-shrink-0"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-brand-text-muted/50" /><input type="text" placeholder="Search conversations..." className="w-full bg-black/20 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-brand-text-main focus:outline-none focus:ring-2 focus:ring-brand-accent" /></div>
 //           <div className="flex-grow overflow-y-auto px-4">
 //             <ul className="space-y-1">
-//               {conversations.map(conv => (<li key={conv.id} className={clsx("p-3 rounded-lg cursor-pointer transition-colors border border-transparent", selectedClientId === conv.client_id ? "bg-white/10 border-white/20" : "hover:bg-white/5")} onClick={() => { setSelectedClientId(conv.client_id); setIsSidebarOpen(false); }}><div className="flex items-start justify-between gap-3"><div className="flex items-start gap-3 overflow-hidden"><Avatar name={conv.client_name} className="w-10 h-10 text-sm flex-shrink-0" /><div className="overflow-hidden"><span className="font-semibold text-brand-text-main">{conv.client_name}</span><p className="text-brand-text-muted text-sm truncate">{conv.last_message}</p></div></div><div className="flex flex-col items-end flex-shrink-0"><span className="text-xs text-brand-text-muted/70">{new Date(conv.last_message_time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>{conv.unread_count > 0 && (<span className="mt-1 bg-brand-accent text-xs text-brand-dark font-bold rounded-full w-5 h-5 flex items-center justify-center"> {conv.unread_count} </span>)}</div></div></li>))}
+//               {conversations.map(conv => (<li key={conv.id} className={clsx("p-3 rounded-lg cursor-pointer transition-colors border border-transparent", selectedClientId === conv.client_id ? "bg-white/10 border-white/20" : "hover:bg-white/5")} onClick={() => { setSelectedClientId(conv.client_id); setIsSidebarOpen(false); }}><div className="flex items-start justify-between gap-3"><div className="flex items-start gap-3 overflow-hidden"><Avatar name={conv.client_name} className="w-10 h-10 text-sm flex-shrink-0" /><div className="overflow-hidden"><span className="font-semibold text-brand-text-main">{conv.client_name}</span><p className="text-brand-text-muted text-sm truncate">{conv.last_message}</p></div></div><div className="flex flex-col items-end flex-shrink-0"><span className="text-xs text-brand-text-muted/70">{new Date(new Date(conv.last_message_time).toISOString()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>{conv.unread_count > 0 && (<span className="mt-1 bg-brand-accent text-xs text-brand-dark font-bold rounded-full w-5 h-5 flex items-center justify-center"> {conv.unread_count} </span>)}</div></div></li>))}
 //             </ul>
 //           </div>
 //           <div className="p-4 flex-shrink-0 border-t border-white/5"><Link href="/profile" className="flex items-center gap-3 p-2.5 rounded-lg text-brand-text-muted hover:bg-white/5 transition-colors"><UserIcon className="w-5 h-5" /> Profile</Link></div>

@@ -18,9 +18,10 @@ interface AIDraftDisplayProps {
     draft: CampaignBriefing;
     onSendMessage: (content: string) => Promise<void>;
     messageComposerRef: React.RefObject<MessageComposerHandle>;
+    isSending?: boolean;
 }
 
-export const AIDraftDisplay = ({ draft, onSendMessage, messageComposerRef }: AIDraftDisplayProps) => {
+export const AIDraftDisplay = ({ draft, onSendMessage, messageComposerRef, isSending = false }: AIDraftDisplayProps) => {
     
     /**
      * Handles the "Edit" button click.
@@ -37,6 +38,7 @@ export const AIDraftDisplay = ({ draft, onSendMessage, messageComposerRef }: AID
      * It uses the parent's onSendMessage function to send the draft text.
      */
     const handleSend = async () => {
+        if (isSending) return; // Prevent multiple sends
         await onSendMessage(draft.original_draft);
     };
 
@@ -52,7 +54,7 @@ export const AIDraftDisplay = ({ draft, onSendMessage, messageComposerRef }: AID
                     <Button variant="secondary" onClick={handleEdit} size="sm" className="flex items-center gap-1">
                         <Edit className="w-4 h-4" /> Edit
                     </Button>
-                    <Button onClick={handleSend} size="sm" className="flex items-center gap-1">
+                    <Button onClick={handleSend} size="sm" className="flex items-center gap-1" disabled={isSending}>
                         <Send className="w-4 h-4" /> Send
                     </Button>
                 </div>

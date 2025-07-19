@@ -40,10 +40,24 @@ const groupMessagesByDate = (messages: ScheduledMessage[], localTimeZone: string
 
 const formatDisplayDateTime = (utcDateString: string, timeZone: string) => {
     try {
-        return formatInTimeZone(utcDateString, timeZone, "MMM d, h:mm a (zzz)");
+        // Create a Date object from the UTC string
+        const date = new Date(utcDateString);
+        
+        // Debug logging
+        console.log('formatDisplayDateTime debug:', {
+            original: utcDateString,
+            parsedDate: date,
+            timeZone: timeZone,
+            isUTC: utcDateString.includes('Z') || utcDateString.includes('+00:00'),
+            result: formatInTimeZone(date, timeZone, "MMM d, h:mm a (zzz)")
+        });
+        
+        // Use the date directly with the user's timezone
+        return formatInTimeZone(date, timeZone, "MMM d, h:mm a (zzz)");
     } catch (e) {
         console.error("Timezone formatting failed:", e);
-        return new Date(utcDateString).toLocaleString();
+        // Fallback: show the original string
+        return utcDateString;
     }
 };
 
@@ -54,6 +68,16 @@ export const ScheduledNudgesView: FC<ScheduledNudgesViewProps> = ({ messages, is
     const [processingId, setProcessingId] = useState<string | null>(null);
 
     const userTimezone = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    
+    // Debug timezone detection
+    console.log('ScheduledNudgesView timezone debug:', {
+        userTimezone: user?.timezone,
+        browserTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        finalTimezone: userTimezone,
+        currentTime: new Date().toLocaleString(),
+        currentTimeInUserTz: new Date().toLocaleString('en-US', { timeZone: userTimezone })
+    });
+    
     const findClient = (clientId: string) => clients.find(c => c.id === clientId);
     
     const pendingMessages = useMemo(() => messages.filter(msg => msg.status === 'pending'), [messages]);

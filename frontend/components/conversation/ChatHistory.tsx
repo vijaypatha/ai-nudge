@@ -11,6 +11,7 @@ import { Avatar } from '../ui/Avatar';
 import { CoPilotBriefingCard } from './CoPilotBriefingCard';
 import { AIDraftDisplay } from './AIDraftDisplay';
 import { RecommendationActions } from './RecommendationActions';
+import { formatInTimeZone } from 'date-fns-tz';
 
 // Ref type for the message composer handle
 interface MessageComposerHandle {
@@ -25,7 +26,18 @@ interface ChatHistoryProps {
     onCoPilotActionSuccess: () => void;
     onSendMessage: (content: string) => Promise<void>;
     messageComposerRef: React.RefObject<MessageComposerHandle>;
+    isSending?: boolean;
 }
+
+const formatMessageTime = (timestamp: string) => {
+    try {
+        const date = new Date(timestamp);
+        return formatInTimeZone(date, Intl.DateTimeFormat().resolvedOptions().timeZone, "h:mm a");
+    } catch (e) {
+        console.error("Message time formatting failed:", e);
+        return timestamp;
+    }
+};
 
 export const ChatHistory = ({
     messages,
@@ -34,7 +46,8 @@ export const ChatHistory = ({
     onActionComplete,
     onCoPilotActionSuccess,
     onSendMessage,
-    messageComposerRef
+    messageComposerRef,
+    isSending = false
 }: ChatHistoryProps) => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -85,8 +98,8 @@ export const ChatHistory = ({
                                         )}
                                         <span>
                                             {msg.source === 'scheduled' && msg.originally_scheduled_at 
-                                                ? new Date(msg.originally_scheduled_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-                                                : new Date(msg.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+                                                                ? formatMessageTime(msg.originally_scheduled_at)
+                : formatMessageTime(msg.created_at)
                                             }
                                         </span>
                                     </div>
@@ -111,6 +124,7 @@ export const ChatHistory = ({
                                             draft={recommendations}
                                             onSendMessage={onSendMessage}
                                             messageComposerRef={messageComposerRef}
+                                            isSending={isSending}
                                         />
                                     )}
                                     <RecommendationActions

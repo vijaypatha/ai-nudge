@@ -154,21 +154,62 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [router]);
   
   const api = useMemo(() => {
-    const request = async (endpoint: string, method: string, body?: any) => {
+    const request = async (endpoint: string, method: string, body?: any, retries = 3) => {
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       const url = `${baseUrl}${endpoint}`;
       const headers: HeadersInit = { 'Content-Type': 'application/json' };
       if (tokenRef.current) headers['Authorization'] = `Bearer ${tokenRef.current}`;
-      const config: RequestInit = { method, headers, body: body ? JSON.stringify(body) : undefined };
-      const response = await fetch(url, config);
-      if (!response.ok) {
-        if (response.status === 401) logout();
-        const errorData = await response.json().catch(() => ({ detail: `API Error: ${response.statusText}` }));
-        throw new Error(errorData.detail || 'An unknown error occurred');
+      
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          const config: RequestInit = { 
+            method, 
+            headers, 
+            body: body ? JSON.stringify(body) : undefined 
+          };
+          
+          const response = await fetch(url, config);
+          
+          if (!response.ok) {
+            if (response.status === 401) {
+              logout();
+              throw new Error('Authentication failed');
+            }
+            
+            const errorData = await response.json().catch(() => ({ 
+              detail: `API Error: ${response.statusText}` 
+            }));
+            
+            // Retry on 5xx errors (server errors)
+            if (response.status >= 500 && attempt < retries) {
+              console.warn(`API attempt ${attempt} failed with ${response.status}, retrying...`);
+              await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // Exponential backoff
+              continue;
+            }
+            
+            throw new Error(errorData.detail || 'An unknown error occurred');
+          }
+          
+          const text = await response.text();
+          return text ? JSON.parse(text) : {};
+          
+        } catch (error) {
+          if (attempt === retries) {
+            console.error(`API request failed after ${retries} attempts:`, error);
+            throw error;
+          }
+          
+          // Don't retry on client errors (4xx)
+          if (error instanceof Error && error.message.includes('4')) {
+            throw error;
+          }
+          
+          console.warn(`API attempt ${attempt} failed, retrying...`, error);
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
       }
-      const text = await response.text();
-      return text ? JSON.parse(text) : {};
     };
+    
     return {
       get: (endpoint: string) => request(endpoint, 'GET'),
       post: (endpoint: string, body: any) => request(endpoint, 'POST', body),
@@ -272,6 +313,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     };
     checkUserSession();
   }, [login]);
+
+  // Add useEffect to fetch dashboard data when user is authenticated
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      fetchDashboardData();
+    }
+  }, [isAuthenticated, user, fetchDashboardData]);
 
   const updateClientInList = (updatedClient: Client) => {
     setClients(prevClients => prevClients.map(c => c.id === updatedClient.id ? updatedClient : c));

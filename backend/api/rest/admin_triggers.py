@@ -89,3 +89,146 @@ async def trigger_market_scan(minutes_ago: int = 60, current_user: User = Depend
 async def trigger_daily_scan(current_user: User = Depends(get_current_user_from_token)):
     await nudge_engine.generate_recency_nudges(realtor=current_user) 
     return {"status": "accepted", "message": "Daily relationship scan for recency nudges initiated for current user."}
+
+# backend/api/rest/admin_triggers.py
+# --- PRODUCTION MONITORING ENDPOINTS ---
+
+import logging
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, List
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session, select
+from data.database import engine
+from data.models.message import Message, MessageStatus, ScheduledMessage
+from data.models.user import User
+from api.security import get_current_user_from_token
+
+router = APIRouter(prefix="/admin", tags=["Admin"])
+
+@router.get("/health")
+async def health_check() -> Dict[str, Any]:
+    """Comprehensive health check for the application."""
+    try:
+        # Database connectivity
+        with Session(engine) as session:
+            # Test basic query
+            user_count = session.exec(select(User)).first()
+            
+            # Check recent message activity
+            recent_messages = session.exec(
+                select(Message).where(
+                    Message.created_at >= datetime.now(timezone.utc) - timedelta(hours=1)
+                )
+            ).all()
+            
+            # Check pending scheduled messages
+            pending_scheduled = session.exec(
+                select(ScheduledMessage).where(ScheduledMessage.status == MessageStatus.PENDING)
+            ).all()
+            
+            # Check failed messages
+            failed_messages = session.exec(
+                select(Message).where(Message.status == MessageStatus.FAILED)
+            ).all()
+        
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "database": "connected",
+            "recent_messages_count": len(recent_messages),
+            "pending_scheduled_count": len(pending_scheduled),
+            "failed_messages_count": len(failed_messages)
+        }
+        
+    except Exception as e:
+        logging.error(f"Health check failed: {e}", exc_info=True)
+        return {
+            "status": "unhealthy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "error": str(e)
+        }
+
+@router.get("/metrics")
+async def get_metrics() -> Dict[str, Any]:
+    """Get key metrics for monitoring."""
+    try:
+        with Session(engine) as session:
+            # Message metrics
+            total_messages = session.exec(select(Message)).all()
+            sent_messages = [m for m in total_messages if m.status == MessageStatus.SENT]
+            failed_messages = [m for m in total_messages if m.status == MessageStatus.FAILED]
+            
+            # Scheduled message metrics
+            total_scheduled = session.exec(select(ScheduledMessage)).all()
+            pending_scheduled = [m for m in total_scheduled if m.status == MessageStatus.PENDING]
+            sent_scheduled = [m for m in total_scheduled if m.status == MessageStatus.SENT]
+            
+            # User metrics
+            total_users = session.exec(select(User)).all()
+            
+            return {
+                "messages": {
+                    "total": len(total_messages),
+                    "sent": len(sent_messages),
+                    "failed": len(failed_messages),
+                    "success_rate": len(sent_messages) / len(total_messages) if total_messages else 0
+                },
+                "scheduled_messages": {
+                    "total": len(total_scheduled),
+                    "pending": len(pending_scheduled),
+                    "sent": len(sent_scheduled)
+                },
+                "users": {
+                    "total": len(total_users)
+                }
+            }
+            
+    except Exception as e:
+        logging.error(f"Metrics collection failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to collect metrics")
+
+@router.get("/alerts")
+async def get_alerts() -> List[Dict[str, Any]]:
+    """Get current alerts for monitoring."""
+    alerts = []
+    
+    try:
+        with Session(engine) as session:
+            # Check for failed messages
+            failed_messages = session.exec(
+                select(Message).where(Message.status == MessageStatus.FAILED)
+            ).all()
+            
+            if failed_messages:
+                alerts.append({
+                    "type": "failed_messages",
+                    "severity": "high",
+                    "count": len(failed_messages),
+                    "message": f"{len(failed_messages)} messages failed to send"
+                })
+            
+            # Check for stuck scheduled messages
+            old_pending = session.exec(
+                select(ScheduledMessage).where(
+                    ScheduledMessage.status == MessageStatus.PENDING,
+                    ScheduledMessage.scheduled_at_utc < datetime.now(timezone.utc) - timedelta(hours=1)
+                )
+            ).all()
+            
+            if old_pending:
+                alerts.append({
+                    "type": "stuck_scheduled_messages",
+                    "severity": "medium",
+                    "count": len(old_pending),
+                    "message": f"{len(old_pending)} scheduled messages are overdue"
+                })
+        
+        return alerts
+        
+    except Exception as e:
+        logging.error(f"Alert collection failed: {e}", exc_info=True)
+        return [{
+            "type": "system_error",
+            "severity": "critical",
+            "message": f"Failed to collect alerts: {str(e)}"
+        }]

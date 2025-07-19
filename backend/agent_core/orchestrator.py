@@ -25,6 +25,21 @@ from data import crm as crm_service
 from agent_core.agents import conversation as conversation_agent
 from workflow.relationship_playbooks import get_playbook_for_intent
 from integrations import twilio_outgoing
+from datetime import datetime, timezone
+
+# In-memory cache to prevent duplicate sends within a short time window
+# Key: (client_id, normalized_content_hash), Value: timestamp
+_duplicate_send_cache: Dict[str, float] = {}
+
+def _cleanup_duplicate_cache():
+    """Clean up old entries from the duplicate send cache."""
+    current_time = datetime.now(timezone.utc).timestamp()
+    expired_keys = [
+        key for key, timestamp in _duplicate_send_cache.items()
+        if current_time - timestamp > 300  # Remove entries older than 5 minutes
+    ]
+    for key in expired_keys:
+        del _duplicate_send_cache[key]
 
 async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Message, user: User) -> Dict[str, Any]:
     """
@@ -171,53 +186,167 @@ async def orchestrate_send_message_now(
     source: MessageSource = MessageSource.MANUAL
 ) -> Optional[Message]:
     """
-    Sends a message immediately, logs it with correct source, and returns the created message object.
+    Sends a message immediately with production-grade error handling and reliability.
+    Includes duplicate message detection to prevent sending identical messages.
     """
-    logging.info(f"ORCHESTRATOR: Orchestrating immediate send for client {client_id} (Source: {source.value})")
+    logging.info(f"ORCHESTRATOR: Starting message send for client {client_id} (Source: {source.value})")
+    
+    # Validate inputs
+    if not content or not content.strip():
+        logging.error(f"ORCHESTRATOR: Empty message content for client {client_id}")
+        return None
+    
+    if not client_id or not user_id:
+        logging.error(f"ORCHESTRATOR: Invalid client_id or user_id: {client_id}, {user_id}")
+        return None
 
-    with Session(engine) as session:
-        # Slate management logic remains, no changes needed here.
-        all_active_slates = crm_service.get_all_active_slates_for_client(client_id, user_id, session)
-        immediate_slate = next((s for s in all_active_slates if not s.is_plan), None)
-        if immediate_slate:
-            logging.info(f"ORCHESTRATOR: Message sent, marking active slate {immediate_slate.id} as 'completed'.")
-            crm_service.update_slate_status(immediate_slate.id, CampaignStatus.COMPLETED, user_id, session)
-
-        # User and Client retrieval logic remains, no changes needed here.
+    session = None
+    message_log = None
+    
+    try:
+        session = Session(engine)
+        
+        # --- TRANSACTION START ---
+        session.begin()
+        
+        # 1. Validate user and client ownership
         user = crm_service.get_user_by_id(user_id)
-        client = crm_service.get_client_by_id(client_id, user_id=user_id)
         if not user or not user.twilio_phone_number:
-            logging.error(f"ORCHESTRATOR ERROR: User {user_id} not found or has no Twilio number.")
+            logging.error(f"ORCHESTRATOR: User {user_id} not found or missing Twilio number")
+            session.rollback()
             return None
+            
+        client = crm_service.get_client_by_id(client_id, user_id=user_id)
         if not client or not client.phone:
-            logging.error(f"ORCHESTRATOR ERROR: Client {client_id} not found for user {user_id} or has no phone number.")
+            logging.error(f"ORCHESTRATOR: Client {client_id} not found or missing phone for user {user_id}")
+            session.rollback()
             return None
 
-        # Sending logic remains, no changes needed here.
-        first_name = client.full_name.strip().split(' ')[0]
+        # 2. Check for duplicate messages (prevent sending identical content)
+        recent_messages = crm_service.get_recent_messages(client_id=client_id, user_id=user_id, limit=5)
+        normalized_content = content.strip().lower()
+        
+        # Check in-memory cache for very recent duplicates (within 30 seconds)
+        cache_key = f"{client_id}:{hash(normalized_content)}"
+        current_time = datetime.now(timezone.utc).timestamp()
+        
+        if cache_key in _duplicate_send_cache:
+            time_since_last = current_time - _duplicate_send_cache[cache_key]
+            if time_since_last < 30:  # 30 seconds
+                logging.warning(f"ORCHESTRATOR: Very recent duplicate detected for client {client_id}. "
+                              f"Identical content sent {time_since_last:.1f}s ago. Skipping send.")
+                session.rollback()
+                return None
+        
+        # Check database for recent duplicates (within 5 minutes)
+        for recent_msg in recent_messages:
+            if (recent_msg.direction == MessageDirection.OUTBOUND and 
+                recent_msg.content.strip().lower() == normalized_content and
+                recent_msg.source == source):
+                
+                # Check if this message was sent within the last 5 minutes
+                time_diff = datetime.now(timezone.utc) - recent_msg.created_at
+                if time_diff.total_seconds() < 300:  # 5 minutes
+                    logging.warning(f"ORCHESTRATOR: Duplicate message detected for client {client_id}. "
+                                  f"Identical content sent {time_diff.total_seconds():.1f}s ago. Skipping send.")
+                    session.rollback()
+                    return recent_msg  # Return the existing message instead of creating a new one
+        
+        # 3. Personalize content
+        first_name = client.full_name.strip().split(' ')[0] if client.full_name else "there"
         personalized_content = content.replace("[Client Name]", first_name)
-        was_sent = twilio_outgoing.send_sms(from_number=user.twilio_phone_number, to_number=client.phone, body=personalized_content)
-
-        if not was_sent:
-            logging.error(f"ORCHESTRATOR: Failed to send SMS for client {client_id}. Message will not be logged.")
-            # We do not commit session changes if SMS fails
-            return None
-
-        # --- REVISED MESSAGE LOGGING ---
+        
+        # 3. Send SMS with retry logic
+        max_retries = 3
+        retry_delay = 1  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                was_sent = twilio_outgoing.send_sms(
+                    from_number=user.twilio_phone_number, 
+                    to_number=client.phone, 
+                    body=personalized_content
+                )
+                
+                if was_sent:
+                    logging.info(f"ORCHESTRATOR: SMS sent successfully on attempt {attempt + 1}")
+                    break
+                else:
+                    raise Exception("Twilio returned False for send_sms")
+                    
+            except Exception as e:
+                logging.warning(f"ORCHESTRATOR: SMS send attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries - 1:
+                    logging.error(f"ORCHESTRATOR: All SMS send attempts failed for client {client_id}")
+                    session.rollback()
+                    return None
+                await asyncio.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
+        
+        # 4. Create message record with comprehensive metadata
         message_log = Message(
             user_id=user_id,
             client_id=client_id,
             content=personalized_content,
             direction=MessageDirection.OUTBOUND,
             status=MessageStatus.SENT,
-            source=source, # Use the dynamic source parameter
+            source=source,
             sender_type=MessageSenderType.USER,
+            created_at=datetime.now(timezone.utc)
         )
-        session.add(message_log)
-        crm_service.update_last_interaction(client_id, user_id=user_id, session=session)
+        
+        # 5. Save message with error handling
+        try:
+            session.add(message_log)
+            session.flush()  # Ensure ID is generated
+            session.refresh(message_log)
+            logging.info(f"ORCHESTRATOR: Message record created with ID {message_log.id}")
+        except Exception as e:
+            logging.error(f"ORCHESTRATOR: Failed to save message record: {e}")
+            session.rollback()
+            return None
 
+        # 6. Update client interaction timestamp
+        try:
+            crm_service.update_last_interaction(client_id, user_id=user_id, session=session)
+        except Exception as e:
+            logging.error(f"ORCHESTRATOR: Failed to update last interaction: {e}")
+            # Don't fail the entire operation for this
+
+        # 7. Clear active recommendations
+        try:
+            all_active_slates = crm_service.get_all_active_slates_for_client(client_id, user_id, session)
+            immediate_slate = next((s for s in all_active_slates if not s.is_plan), None)
+            if immediate_slate:
+                logging.info(f"ORCHESTRATOR: Marking active slate {immediate_slate.id} as completed")
+                crm_service.update_slate_status(immediate_slate.id, CampaignStatus.COMPLETED, user_id, session)
+        except Exception as e:
+            logging.error(f"ORCHESTRATOR: Failed to clear recommendations: {e}")
+            # Don't fail the entire operation for this
+
+        # 8. Update cache to prevent immediate duplicates
+        _duplicate_send_cache[cache_key] = current_time
+        
+        # 9. Clean up old cache entries
+        _cleanup_duplicate_cache()
+        
+        # 10. Commit transaction
         session.commit()
-        session.refresh(message_log) # Refresh to get DB-generated values like created_at
-
-        logging.info(f"ORCHESTRATOR: Database updated for message to client {client_id}.")
+        logging.info(f"ORCHESTRATOR: Message send completed successfully for client {client_id}")
+        
         return message_log
+        
+    except Exception as e:
+        logging.error(f"ORCHESTRATOR: Critical error in message send: {e}", exc_info=True)
+        if session:
+            try:
+                session.rollback()
+            except Exception as rollback_error:
+                logging.error(f"ORCHESTRATOR: Failed to rollback transaction: {rollback_error}")
+        return None
+        
+    finally:
+        if session:
+            try:
+                session.close()
+            except Exception as e:
+                logging.error(f"ORCHESTRATOR: Failed to close session: {e}")

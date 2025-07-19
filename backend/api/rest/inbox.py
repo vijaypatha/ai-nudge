@@ -15,6 +15,7 @@ router = APIRouter(
 @router.post("/twilio_inbound", status_code=status.HTTP_204_NO_CONTENT)
 async def handle_twilio_inbound_sms(
     From: str = Form(...), 
+    To: str = Form(...),
     Body: str = Form(...)
 ):
     """
@@ -25,7 +26,7 @@ async def handle_twilio_inbound_sms(
     an empty response back to Twilio to acknowledge receipt.
     """
     # The core logic is now handled by the integration module
-    await twilio_incoming.process_incoming_sms(from_number=From, body=Body)
+    await twilio_incoming.process_incoming_sms(from_number=From, to_number=To, body=Body)
     
     # Always respond to Twilio with an empty TwiML response to prevent errors.
     return Response(content="<Response></Response>", media_type="application/xml")

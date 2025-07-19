@@ -5,6 +5,7 @@ import { Conversation } from '@/context/AppContext';
 import { Avatar } from '@/components/ui/Avatar';
 import { Clock, MessageCircle, Zap, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
+import { formatInTimeZone } from 'date-fns-tz';
 
 interface ConversationListItemProps {
   conversation: Conversation;
@@ -13,22 +14,27 @@ interface ConversationListItemProps {
 }
 
 const formatTime = (timestamp: string) => {
-  // Parse the UTC timestamp and convert to local time
-  const date = new Date(timestamp);
-  const now = new Date();
-  const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
-  
-  if (diffInHours < 24) {
-    return date.toLocaleTimeString([], { 
-      hour: 'numeric', 
-      minute: '2-digit',
-      hour12: true 
-    });
-  } else if (diffInHours < 48) {
-    return 'Yesterday';
-  } else {
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  }
+    try {
+        const date = new Date(timestamp);
+        const now = new Date();
+        const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
+        
+        // If less than 24 hours, show relative time
+        if (diffInHours < 24) {
+            if (diffInHours < 1) {
+                const diffInMinutes = Math.floor(diffInHours * 60);
+                return diffInMinutes === 0 ? 'Just now' : `${diffInMinutes}m ago`;
+            } else {
+                return `${Math.floor(diffInHours)}h ago`;
+            }
+        } else {
+            // For older messages, show the date in user's timezone
+            return formatInTimeZone(date, Intl.DateTimeFormat().resolvedOptions().timeZone, "MMM d");
+        }
+    } catch (e) {
+        console.error("Time formatting failed:", e);
+        return timestamp;
+    }
 };
 
 const getMessageIcon = (source?: string, direction?: string) => {

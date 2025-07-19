@@ -18,15 +18,11 @@ celery_app = Celery(
 )
 
 # --- Celery Beat Schedules (The "Company Clock") ---
+# Note: These are placeholder tasks for future implementation
 celery_app.conf.beat_schedule = {
-    'check-mls-every-15-minutes': {
-        # --- FIX: Corrected the task path ---
-        'task': 'celery_tasks.check_mls_for_events_task',
-        'schedule': crontab(minute='*/15'),
-    },
-    'check-for-recency-nudges-daily': {
-        'task': 'celery_tasks.check_for_recency_nudges_task',
-        'schedule': crontab(hour=9, minute=0), # Run once a day at 9 AM
+    'health-check-every-hour': {
+        'task': 'celery_tasks.health_check_task',
+        'schedule': crontab(minute=0), # Run every hour
     }
 }
 

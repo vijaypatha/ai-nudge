@@ -496,20 +496,31 @@ def update_slate_status(slate_id: uuid.UUID, new_status: CampaignStatus, user_id
 
 def save_message(message: Message, session: Optional[Session] = None):
     """
-    Saves a single inbound or outbound message to the universal log.
-    Can operate within a provided session or create its own.
+    Saves a single inbound or outbound message to the universal log with transaction safety.
     """
     def _save(db_session: Session):
-        db_session.add(message)
-        logging.info(f"CRM: Queued save for '{message.direction}' message for client_id: {message.client_id}")
+        try:
+            db_session.add(message)
+            db_session.flush()  # Ensure ID is generated
+            db_session.refresh(message)
+            logging.info(f"CRM: Message saved successfully - ID: {message.id}, Client: {message.client_id}, Direction: {message.direction}")
+        except Exception as e:
+            logging.error(f"CRM: Failed to save message: {e}", exc_info=True)
+            db_session.rollback()
+            raise
 
     if session:
         _save(session)
     else:
         with Session(engine) as new_session:
-            _save(new_session)
-            new_session.commit()
-            logging.info(f"CRM: Committed '{message.direction}' message for client_id: {message.client_id}")
+            try:
+                _save(new_session)
+                new_session.commit()
+                logging.info(f"CRM: Message committed successfully for client_id: {message.client_id}")
+            except Exception as e:
+                logging.error(f"CRM: Failed to commit message: {e}", exc_info=True)
+                new_session.rollback()
+                raise
 
 
 def get_conversation_history(client_id: uuid.UUID, user_id: uuid.UUID) -> List[Message]:

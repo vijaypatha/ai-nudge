@@ -6,9 +6,10 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Optional
 import uuid
 from sqlmodel import Session, select
+from datetime import datetime, timezone, timedelta
 from data.models.user import User
 from api.security import get_current_user_from_token
-from data.models.message import Message, MessageWithDraft, MessageSource
+from data.models.message import Message, MessageWithDraft, MessageSource, MessageDirection
 from data.models.campaign import RecommendationSlateResponse, CampaignBriefing
 from pydantic import BaseModel
 from data import crm as crm_service
@@ -102,27 +103,80 @@ async def send_reply(
     payload: SendReplyPayload,
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """Sends a new message from the user to a client."""
+    """Sends a new message from the user to a client with comprehensive error handling."""
     try:
-        # Orchestrator now handles the entire process, including saving the message.
-        # It returns the saved message object or None on failure.
+        # Validate payload
+        if not payload.content or not payload.content.strip():
+            raise HTTPException(status_code=400, detail="Message content cannot be empty")
+        
+        if len(payload.content) > 1600:  # SMS character limit
+            raise HTTPException(status_code=400, detail="Message too long (max 1600 characters)")
+        
+        # Validate client ownership
+        client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found")
+        
+        if not client.phone:
+            raise HTTPException(status_code=400, detail="Client has no phone number")
+        
+        # Validate user has Twilio number
+        if not current_user.twilio_phone_number:
+            raise HTTPException(status_code=400, detail="User has no Twilio number configured")
+        
+        # Check for very recent duplicate messages (within 10 seconds)
+        with Session(crm_service.engine) as session:
+            recent_duplicate = session.exec(
+                select(Message).where(
+                    Message.client_id == client_id,
+                    Message.user_id == current_user.id,
+                    Message.direction == MessageDirection.OUTBOUND,
+                    Message.content == payload.content.strip(),
+                    Message.created_at >= datetime.now(timezone.utc) - timedelta(seconds=10)
+                )
+            ).first()
+            
+            if recent_duplicate:
+                logging.warning(f"API: Very recent duplicate message detected for client {client_id}. "
+                              f"Returning existing message instead of sending new one.")
+                return recent_duplicate
+        
+        logging.info(f"API: Sending reply to client {client_id} from user {current_user.id}")
+        
+        # Orchestrator handles the entire process with error handling
         saved_message = await orchestrator.orchestrate_send_message_now(
             client_id=client_id,
             content=payload.content,
             user_id=current_user.id,
-            source=MessageSource.MANUAL # Explicitly set source for manual replies
+            source=MessageSource.MANUAL
         )
 
         if not saved_message:
-            raise HTTPException(status_code=500, detail="Failed to send message.")
+            logging.error(f"API: Orchestrator failed to send message for client {client_id}")
+            raise HTTPException(status_code=500, detail="Failed to send message")
 
-        # The message is already saved by the orchestrator. We just return it.
-        # This fixes the double-saving bug.
-        return saved_message
+        # Store the message ID before the session closes
+        message_id = saved_message.id
+        logging.info(f"API: Message sent successfully for client {client_id}, message ID: {message_id}")
+        
+        # Return a fresh copy of the message data to avoid session issues
+        return Message(
+            id=message_id,
+            user_id=saved_message.user_id,
+            client_id=saved_message.client_id,
+            content=saved_message.content,
+            direction=saved_message.direction,
+            status=saved_message.status,
+            source=saved_message.source,
+            sender_type=saved_message.sender_type,
+            created_at=saved_message.created_at
+        )
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logging.error(f"API send_reply failed for client {client_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred.")
+        logging.error(f"API: Critical error in send_reply for client {client_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while sending message")
 
 
 @router.get("/scheduled-messages/", response_model=List)

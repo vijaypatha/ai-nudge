@@ -157,7 +157,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     }, [clientId, token]);
 
     const handleSendMessage = useCallback(async (content: string) => {
-        if (!content.trim() || !selectedClient) return;
+        if (!content.trim() || !selectedClient || isSending) return; // Prevent multiple sends
         setIsSending(true);
         const optimisticMessage: Message = { id: `agent-${Date.now()}`, client_id: selectedClient.id, content, direction: 'outbound', status: 'pending', created_at: new Date().toISOString(), source: 'manual', sender_type: 'user' };
         
@@ -178,7 +178,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         } finally {
             setIsSending(false);
         }
-    }, [selectedClient, api, fetchConversationData, refreshConversations]);
+    }, [selectedClient, api, fetchConversationData, refreshConversations, isSending]);
 
     const handleOpenScheduleModal = useCallback((content: string) => {
         setComposerContent(content);
@@ -300,6 +300,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                             onCoPilotActionSuccess={handleCoPilotActionSuccess}
                             onSendMessage={handleSendMessage}
                             messageComposerRef={messageComposerRef}
+                            isSending={isSending}
                         />
                         <MessageComposer
                             onSendMessage={handleSendMessage}
