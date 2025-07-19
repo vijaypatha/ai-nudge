@@ -18,7 +18,7 @@ from .models.event import MarketEvent
 from .models.user import User, UserUpdate
 from .models.resource import Resource, ResourceCreate, ResourceUpdate
 from .models.campaign import CampaignBriefing, CampaignUpdate, CampaignStatus
-from .models.message import ScheduledMessage, Message, MessageStatus, MessageDirection
+from .models.message import ScheduledMessage, Message, MessageStatus, MessageDirection, ScheduledMessageCreate
 from agent_core.agents import profiler as profiler_agent
 
 from uuid import UUID
@@ -623,6 +623,19 @@ def save_scheduled_message(message: ScheduledMessage):
     with Session(engine) as session:
         session.add(message)
         session.commit()
+        
+def create_scheduled_message(message_data: ScheduledMessageCreate, user_id: UUID) -> ScheduledMessage:
+    """
+    Creates and saves a new scheduled message record in the database.
+    --- NEW ---
+    """
+    with Session(engine) as session:
+        # The ScheduledMessageCreate model is validated against the ScheduledMessage table model
+        new_message = ScheduledMessage.model_validate(message_data, update={"user_id": user_id})
+        session.add(new_message)
+        session.commit()
+        session.refresh(new_message)
+        return new_message
 
 def get_scheduled_message_by_id(message_id: uuid.UUID) -> Optional[ScheduledMessage]:
     with Session(engine) as session:

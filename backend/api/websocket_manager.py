@@ -5,6 +5,7 @@ import logging
 from collections import defaultdict
 from fastapi import WebSocket
 from typing import List, Dict
+import json
 
 class ConnectionManager:
     """
@@ -28,17 +29,20 @@ class ConnectionManager:
             self.active_connections[client_id].remove(websocket)
         logging.info(f"WS DISCONNECT: Connection closed for client_id: {client_id}. Total connections for client: {len(self.active_connections[client_id])}")
 
-    async def broadcast_to_client(self, client_id: str, message: str):
-        """Broadcasts a message to all connected clients for a specific client_id."""
+    async def broadcast_json_to_client(self, client_id: str, data: dict):
+        """Broadcasts a JSON payload to all connections for a specific client_id."""
+
         connections = self.active_connections.get(client_id, [])
         if not connections:
             logging.info(f"WS BROADCAST: No active connections for client_id: {client_id}. Message not sent.")
             return
 
-        logging.info(f"WS BROADCAST: Sending message to {len(connections)} connection(s) for client_id: {client_id}")
+        message_to_send = json.dumps(data)
+        logging.info(f"WS BROADCAST: Sending JSON to {len(connections)} connection(s) for client_id: {client_id}    : {message_to_send}")
+
         for connection in connections:
             try:
-                await connection.send_text(message)
+                await connection.send_text(message_to_send)
             except Exception as e:
                 logging.error(f"WS BROADCAST ERROR: Could not send message to a client for client_id {client_id}. Error: {e}")
 

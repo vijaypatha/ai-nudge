@@ -9,6 +9,7 @@ import uuid
 from datetime import timedelta
 from celery.schedules import crontab
 from sqlmodel import select, Session
+from sqlalchemy.orm import selectinload
 
 from celery_worker import celery_app
 from agent_core.brain import nudge_engine, relationship_planner
@@ -19,6 +20,10 @@ from data.models.client import Client
 from data.models.resource import Resource
 from data.models.campaign import MatchedClient
 from agent_core import llm_client
+from data.models.message import ScheduledMessage, Message, MessageDirection, MessageStatus
+from datetime import datetime, timezone
+from api.websocket_manager import manager
+
 
 from integrations.tool_factory import get_tool_for_user
 from integrations.tool_interface import Event as ToolEvent
@@ -197,8 +202,77 @@ def rescore_client_against_recent_events_task(client_id: str, extracted_prefs: d
 
 @celery_app.task
 def send_scheduled_message_task(message_id: str):
-    logger.info(f"CELERY TASK: Pretending to send scheduled message -> {message_id}")
-    pass
+    """
+    Sends a scheduled message, updates its status, logs it, and broadcasts a WebSocket event.
+    """
+    from data.database import engine
+    from integrations.twilio_outgoing import send_sms
+
+    logger.info(f"CELERY TASK: Processing scheduled message -> {message_id}")
+    message_uuid = uuid.UUID(message_id)
+    client_id_for_broadcast = None # Variable to hold client_id for the final broadcast
+
+    with Session(engine) as session:
+        try:
+            statement = select(ScheduledMessage).options(
+                selectinload(ScheduledMessage.client).selectinload(Client.user)
+            ).where(ScheduledMessage.id == message_uuid)
+            scheduled_message = session.exec(statement).first()
+
+            if not scheduled_message:
+                logger.error(f"Scheduled message {message_id} not found. Aborting.")
+                return
+
+            client_id_for_broadcast = str(scheduled_message.client_id) # Store client_id
+
+            if scheduled_message.status != MessageStatus.PENDING:
+                logger.warning(f"Scheduled message {message_id} is not in PENDING state. Skipping.")
+                return
+
+            client = scheduled_message.client
+            if not client or not client.user:
+                 raise Exception("Client or owning User not found for scheduled message.")
+
+            success = send_sms(
+                from_number=client.user.twilio_phone_number,
+                to_number=client.phone,
+                body=scheduled_message.content
+            )
+            if not success:
+                raise Exception(f"Twilio send_sms function returned False for message {message_id}.")
+
+            scheduled_message.status = MessageStatus.SENT
+            scheduled_message.sent_at = datetime.now(timezone.utc)
+            session.add(scheduled_message)
+
+            conversation_log_entry = Message(
+                user_id=scheduled_message.user_id,
+                client_id=scheduled_message.client_id,
+                content=scheduled_message.content,
+                direction=MessageDirection.OUTBOUND,
+                status=MessageStatus.SENT,
+            )
+            session.add(conversation_log_entry)
+            session.commit()
+            logger.info(f"Successfully committed task for message {message_id}.")
+
+        except Exception as e:
+            logger.error(f"CELERY TASK ERROR: Failed to process scheduled message {message_id}: {e}", exc_info=True)
+            session.rollback()
+            # Mark the message as FAILED and exit
+            with Session(engine) as error_session:
+                failed_message = error_session.get(ScheduledMessage, message_uuid)
+                if failed_message:
+                    failed_message.status = MessageStatus.FAILED
+                    failed_message.error_message = str(e)
+                    error_session.add(failed_message)
+                    error_session.commit()
+            return # Stop execution if there was an error
+
+    # --- After successful commit, broadcast the update ---
+    if client_id_for_broadcast:
+        event_data = {"type": "MESSAGE_SENT", "clientId": client_id_for_broadcast}
+        asyncio.run(manager.broadcast_json_to_client(client_id_for_broadcast, event_data))
 
 @celery_app.task
 def reschedule_recurring_messages_task():

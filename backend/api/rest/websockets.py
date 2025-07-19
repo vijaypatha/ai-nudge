@@ -1,20 +1,32 @@
-# backend/api/rest/websockets.py
-# --- NEW FILE ---
-
 import logging
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from api.websocket_manager import manager # Import the global manager instance
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from api.websocket_manager import manager
+from api.security import get_current_user_from_token # <-- Import the authenticator
+from data.models.user import User
 
 router = APIRouter()
 
 @router.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: str):
+async def websocket_endpoint(
+    websocket: WebSocket,
+    client_id: str,
+    token: str = Query(...), # <-- Require a token as a query parameter
+):
     """
-    Handles the WebSocket connection for a specific client conversation.
+    Handles the WebSocket connection, now with authentication.
     """
+    try:
+        # --- FIX: Authenticate the user before connecting ---
+        user: User = await get_current_user_from_token(token)
+        if not user:
+            await websocket.close(code=403)
+            return
+    except Exception:
+        await websocket.close(code=403)
+        return
+
     await manager.connect(websocket, client_id)
     try:
-        # This loop keeps the connection alive to listen for the client closing it.
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
