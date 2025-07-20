@@ -7,11 +7,12 @@ import logging
 from sqlalchemy.orm import Session
 import asyncio
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from .database import engine
 from .models.user import User, UserType
 from .models.client import Client
-from .models.resource import Resource
+from .models.resource import Resource, ContentResource
 from .models.campaign import CampaignBriefing
 from .models.faq import Faq
 from common.config import get_settings
@@ -34,6 +35,7 @@ async def seed_database():
         session.query(CampaignBriefing).delete()
         session.query(Faq).delete()
         session.query(Client).delete()
+        session.query(ContentResource).delete()
         session.query(Resource).delete()
         session.query(User).delete()
         session.commit()
@@ -79,6 +81,125 @@ async def seed_database():
             user_id=realtor_user.id, resource_type="property", status="active",
             attributes={"address": "456 Oak Ave, St. George, UT", "price": 550000.0}
         ))
+        
+        # --- Step 2.5: Create Content Resources for Both Verticals ---
+        
+        # Real Estate Content Resources
+        real_estate_resources = [
+            ContentResource(
+                id=uuid4(),
+                user_id=realtor_user.id,
+                title="First-Time Buyer's Guide to Downtown Condos",
+                description="Everything you need to know about purchasing your first condo in the city center",
+                url="https://example.com/first-time-buyer-guide",
+                categories=["first-time-buyer", "condos", "downtown", "buying"],
+                content_type="document",
+                status="active",
+                usage_count=0,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
+            ),
+            ContentResource(
+                id=uuid4(),
+                user_id=realtor_user.id,
+                title="Investment Property Analysis: St. George Market",
+                description="Comprehensive analysis of investment opportunities in the St. George area",
+                url="https://example.com/investment-analysis",
+                categories=["investment", "market-analysis", "st-george", "roi"],
+                content_type="document",
+                status="active",
+                usage_count=0,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
+            ),
+            ContentResource(
+                id=uuid4(),
+                user_id=realtor_user.id,
+                title="Luxury Home Buying Checklist",
+                description="Essential considerations when purchasing high-end properties",
+                url="https://example.com/luxury-checklist",
+                categories=["luxury", "high-end", "buying", "checklist"],
+                content_type="document",
+                status="active",
+                usage_count=0,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
+            ),
+            ContentResource(
+                id=uuid4(),
+                user_id=realtor_user.id,
+                title="Selling Your Home: Market Preparation Tips",
+                description="How to prepare your home for sale and maximize its value",
+                url="https://example.com/selling-tips",
+                categories=["selling", "home-preparation", "market-value", "staging"],
+                content_type="article",
+                status="active",
+                usage_count=0,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
+            )
+        ]
+        
+        # Therapy Content Resources
+        therapy_resources = [
+            ContentResource(
+                id=uuid4(),
+                user_id=therapist_user.id,
+                title="Anxiety Meditation",
+                description="Mindful Breathing for Anxiety",
+                url="https://example.com/anxiety-meditation",
+                categories=["anxiety", "meditation", "mindfulness"],
+                content_type="video",
+                status="active",
+                usage_count=0,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
+            ),
+            ContentResource(
+                id=uuid4(),
+                user_id=therapist_user.id,
+                title="Stress Management Guide",
+                description="Practical techniques for managing daily stress",
+                url="https://example.com/stress-management",
+                categories=["stress", "coping", "wellness"],
+                content_type="document",
+                status="active",
+                usage_count=0,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
+            ),
+            ContentResource(
+                id=uuid4(),
+                user_id=therapist_user.id,
+                title="Grief Support Resources",
+                description="Supporting clients through loss and grief",
+                url="https://example.com/grief-support",
+                categories=["grief", "loss", "support"],
+                content_type="document",
+                status="active",
+                usage_count=0,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
+            ),
+            ContentResource(
+                id=uuid4(),
+                user_id=therapist_user.id,
+                title="Parenting Tips for Stress",
+                description="Managing stress while parenting",
+                url="https://example.com/parenting-stress",
+                categories=["parenting", "stress", "family"],
+                content_type="article",
+                status="active",
+                usage_count=0,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
+            )
+        ]
+        
+        # Add all content resources
+        session.add_all(real_estate_resources)
+        session.add_all(therapy_resources)
+        session.commit()
         
         # --- Step 3: Create A DIVERSE set of Clients ---
         
