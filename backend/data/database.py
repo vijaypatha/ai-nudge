@@ -8,7 +8,7 @@ from common.config import get_settings
 # Correctly import all table models to ensure they are registered with SQLModel metadata.
 from .models.user import User
 from .models.client import Client
-from .models.resource import Resource
+from .models.resource import Resource, ContentResource
 from .models.message import Message, ScheduledMessage
 from .models.campaign import CampaignBriefing
 from .models.event import MarketEvent

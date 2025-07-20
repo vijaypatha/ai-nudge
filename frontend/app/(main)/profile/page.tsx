@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useAppContext, User as UserType } from '@/context/AppContext';
 import { TimezoneSelector } from "@/components/ui/TimezoneSelector";
 import { ContentDiscovery } from "@/components/profile/ContentDiscovery";
+import { ContentResourceManager } from "@/components/profile/ContentResourceManager";
 
 
 export interface FaqItem {
@@ -277,6 +278,11 @@ export default function ProfilePage() {
                 <div className="bg-gray-800/40 rounded-xl border border-white/10 p-8">
                     <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3"><Briefcase /> Business Details</h2>
                     {renderBusinessDetails()}
+                </div>
+                
+                {/* Content Resources Section */}
+                <div className="bg-gray-800/40 rounded-xl border border-white/10 p-8">
+                    <ContentResourceManager api={api} />
                 </div>
                 <div className="bg-gray-800/40 rounded-xl border border-white/10 p-8">
                     <div className="flex justify-between items-center mb-2"><h2 className="text-2xl font-bold text-white flex items-center gap-3"><Bot />AI Auto-Responder</h2><button onClick={handleAddFaq} className="px-3 py-1.5 text-sm font-semibold bg-white/10 rounded-lg hover:bg-white/20">+ Add FAQ</button></div>

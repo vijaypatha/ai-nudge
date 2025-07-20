@@ -2,6 +2,7 @@
 # --- FINAL FIX v2: Corrected the CRM function call to fetch nudges.
 
 import logging
+import asyncio
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body, Query
 from typing import List, Dict, Any, Optional
 from uuid import UUID
@@ -19,6 +20,7 @@ from data import crm as crm_service
 from workflow import outbound as outbound_workflow
 from agent_core.brain import relationship_planner
 from workflow import campaigns as campaign_workflow
+from agent_core.content_resource_service import get_content_recommendations_for_user
 
 router = APIRouter(
     prefix="/campaigns",
@@ -51,21 +53,54 @@ async def get_all_campaigns(
 ):
     """
     Fetches all campaign briefings in DRAFT status for the current user,
-    wrapped in an agnostic response model that includes UI display configuration.
+    including both traditional opportunities AND content recommendations
+    as part of the unified AI suggestions system.
     """
     try:
         # --- FIX: Reverted to the original, correct function call ---
         briefings = crm_service.get_new_campaign_briefings_for_user(user_id=current_user.id)
         
+        # --- NEW: Include content recommendations as part of AI suggestions ---
+        # Content resources are part of the Perceive layer that feeds into AI reasoning
+        content_recommendations = get_content_recommendations_for_user(user_id=current_user.id)
+        
+        # Convert content recommendations to campaign briefings format
+        content_briefings = []
+        for recommendation in content_recommendations:
+            # Create a campaign briefing for each content recommendation
+            content_briefing = CampaignBriefing(
+                id=recommendation['resource']['id'],
+                campaign_type='content_recommendation',
+                title=f"Content: {recommendation['resource']['title']}",
+                description=recommendation['resource']['description'],
+                matched_audience=recommendation['matched_clients'],
+                edited_draft=recommendation['generated_message'],
+                status='DRAFT',
+                created_at=recommendation['resource']['created_at'],
+                updated_at=recommendation['resource']['updated_at']
+            )
+            content_briefings.append(content_briefing)
+        
+        # Combine traditional briefings with content briefings
+        all_briefings = briefings + content_briefings
+        
         vertical_config = VERTICAL_CONFIGS.get(current_user.vertical, {})
         campaign_configs = vertical_config.get("campaign_configs", {})
         
+        # Add display config for content recommendations
         display_config = {
             campaign_type: config.get("display", {})
             for campaign_type, config in campaign_configs.items()
         }
         
-        return AgnosticNudgesResponse(nudges=briefings, display_config=display_config)
+        # Add content recommendation display config
+        display_config['content_recommendation'] = {
+            'icon': 'BookOpen',
+            'color': 'text-blue-400',
+            'title': 'Content'
+        }
+        
+        return AgnosticNudgesResponse(nudges=all_briefings, display_config=display_config)
 
     except Exception as e:
         logging.error(f"Error fetching campaigns for user {current_user.id}: {e}", exc_info=True)

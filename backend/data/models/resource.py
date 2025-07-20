@@ -1,46 +1,80 @@
 # File Path: backend/data/models/resource.py
 # --- NEW FILE: Defines the generic Resource model for our vertical-agnostic architecture.
 
-from typing import Optional, Dict, Any
+from enum import Enum
+from typing import List, Optional, TYPE_CHECKING, Dict, Any
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
-from sqlmodel import SQLModel, Field, Column, JSON
+from sqlmodel import SQLModel, Field, Relationship, Column, JSON
+
+if TYPE_CHECKING:
+    from .user import User
+    from .campaign import CampaignBriefing
+
+class ResourceType(str, Enum):
+    PROPERTY = "property"
+    WEB_CONTENT = "web_content"
+    CONTENT_RESOURCE = "content_resource"  # NEW: For manual content resources
+
+class ResourceStatus(str, Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    ARCHIVED = "archived"
 
 class Resource(SQLModel, table=True):
-    """
-    (Database Table) A generic, flexible model to represent any type of entity
-    a user might work with, from a real estate property to a vehicle or a rental venue.
-    This model is the key to making our platform vertical-agnostic.
-    """
+    """(Data Model) Represents a resource in the system."""
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id", index=True)
-    entity_id: Optional[str] = Field(default=None, index=True)
-
-    
-    # The type of resource, e.g., "property", "vehicle", "venue".
-    resource_type: str = Field(index=True)
-    
-    # The current status of the resource, e.g., "active", "sold", "draft".
-    status: str = Field(index=True)
-    
-    # A flexible JSON field to store all vertical-specific data.
-    # For a "property": {"address": "...", "price": 100000, "amenities": ["pool"]}
-    # For a "vehicle": {"make": "Toyota", "model": "Camry", "year": 2023, "price": 25000}
-    attributes: Dict[str, Any] = Field(sa_column=Column(JSON))
-    
+    resource_type: ResourceType = Field(index=True)
+    status: ResourceStatus = Field(default=ResourceStatus.ACTIVE, index=True)
+    entity_id: Optional[str] = Field(default=None, index=True)  # External ID (e.g., listing key, URL)
+    attributes: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        sa_column_kwargs={"onupdate": lambda: datetime.now(timezone.utc)}
-    )
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+
+    # --- Relationships ---
+    user: Optional["User"] = Relationship(back_populates="resources")
+    campaigns: List["CampaignBriefing"] = Relationship(back_populates="triggering_resource")
 
 class ResourceCreate(SQLModel):
-    """Pydantic model for creating a new resource via the API."""
-    resource_type: str
-    status: str
-    attributes: Dict[str, Any]
+    """Defines the structure for creating a new resource."""
+    resource_type: ResourceType
+    status: ResourceStatus = ResourceStatus.ACTIVE
+    entity_id: Optional[str] = None
+    attributes: Dict[str, Any] = Field(default_factory=dict)
 
-class ResourceUpdate(SQLModel):
-    """Pydantic model for updating an existing resource via the API."""
-    status: Optional[str] = None
-    attributes: Optional[Dict[str, Any]] = None
+# --- NEW: Content Resource Models ---
+
+class ContentResource(SQLModel, table=True):
+    """(Data Model) Represents a manually added content resource."""
+    id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(foreign_key="user.id", index=True)
+    title: str = Field(index=True)
+    url: str = Field(index=True)
+    description: Optional[str] = Field(default=None)
+    categories: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    content_type: str = Field(default="article")  # article, video, document, etc.
+    status: ResourceStatus = Field(default=ResourceStatus.ACTIVE, index=True)
+    usage_count: int = Field(default=0, index=True)  # Track how often it's used
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+
+    # --- Relationships ---
+    user: Optional["User"] = Relationship(back_populates="content_resources")
+
+class ContentResourceCreate(SQLModel):
+    """Defines the structure for creating a new content resource."""
+    title: str
+    url: str
+    description: Optional[str] = None
+    categories: List[str] = Field(default_factory=list)
+    content_type: str = "article"
+
+class ContentResourceUpdate(SQLModel):
+    """Defines updatable fields for content resources."""
+    title: Optional[str] = None
+    url: Optional[str] = None
+    description: Optional[str] = None
+    categories: Optional[List[str]] = None
+    content_type: Optional[str] = None
+    status: Optional[ResourceStatus] = None

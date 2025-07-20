@@ -16,7 +16,7 @@ from agent_core.deduplication.deduplication_engine import find_strong_duplicate
 from .models.client import Client, ClientUpdate, ClientCreate
 from .models.event import MarketEvent
 from .models.user import User, UserUpdate
-from .models.resource import Resource, ResourceCreate, ResourceUpdate
+from .models.resource import Resource, ResourceCreate, ContentResource, ContentResourceCreate, ContentResourceUpdate
 from .models.campaign import CampaignBriefing, CampaignUpdate, CampaignStatus
 from .models.message import ScheduledMessage, Message, MessageStatus, MessageDirection, ScheduledMessageCreate
 from agent_core.agents import profiler as profiler_agent
@@ -295,7 +295,7 @@ def create_resource(user_id: uuid.UUID, resource_data: ResourceCreate) -> Resour
         session.refresh(new_resource)
         return new_resource
 
-def update_resource(resource_id: uuid.UUID, update_data: ResourceUpdate, user_id: uuid.UUID) -> Optional[Resource]:
+def update_resource(resource_id: uuid.UUID, update_data: ContentResourceUpdate, user_id: uuid.UUID) -> Optional[Resource]:
     """Updates a resource's status or attributes."""
     with Session(engine) as session:
         resource = session.exec(select(Resource).where(Resource.id == resource_id, Resource.user_id == user_id)).first()

@@ -16,6 +16,7 @@ import { ClientIntelCard } from '@/components/conversation/ClientIntelCard';
 import { RelationshipCampaignCard } from '@/components/conversation/RelationshipCampaignCard';
 import { ChatHistory } from '@/components/conversation/ChatHistory';
 import { MessageComposer } from '@/components/conversation/MessageComposer';
+import { ContentSuggestionsCard } from '@/components/conversation/ContentSuggestionsCard';
 import { ScheduleMessageModal } from '@/components/modals/ScheduleMessageModal';
 import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
@@ -254,6 +255,11 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         <>
             <DynamicTaggingCard client={selectedClient} onUpdate={handleClientUpdate} />
             <ClientIntelCard client={selectedClient} onUpdate={handleClientUpdate} onReplan={() => {}} displayConfig={displayConfig} />
+            <ContentSuggestionsCard 
+                clientId={clientId}
+                api={api}
+                onSendMessage={handleSendMessage}
+            />
             <RelationshipCampaignCard 
                 plan={activePlan || null}
                 messages={scheduledMessages}

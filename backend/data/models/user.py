@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .faq import Faq
     from .client import Client
     from .message import Message, ScheduledMessage
+    from .resource import Resource, ContentResource
 
 class UserType(str, Enum):
     REALTOR = "realtor"
@@ -69,6 +70,8 @@ class User(SQLModel, table=True):
     clients: List["Client"] = Relationship(back_populates="user")
     messages: List["Message"] = Relationship(back_populates="user")
     scheduled_messages: List["ScheduledMessage"] = Relationship(back_populates="user")
+    resources: List["Resource"] = Relationship(back_populates="user")
+    content_resources: List["ContentResource"] = Relationship(back_populates="user")
 
 class UserUpdate(SQLModel):
     """Defines all updatable fields for a user."""

@@ -35,6 +35,8 @@ The real estate focus you might see in the codebase is likely because it was the
     
 - **Flexible Core Engine for Any Business:** The underlying architecture (`Event -> Audience -> Campaign`) is abstract. By plugging in different integrations (MLS, EHS, POS), we can serve any small business vertical.
 
+- **Unified AI Experience:** Content recommendations are integrated into the AI suggestions system, not as a separate feature. This follows the "Perceive -> Reason -> Act -> Learn" framework where content resources are part of the Perceive layer that feeds into AI reasoning.
+
 ### **3. The Core Product Loop**
 
 This is the fundamental engine of the application:
@@ -98,12 +100,14 @@ This is the fundamental engine of the application:
 - **`agents/`:** Specialized AI agents for different tasks
 - **`orchestrator.py`:** Coordinates between different AI components
 - **`audience_builder.py`:** Client targeting and segmentation
+- **`content_resource_service.py`:** Content recommendation and matching engine
 
 #### **Data Layer (`/data/`)**
 - **`models/`:** SQLModel database models
 - **`database.py`:** Database connection and session management
 - **`crm.py`:** Customer relationship management operations
 - **`vector.py`:** Vector search and similarity matching
+- **`models/resource.py`:** Content resource management and storage
 
 #### **Integrations (`/integrations/`)**
 - **`mls/`:** Multiple Listing Service integrations
@@ -169,7 +173,22 @@ This is the fundamental engine of the application:
 - **Therapy:** HIPAA compliance, appointment reminders, wellness check-ins
 - **Extensible:** Framework for additional verticals
 
-### **5. Personalization & Learning**
+### **5. Content Resource Management & Recommendations**
+- **Content Resource Management:** Business owners can add trusted content URLs/documents in their profile settings
+- **AI-Powered Matching:** Content recommendations based on client tags and resource categories
+- **Integrated AI Suggestions:** Content recommendations appear in the main AI Suggestions tab alongside traditional opportunities
+- **Perceive Layer Integration:** Content resources are part of the Perceive layer that feeds into the AI reasoning engine
+- **Personalized Messaging:** AI generates personalized messages for sharing content with matched clients
+- **Multi-Vertical Support:** Content resources work across all business verticals (real estate, therapy, consulting, etc.)
+- **Usage Tracking:** System tracks content usage and engagement metrics
+- **Content Categories:** Flexible categorization system for organizing content by topic and relevance
+- **Client Matching Logic:** 
+  - Matches clients based on user tags and AI tags
+  - Considers resource categories and client interests
+  - Supports multiple content types (documents, videos, articles)
+- **Unified Experience:** Content recommendations appear in the same interface as other AI suggestions, providing a cohesive user experience
+
+### **6. Personalization & Learning**
 - **Style Adaptation:** AI learns from user message edits
 - **Behavior Profiling:** User interaction pattern analysis
 - **Performance Optimization:** Continuous improvement based on outcomes
@@ -234,6 +253,12 @@ This is the fundamental engine of the application:
 - **Integration Tests:** API endpoint testing with FastAPI TestClient
 - **E2E Tests:** Playwright for critical user flows
 - **Manual Testing:** Comprehensive test scenarios for each feature
+- **Content Recommendation Testing:**
+  - Test content resource creation and management
+  - Verify client matching logic with various tag combinations
+  - Test AI message generation for content sharing
+  - Validate integration with AI suggestions interface
+  - Test multi-vertical content recommendation functionality
 
 ### **Deployment Pipeline**
 - **Development:** Local Docker Compose environment
@@ -267,6 +292,15 @@ This is the fundamental engine of the application:
 - **Scheduling:** Optimal timing recommendations
 - **Execution:** Multi-channel delivery with tracking
 - **Analytics:** Performance measurement and optimization
+
+### **Content Recommendation Engine**
+- **Resource Management:** Business owners add content resources with categories and metadata
+- **Client Profiling:** System analyzes client tags (user-set and AI-generated) for interests and needs
+- **Matching Algorithm:** Content resources are matched to clients based on category/tag overlap
+- **AI Message Generation:** Personalized messages are generated for each client-resource match
+- **Integration with AI Suggestions:** Content recommendations are converted to campaign briefings and appear in the unified AI suggestions interface
+- **Usage Analytics:** System tracks which content resources are shared and their engagement rates
+- **Multi-Vertical Adaptability:** Content recommendation logic works across all business verticals
 
 ---
 

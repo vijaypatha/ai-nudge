@@ -36,6 +36,8 @@ export default function NudgesPage() {
 
     const fetchNudgesAndConfig = useCallback(() => {
         setIsNudgesLoading(true);
+        // This now includes both traditional opportunities AND content recommendations
+        // as part of the unified AI suggestions system
         api.get('/api/campaigns?status=DRAFT')
             .then(data => {
                 setNudges(data.nudges || []);
