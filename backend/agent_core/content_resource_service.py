@@ -10,6 +10,7 @@ from data.models.resource import ContentResource
 from data.models.client import Client
 from data.database import engine
 from agent_core.llm_client import get_chat_completion
+from agent_core.llm_client import generate_embedding
 
 def get_content_recommendations_for_user(user_id: UUID) -> List[Dict[str, Any]]:
     """
@@ -88,6 +89,120 @@ def find_matching_clients(resource: ContentResource, clients: List[Client]) -> L
             matched_clients.append(client)
     
     return matched_clients
+
+async def find_matching_clients_semantic(resource: ContentResource, clients: List[Client], similarity_threshold: float = 0.7) -> List[Client]:
+    """
+    Find clients that match the content resource using semantic embeddings.
+    This provides more intelligent matching based on content meaning, not just exact string matches.
+    """
+    try:
+        matched_clients = []
+        
+        # Create embedding for the resource content
+        resource_text = f"{resource.title} {resource.description or ''}"
+        resource_embedding = await generate_embedding(resource_text)
+        
+        for client in clients:
+            # Create embedding for client profile
+            client_tags = (client.user_tags or []) + (client.ai_tags or [])
+            client_notes = client.notes or ""
+            client_text = f"{client.full_name} {' '.join(client_tags)} {client_notes}"
+            client_embedding = await generate_embedding(client_text)
+            
+            # Calculate cosine similarity
+            similarity = calculate_cosine_similarity(resource_embedding, client_embedding)
+            
+            if similarity >= similarity_threshold:
+                logging.info(f"Semantic match found: {client.full_name} -> {resource.title} (similarity: {similarity:.3f})")
+                matched_clients.append(client)
+        
+        return matched_clients
+        
+    except Exception as e:
+        logging.error(f"Error in semantic matching: {e}", exc_info=True)
+        # Fallback to exact matching if semantic matching fails
+        return find_matching_clients(resource, clients)
+
+def calculate_cosine_similarity(embedding1: List[float], embedding2: List[float]) -> float:
+    """
+    Calculate cosine similarity between two embeddings.
+    """
+    import numpy as np
+    
+    vec1 = np.array(embedding1)
+    vec2 = np.array(embedding2)
+    
+    # Calculate cosine similarity
+    dot_product = np.dot(vec1, vec2)
+    norm1 = np.linalg.norm(vec1)
+    norm2 = np.linalg.norm(vec2)
+    
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    
+    return dot_product / (norm1 * norm2)
+
+async def get_content_recommendations_semantic(user_id: UUID, use_semantic: bool = True) -> List[Dict[str, Any]]:
+    """
+    Get content recommendations using semantic matching when enabled.
+    """
+    try:
+        with Session(engine) as session:
+            # Get all active content resources for the user
+            resources = session.exec(
+                select(ContentResource)
+                .where(ContentResource.user_id == user_id)
+                .where(ContentResource.status == 'active')
+            ).all()
+            
+            if not resources:
+                return []
+            
+            # Get all clients for the user
+            clients = session.exec(
+                select(Client)
+                .where(Client.user_id == user_id)
+            ).all()
+            
+            recommendations = []
+            
+            for resource in resources:
+                if use_semantic:
+                    # Use semantic matching
+                    matched_clients = await find_matching_clients_semantic(resource, clients)
+                else:
+                    # Use exact matching
+                    matched_clients = find_matching_clients(resource, clients)
+                
+                if matched_clients:
+                    for client in matched_clients:
+                        message = generate_resource_message_sync(resource, client)
+                        
+                        recommendation = {
+                            'resource': {
+                                'id': resource.id,
+                                'title': resource.title,
+                                'description': resource.description,
+                                'url': resource.url,
+                                'categories': resource.categories,
+                                'content_type': resource.content_type,
+                                'created_at': resource.created_at,
+                                'updated_at': resource.updated_at
+                            },
+                            'matched_clients': [{
+                                'client_id': client.id,
+                                'client_name': client.full_name,
+                                'match_reason': f"Semantic match (similarity: {calculate_cosine_similarity([], []) if use_semantic else 'exact match'})"
+                            }],
+                            'generated_message': message
+                        }
+                        recommendations.append(recommendation)
+            
+            return recommendations
+            
+    except Exception as e:
+        logging.error(f"Error getting semantic content recommendations for user {user_id}: {e}", exc_info=True)
+        return []
 
 def generate_resource_message_sync(resource: ContentResource, client: Client) -> str:
     """
