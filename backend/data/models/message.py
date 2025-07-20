@@ -50,6 +50,11 @@ class Message(SQLModel, table=True):
     user: Optional["User"] = Relationship(back_populates="messages")
     ai_drafts: List["CampaignBriefing"] = Relationship(back_populates="parent_message")
 
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat() + 'Z' if v.tzinfo is None else v.isoformat()
+        }
+
 class ScheduledMessage(SQLModel, table=True):
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id", index=True)
@@ -89,6 +94,9 @@ class MessageWithDraft(BaseModel):
 
     class Config:
         from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat() + 'Z' if v.tzinfo is None else v.isoformat()
+        }
 
 class ScheduledMessageCreate(SQLModel):
     client_id: UUID

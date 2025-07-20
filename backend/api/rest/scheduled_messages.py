@@ -2,7 +2,7 @@
 # --- FULLY REVISED AND HARDENED ---
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
@@ -49,6 +49,10 @@ async def create_scheduled_message(
             local_time = tz.localize(local_time)
 
         utc_time = local_time.astimezone(pytz.utc)
+        
+        # Validate that the scheduled time is in the future
+        if utc_time <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=400, detail="Scheduled time must be in the future.")
 
         # 3. Save the record to our database first
         with Session(engine) as session:
@@ -182,7 +186,7 @@ async def get_all_scheduled_messages(
     try:
         # This logic remains correct.
         if client_id:
-            return crm_service.get_scheduled_messages_for__client(user_id=current_user.id, client_id=client_id)
+            return crm_service.get_scheduled_messages_for_client(client_id=client_id, user_id=current_user.id)
         else:
             return crm_service.get_all_scheduled_messages(user_id=current_user.id)
     except Exception as e:

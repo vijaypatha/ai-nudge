@@ -15,6 +15,10 @@ from pydantic import BaseModel
 from data import crm as crm_service
 from agent_core import orchestrator
 from agent_core import audience_builder
+from sqlalchemy import func
+from data.models.client import Client
+from data.models.message import MessageStatus
+from data.database import get_session as get_db
 
 
 router = APIRouter(prefix="/conversations", tags=["Conversations"])
@@ -26,6 +30,11 @@ class ConversationSummary(BaseModel):
     last_message: str
     last_message_time: str
     unread_count: int
+    client_phone: Optional[str] = None
+    is_online: bool = False
+    has_messages: bool = False
+    last_message_direction: Optional[str] = None
+    last_message_source: Optional[str] = None
 
 class ConversationDetailResponse(BaseModel):
     messages: List[MessageWithDraft]
@@ -42,14 +51,90 @@ class ConversationSearchQuery(BaseModel):
     natural_language_query: str
 
 
-@router.get("/", response_model=List[ConversationSummary])
-async def get_conversation_list(current_user: User = Depends(get_current_user_from_token)):
-    """Retrieves a summary of all conversations for the logged-in user."""
+@router.get("", response_model=List[ConversationSummary])
+def get_conversations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    --- REVISED ---
+    Fetches all clients for the user and formats them as conversation summaries.
+    This ensures that clients with no messages yet still appear in the list.
+    """
     try:
-        summaries = crm_service.get_conversation_summaries(user_id=current_user.id)
+        logging.info(f"API: Fetching conversations for user {current_user.id}")
+        all_clients = db.exec(
+            select(Client).where(Client.user_id == current_user.id)
+        ).all()
+        logging.info(f"API: Found {len(all_clients)} clients for user {current_user.id}")
+
+        summaries = []
+        for client in all_clients:
+            logging.debug(f"API: Processing client {client.id} ({client.full_name})")
+            # Query for the last message
+            last_message = db.exec(
+                select(Message)
+                .where(Message.client_id == client.id)
+                .order_by(Message.created_at.desc())
+            ).first()
+
+            # Query for unread message count
+            # Use first() to retrieve the count in a version-agnostic way
+            unread_count_tuple = db.exec(
+                select(func.count(Message.id))
+                .where(
+                    Message.client_id == client.id,
+                    Message.direction == MessageDirection.INBOUND,
+                    # --- FIX: Use the correct enum member for unread messages ---
+                    Message.status == MessageStatus.RECEIVED
+                )
+            ).first()
+
+            # Handle both tuple and integer return types from first()
+            if unread_count_tuple is None:
+                unread_count = 0
+            elif isinstance(unread_count_tuple, tuple):
+                unread_count = unread_count_tuple[0] if unread_count_tuple else 0
+            else:
+                # first() returned an integer directly
+                unread_count = unread_count_tuple
+            
+            # Check if the client has any messages at all
+            has_messages = last_message is not None
+
+            # Calculate if client is online based on recent inbound message activity
+            is_online = False
+            if last_message and last_message.direction == MessageDirection.INBOUND:
+                # Check if the last inbound message was within the last 5 minutes
+                message_time = last_message.created_at.replace(tzinfo=timezone.utc) if last_message.created_at.tzinfo is None else last_message.created_at
+                current_time = datetime.now(timezone.utc)
+                time_diff = current_time - message_time
+                is_online = time_diff.total_seconds() < 300  # 5 minutes
+
+            summary = ConversationSummary(
+                id=str(client.id), # Use client ID as the summary ID
+                client_id=client.id,
+                client_name=client.full_name,
+                client_phone=client.phone,
+                last_message=last_message.content if last_message else "No messages yet.",
+                last_message_time=(
+                    last_message.created_at.isoformat() 
+                    if last_message 
+                    else (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+                ),
+                unread_count=unread_count,
+                is_online=is_online,
+                has_messages=has_messages,
+                last_message_direction=last_message.direction if last_message else None,
+                last_message_source=last_message.source if last_message else None
+            )
+            summaries.append(summary)
+            
+        logging.info(f"API: Returning {len(summaries)} conversation summaries for user {current_user.id}")
         return summaries
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch conversations: {str(e)}")
+        logging.error(f"API: Error in get_conversations for user {current_user.id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch conversations")
 
 
 @router.get("/messages/", response_model=ConversationDetailResponse)
@@ -155,22 +240,22 @@ async def send_reply(
             logging.error(f"API: Orchestrator failed to send message for client {client_id}")
             raise HTTPException(status_code=500, detail="Failed to send message")
 
-        # Store the message ID before the session closes
-        message_id = saved_message.id
-        logging.info(f"API: Message sent successfully for client {client_id}, message ID: {message_id}")
+        # Store all message data before the session closes
+        message_data = {
+            'id': saved_message.id,
+            'user_id': saved_message.user_id,
+            'client_id': saved_message.client_id,
+            'content': saved_message.content,
+            'direction': saved_message.direction,
+            'status': saved_message.status,
+            'source': saved_message.source,
+            'sender_type': saved_message.sender_type,
+            'created_at': saved_message.created_at
+        }
+        logging.info(f"API: Message sent successfully for client {client_id}, message ID: {message_data['id']}")
         
         # Return a fresh copy of the message data to avoid session issues
-        return Message(
-            id=message_id,
-            user_id=saved_message.user_id,
-            client_id=saved_message.client_id,
-            content=saved_message.content,
-            direction=saved_message.direction,
-            status=saved_message.status,
-            source=saved_message.source,
-            sender_type=saved_message.sender_type,
-            created_at=saved_message.created_at
-        )
+        return Message(**message_data)
 
     except HTTPException:
         raise
@@ -275,3 +360,62 @@ async def mark_conversation_as_read(
     except Exception as e:
         logging.error(f"API: Failed to mark messages as read for client {client_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to mark messages as read: {str(e)}")
+
+
+@router.post("/test-recommendation")
+async def test_recommendation_generation(
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """Test endpoint to verify recommendation generation works."""
+    try:
+        from agent_core.agents import conversation as conversation_agent
+        from data.models.message import Message, MessageDirection
+        
+        # Get a valid client for the user
+        clients = crm_service.get_all_clients(user_id=current_user.id)
+        if not clients:
+            raise HTTPException(status_code=404, detail="No clients found for user")
+        
+        client = clients[0]  # Use the first client
+        
+        # Create a test message
+        test_message = Message(
+            id=uuid.uuid4(),
+            user_id=current_user.id,
+            client_id=client.id,
+            content="Hi! I just got a new job and we might be moving to a bigger house next year. My kids are starting high school which is exciting but stressful!",
+            direction=MessageDirection.INBOUND,
+            status="received",
+            source="manual",
+            sender_type="user",
+            created_at=datetime.now(timezone.utc)
+        )
+        
+        # Get conversation history
+        conversation_history = crm_service.get_recent_messages(
+            client_id=test_message.client_id, 
+            user_id=current_user.id, 
+            limit=10
+        )
+        
+        # Generate recommendations
+        recommendation_data = await conversation_agent.generate_recommendation_slate(
+            current_user, 
+            test_message.client_id, 
+            test_message, 
+            conversation_history
+        )
+        
+        return {
+            "test_message": test_message.content,
+            "client_id": str(test_message.client_id),
+            "recommendation_data": recommendation_data,
+            "has_update_client_intel": any(
+                rec.get("type") == "UPDATE_CLIENT_INTEL" 
+                for rec in recommendation_data.get("recommendations", [])
+            )
+        }
+        
+    except Exception as e:
+        logging.error(f"API: Test recommendation generation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Test failed: {str(e)}")

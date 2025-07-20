@@ -111,7 +111,17 @@ async def generate_recommendation_slate(
     ## INSTRUCTIONS
     1.  **Analyze ONLY the LATEST INCOMING MESSAGE** in the context of the history.
     2.  **You MUST ALWAYS generate a helpful SMS response draft.** This is your primary function. Your response should be encouraging and move the conversation forward.
-    3.  **GENERATE an `UPDATE_CLIENT_INTEL` recommendation ONLY IF the latest message contains NEW, ACTIONABLE intelligence** like a timeline, a specific goal, a new pain point, or contact information. Do NOT generate intel for simple pleasantries or acknowledgements.
+    3.  **ALWAYS generate an `UPDATE_CLIENT_INTEL` recommendation** for ANY incoming message that contains useful information. This includes:
+        - Personal details (family, work, interests, preferences, emotions)
+        - Life events (moving, job changes, health updates, milestones)
+        - Communication preferences (response style, timing, tone)
+        - Goals, needs, or concerns they mention
+        - Any context that would be valuable for future interactions
+        - Even small details that could be useful for personalization
+        - Emotional state or stress levels
+        - Any information that helps understand the client better
+    4.  **For tags**: ALWAYS suggest 1-3 relevant tags that would help categorize or understand the client. Examples: "first-time buyer", "relocating", "anxiety", "parenting", "work stress", "high school", "job change", "moving", "family", "stress", "excited", "concerned"
+    5.  **For notes**: ALWAYS write a concise, actionable note that summarizes key information from the message. Focus on what's new or important.
     4.  **Format your entire output** as a single, valid JSON object following the schema provided.
 
     ## JSON OUTPUT SCHEMA

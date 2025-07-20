@@ -22,3 +22,9 @@ api_router.include_router(scheduled_messages.router)
 api_router.include_router(community.router)
 api_router.include_router(twilio_numbers.router)
 api_router.include_router(websockets.router)
+
+# --- ADDED: Simple properties endpoint to prevent 404 errors ---
+@api_router.get("/properties")
+async def get_properties():
+    """Temporary endpoint to prevent 404 errors. Returns empty array."""
+    return []

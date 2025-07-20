@@ -200,9 +200,31 @@ async def update_client_tags_endpoint(client_id: UUID, tag_data: ClientTagUpdate
 async def get_all_clients_endpoint(current_user: User = Depends(get_current_user_from_token)):
     return crm_service.get_all_clients(user_id=current_user.id)
 
+@router.get("/debug/list-ids")
+async def list_client_ids(current_user: User = Depends(get_current_user_from_token)):
+    """Debug endpoint to list all client IDs for the current user."""
+    clients = crm_service.get_all_clients(user_id=current_user.id)
+    return {
+        "user_id": str(current_user.id),
+        "client_count": len(clients),
+        "clients": [
+            {
+                "id": str(client.id),
+                "name": client.full_name,
+                "phone": client.phone
+            }
+            for client in clients
+        ]
+    }
+
 @router.get("/{client_id}", response_model=Client)
 async def get_client_by_id_endpoint(client_id: UUID, current_user: User = Depends(get_current_user_from_token)):
+    logging.info(f"API: Requesting client {client_id} for user {current_user.id}")
     client = crm_service.get_client_by_id(client_id=client_id, user_id=current_user.id)
+    if not client:
+        logging.warning(f"API: Client {client_id} not found for user {current_user.id}")
+    else:
+        logging.info(f"API: Found client {client_id} ({client.full_name}) for user {current_user.id}")
     if client:
         return client
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")

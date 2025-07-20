@@ -15,16 +15,17 @@ import { useSidebar } from '@/context/SidebarContext';
 import { Avatar } from '@/components/ui/Avatar';
 import { MagicSearchBar } from '@/components/ui/MagicSearchBar';
 import { ConversationListItem } from '@/components/conversation/ConversationListItem';
-import { MessageCircleHeart, Users, Zap, User as UserIcon, Menu } from "lucide-react";
+import { MessageCircleHeart, Users, Zap, User as UserIcon, Menu, RefreshCw } from "lucide-react";
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
-    const { conversations: initialConversations, api } = useAppContext();
+    const { conversations: initialConversations, api, forceRefreshAllData } = useAppContext();
     const router = useRouter();
     const pathname = usePathname();
     const { isSidebarOpen, setIsSidebarOpen } = useSidebar();
 
     const [searchedConversations, setSearchedConversations] = useState<any[] | null>(null);
     const [isSearching, setIsSearching] = useState(false);
+    const [isRefreshing, setIsRefreshing] = useState(false);
 
     const sortedInitialConversations = useMemo(() => {
         return [...initialConversations].sort((a, b) =>
@@ -33,6 +34,18 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     }, [initialConversations]);
 
     const displayedConversations = searchedConversations ?? sortedInitialConversations;
+
+    const handleForceRefresh = async () => {
+        setIsRefreshing(true);
+        try {
+            await forceRefreshAllData();
+            console.log("Data refreshed successfully");
+        } catch (error) {
+            console.error("Failed to refresh data:", error);
+        } finally {
+            setIsRefreshing(false);
+        }
+    };
 
     const handleConversationSearch = useCallback(async (query: string) => {
         setIsSearching(true);
@@ -58,6 +71,14 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     const selectedClientId = pathname.includes('/conversations/') ? pathname.split('/').pop() : null;
 
     const handleConversationSelect = async (clientId: string) => {
+        // Validate that the client ID exists in the current conversations list
+        const clientExists = displayedConversations.some(conv => conv.client_id === clientId);
+        if (!clientExists) {
+            console.warn(`Client ID ${clientId} not found in current conversations, refreshing data...`);
+            await handleForceRefresh();
+            return;
+        }
+
         router.push(`/conversations/${clientId}`);
         setIsSidebarOpen(false);
         
@@ -104,6 +125,14 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                             isLoading={isSearching}
                             placeholder="Search topics..."
                         />
+                        <button
+                            onClick={handleForceRefresh}
+                            disabled={isRefreshing}
+                            className="mt-2 w-full flex items-center justify-center gap-2 p-2 text-xs text-brand-text-muted hover:text-brand-text-main hover:bg-white/5 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                            <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+                            {isRefreshing ? 'Refreshing...' : 'Refresh Data'}
+                        </button>
                     </div>
 
                     <div className="flex-grow overflow-y-auto">

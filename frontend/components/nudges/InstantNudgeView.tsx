@@ -3,13 +3,14 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, FC } from 'react';
-import { useAppContext, Client } from '@/context/AppContext';
+import { useAppContext, Client, User } from '@/context/AppContext';
 import { MagicSearchBar } from '@/components/ui/MagicSearchBar';
 import { TagFilter } from '@/components/ui/TagFilter';
 import { Avatar } from '@/components/ui/Avatar';
 import { Loader2, Bot, Send, Calendar, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
+import { getFutureTimeInTimezone } from '@/utils/timezone';
 
 interface InstantNudgeViewProps {
     clients: Client[];
@@ -17,7 +18,7 @@ interface InstantNudgeViewProps {
 }
 
 export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onScheduleSuccess }) => {
-    const { api } = useAppContext();
+    const { api, user } = useAppContext();
 
     const [filteredClients, setFilteredClients] = useState<Client[]>(clients);
     const [selectedClients, setSelectedClients] = useState<Set<string>>(new Set());
@@ -35,6 +36,8 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
     useEffect(() => {
         setFilteredClients(clients);
     }, [clients]);
+
+
 
     const allTags = useMemo(() => {
         const tags = new Set<string>();
@@ -146,15 +149,20 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
         // Convert the datetime-local input to a proper datetime object
         const scheduledDateTime = new Date(scheduleDateTime);
         
-        // Get the user's timezone (default to UTC if not available)
-        const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-
+        // Validate that the scheduled time is in the future
+        const now = new Date();
+        if (scheduledDateTime <= now) {
+            alert("Please select a future date and time for scheduling.");
+            setIsScheduling(false);
+            return;
+        }
+        
         const schedulePromises = recipients.map(clientId =>
             api.post('/api/scheduled-messages', {
                 client_id: clientId,
                 content: message,
-                scheduled_at_local: scheduledDateTime.toISOString(),
-                timezone: userTimezone,
+                scheduled_at_local: scheduledDateTime,
+                timezone: user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
             })
         );
         try {
@@ -277,7 +285,19 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
                             </motion.div>
                         ) : (
                             <motion.div key="send" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-2 gap-3">
-                                <button onClick={() => setScheduleDateTime(new Date().toISOString().slice(0, 16))} className="p-3 bg-white/10 rounded-lg font-semibold hover:bg-white/20 disabled:opacity-50 w-full flex items-center justify-center gap-2">
+                                <button onClick={() => {
+                                    // Set default time to 30 minutes from now in user's local timezone
+                                    const userTimezone = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+                                    const defaultTime = getFutureTimeInTimezone(userTimezone, 30);
+                                    console.log('Timezone debug:', {
+                                        userTimezone,
+                                        browserTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                                        defaultTime,
+                                        currentTime: new Date().toLocaleString(),
+                                        currentTimeInUserTz: new Date().toLocaleString('en-US', { timeZone: userTimezone })
+                                    });
+                                    setScheduleDateTime(defaultTime);
+                                }} className="p-3 bg-white/10 rounded-lg font-semibold hover:bg-white/20 disabled:opacity-50 w-full flex items-center justify-center gap-2">
                                     <Calendar size={20} /> Schedule
                                 </button>
                                 <button onClick={handleSendInstantNudge} disabled={isSending || selectedClients.size === 0 || !message.trim()} className="p-3 bg-primary-action text-brand-dark rounded-lg font-semibold hover:brightness-110 disabled:opacity-50 w-full flex items-center justify-center gap-2">

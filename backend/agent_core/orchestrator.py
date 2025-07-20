@@ -333,7 +333,18 @@ async def orchestrate_send_message_now(
         session.commit()
         logging.info(f"ORCHESTRATOR: Message send completed successfully for client {client_id}")
         
-        return message_log
+        # Return a fresh copy to avoid session issues
+        return Message(
+            id=message_log.id,
+            user_id=message_log.user_id,
+            client_id=message_log.client_id,
+            content=message_log.content,
+            direction=message_log.direction,
+            status=message_log.status,
+            source=message_log.source,
+            sender_type=message_log.sender_type,
+            created_at=message_log.created_at
+        )
         
     except Exception as e:
         logging.error(f"ORCHESTRATOR: Critical error in message send: {e}", exc_info=True)

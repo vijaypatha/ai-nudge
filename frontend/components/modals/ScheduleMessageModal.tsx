@@ -5,7 +5,6 @@ import { useState, FC, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useAppContext } from '@/context/AppContext';
 import { Button } from '@/components/ui/Button';
-import { TimezoneSelector } from '@/components/ui/TimezoneSelector';
 import { X, Loader2, CalendarClock } from 'lucide-react';
 
 interface ScheduleMessageModalProps {
@@ -16,11 +15,16 @@ interface ScheduleMessageModalProps {
     initialContent?: string;
 }
 
-export const ScheduleMessageModal: FC<ScheduleMessageModalProps> = ({ isOpen, onClose, onScheduleSuccess, clientId, initialContent = '' }) => {
+export const ScheduleMessageModal: FC<ScheduleMessageModalProps> = ({ 
+    isOpen, 
+    onClose, 
+    onScheduleSuccess, 
+    clientId, 
+    initialContent = ''
+}) => {
     const { api, user } = useAppContext();
     const [content, setContent] = useState('');
     const [date, setDate] = useState('');
-    const [timezone, setTimezone] = useState(user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
@@ -29,23 +33,25 @@ export const ScheduleMessageModal: FC<ScheduleMessageModalProps> = ({ isOpen, on
             const futureDate = new Date(Date.now() + 30 * 60 * 1000);
             const localISOString = new Date(futureDate.getTime() - (futureDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
             setDate(localISOString);
-            setContent(initialContent); // Use initial content if provided
+            setContent(initialContent);
         }
     }, [isOpen, initialContent]);
 
     const handleSchedule = async () => {
-        if (!content || !date || !timezone || !clientId) {
+        if (!content || !date || !clientId) {
             alert("Please fill out all fields.");
             return;
         }
         setIsSaving(true);
         try {
-            // The backend expects the local datetime string and a separate timezone string.
+            // Get user's timezone automatically
+            const userTimezone = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            
             await api.post(`/api/scheduled-messages`, {
                 client_id: clientId,
                 content: content,
                 scheduled_at_local: date,
-                timezone: timezone,
+                timezone: userTimezone,
             });
             onScheduleSuccess();
         } catch (error) {
@@ -79,29 +85,19 @@ export const ScheduleMessageModal: FC<ScheduleMessageModalProps> = ({ isOpen, on
                             placeholder="Write your message here..."
                         />
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                         <div>
-                            <label className="text-sm font-semibold text-gray-300 mb-2 block">Date & Time</label>
-                            <input
-                                type="datetime-local"
-                                value={date}
-                                onChange={(e) => setDate(e.target.value)}
-                                className="w-full p-3 bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-primary-action"
-                            />
-                        </div>
-                        <div>
-                            <label className="text-sm font-semibold text-gray-300 mb-2 block">Time Zone</label>
-                            <TimezoneSelector
-                                value={timezone}
-                                onChange={(e) => setTimezone(e.target.value)}
-                                className="w-full p-3 bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-primary-action"
-                            />
-                        </div>
+                    <div>
+                        <label className="text-sm font-semibold text-gray-300 mb-2 block">Date & Time</label>
+                        <input
+                            type="datetime-local"
+                            value={date}
+                            onChange={(e) => setDate(e.target.value)}
+                            className="w-full p-3 bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-primary-action"
+                        />
                     </div>
                 </main>
                 <footer className="flex justify-end gap-3 p-4 bg-black/20 border-t border-white/10">
                     <Button variant="secondary" onClick={onClose} disabled={isSaving}>Cancel</Button>
-                    <Button onClick={handleSchedule} disabled={isSaving || !content || !date || !timezone}>
+                    <Button onClick={handleSchedule} disabled={isSaving || !content || !date}>
                         {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CalendarClock className="w-4 h-4 mr-2" />}
                         Schedule Message
                     </Button>

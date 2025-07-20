@@ -7,10 +7,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
-from celery import Celery
 from sqlmodel import Session, select
+
+# --- FIX: Import the single, centralized Celery app instance ---
+from celery_worker import celery_app
 from data.database import engine
-from data.models.message import Message, MessageStatus, MessageDirection, MessageSource, MessageSenderType, ScheduledMessage
+from data.models.message import (Message, MessageStatus, MessageDirection, 
+                                 MessageSource, MessageSenderType, ScheduledMessage)
 from data.models.user import User
 from data.models.client import Client
 from data import crm as crm_service
@@ -23,27 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Celery app configuration
-REDIS_URL = "redis://redis:6379/0"  # Use the service name 'redis' from docker-compose
-
-celery_app = Celery('ai_nudge')
-celery_app.conf.update(
-    broker=REDIS_URL,
-    backend=REDIS_URL,
-    task_serializer='json',
-    accept_content=['json'],
-    result_serializer='json',
-    timezone='UTC',
-    enable_utc=True,
-    task_track_started=True,
-    task_time_limit=300,  # 5 minutes max
-    task_soft_time_limit=240,  # 4 minutes soft limit
-    worker_prefetch_multiplier=1,
-    worker_max_tasks_per_child=1000,
-    broker_connection_retry_on_startup=True,
-    broker_connection_max_retries=10,
-    result_expires=3600,  # 1 hour
-)
+# --- REMOVED: Celery app configuration is now centralized in celery_worker.py ---
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def send_scheduled_message_task(self, message_id: str) -> dict:

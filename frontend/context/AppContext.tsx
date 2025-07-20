@@ -126,6 +126,7 @@ interface AppContextType {
   updateClientInList: (updatedClient: Client) => void;
   refetchScheduledMessagesForClient: (clientId: string) => Promise<ScheduledMessage[]>;
   refreshUser: () => Promise<void>;
+  forceRefreshAllData: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -155,7 +156,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   
   const api = useMemo(() => {
     const request = async (endpoint: string, method: string, body?: any, retries = 3) => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
       const url = `${baseUrl}${endpoint}`;
       const headers: HeadersInit = { 'Content-Type': 'application/json' };
       if (tokenRef.current) headers['Authorization'] = `Bearer ${tokenRef.current}`;
@@ -302,6 +303,19 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [api, isAuthenticated]);
 
+  const forceRefreshAllData = useCallback(async () => {
+    if (!isAuthenticated) return;
+    console.log("Force refreshing all data...");
+    // Clear all cached data
+    setClients([]);
+    setProperties([]);
+    setConversations([]);
+    setNudges([]);
+    
+    // Refetch all data
+    await fetchDashboardData();
+  }, [isAuthenticated, fetchDashboardData]);
+
   useEffect(() => {
     const checkUserSession = async () => {
       setLoading(true);
@@ -352,10 +366,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     updateClientInList,
     refetchScheduledMessagesForClient,
     refreshUser,
+    forceRefreshAllData,
   }), [
     loading, isAuthenticated, user, clients, properties, conversations, nudges, 
     logout, api, login, fetchDashboardData, refreshConversations, 
-    updateClientInList, refetchScheduledMessagesForClient, refreshUser
+    updateClientInList, refetchScheduledMessagesForClient, refreshUser, forceRefreshAllData
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

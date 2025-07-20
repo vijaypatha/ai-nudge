@@ -32,7 +32,8 @@ interface ChatHistoryProps {
 const formatMessageTime = (timestamp: string) => {
     try {
         const date = new Date(timestamp);
-        return formatInTimeZone(date, Intl.DateTimeFormat().resolvedOptions().timeZone, "h:mm a");
+        const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        return formatInTimeZone(date, userTimezone, "h:mm a");
     } catch (e) {
         console.error("Message time formatting failed:", e);
         return timestamp;

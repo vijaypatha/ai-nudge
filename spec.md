@@ -174,6 +174,28 @@ This is the fundamental engine of the application:
 - **Behavior Profiling:** User interaction pattern analysis
 - **Performance Optimization:** Continuous improvement based on outcomes
 
+### **6. Seamless Timezone Scheduling**
+- **Zero Timezone Complexity:** Users schedule messages in their local time without any timezone selection
+- **Automatic Detection:** System automatically detects user's timezone from browser
+- **Backend Handles Everything:** 
+  - User picks time in their local timezone
+  - Frontend sends local time + detected timezone to backend
+  - Backend converts to UTC for storage
+  - Backend handles all timezone conversions for delivery
+- **Minimal Click Workflow:**
+  1. Click "Schedule" → Opens modal with default time (30 min from now)
+  2. Type message → Write the message content
+  3. Pick time → Use the datetime picker (optional, default is fine)
+  4. Click "Schedule Message" → Done!
+- **Benefits:**
+  - ✅ Zero timezone complexity for users
+  - ✅ Automatic detection of user's timezone
+  - ✅ Simple interface - just date/time picker
+  - ✅ Backend handles everything - conversions, storage, delivery
+  - ✅ Works globally - any timezone, any user
+  - ✅ Minimal clicks - just pick time and send
+  - ✅ Dead simple: pick a time, write a message, schedule it. Everything else is handled automatically by the system
+
 ---
 
 ## **Development Workflow**

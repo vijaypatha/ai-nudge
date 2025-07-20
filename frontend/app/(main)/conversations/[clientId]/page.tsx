@@ -104,18 +104,33 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         const fetchClientAndConversation = async () => {
             if (!clientId || !api) return;
             setPageState('loading');
+            
+            // Add timeout to prevent hanging
+            const timeoutId = setTimeout(() => {
+                console.warn(`Timeout while fetching client ${clientId}`);
+                setPageState('error');
+            }, 10000); // 10 second timeout
+            
             try {
                 const clientData = await api.get(`/api/clients/${clientId}`);
+                clearTimeout(timeoutId);
                 setSelectedClient(clientData);
                 await fetchConversationData(clientId);
                 setPageState('loaded');
             } catch (error) {
+                clearTimeout(timeoutId);
                 console.error("Failed to fetch client:", error);
+                // If client doesn't exist, redirect to dashboard
+                if (error instanceof Error && error.message.includes('404')) {
+                    console.log(`Client ${clientId} not found, redirecting to dashboard`);
+                    router.push('/dashboard');
+                    return;
+                }
                 setPageState('error');
             }
         };
         fetchClientAndConversation();
-    }, [clientId, api, fetchConversationData]);
+    }, [clientId, api, fetchConversationData, router]);
 
     const handlersRef = useRef({ fetchConversationData, refreshConversations });
 
@@ -126,7 +141,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     useEffect(() => {
         if (!clientId || !token) return;
 
-        const wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+        const wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8001';
         const wsUrl = `${wsBaseUrl}/api/ws/${clientId}?token=${token}`;
 
         console.log(`WS: Attempting to connect to ${wsUrl}`);
@@ -169,7 +184,6 @@ export default function ConversationPage({ params }: ConversationPageProps) {
 
         try {
             await api.post(`/api/conversations/${selectedClient.id}/send_reply`, { content });
-            setTimeout(() => fetchConversationData(selectedClient.id), 1000);
             refreshConversations();
         } catch (err) {
             console.error("Failed to send message:", err);
