@@ -58,7 +58,7 @@ NEXT_PUBLIC_API_URL=https://your-backend-url.com
 
 ### Step 2: Deploy with Blueprint
 
-1. Render will automatically detect the `render.yaml` file
+1. Render will automatically detect the `backend/deployment/render.yaml` file
 2. Configure the following services:
    - **ai-nudge-backend**: Main API service
    - **ai-nudge-celery-worker**: Background task processing
@@ -163,24 +163,27 @@ CREATE USER ai_nudge_user WITH PASSWORD 'your-password';
 GRANT ALL PRIVILEGES ON DATABASE ai_nudge_db TO ai_nudge_user;
 ```
 
-## 🔧 Build Script Usage
+## 🔧 Build Scripts
 
-The `build.sh` script is designed for Render deployment and handles:
+### Render Build Scripts
 
-- Automatic detection of build type (backend/frontend)
-- Python dependency installation
-- Node.js dependency installation
-- Database initialization
-- Application startup
+- **`render-build.sh`**: Simplified build script for Render deployment
+- **`build.sh`**: Comprehensive build script with error handling
+
+### Vercel Build Scripts
+
+- **`deploy-vercel.sh`**: Automated Vercel deployment script
 
 ### Usage
 
 ```bash
-# Make executable
-chmod +x build.sh
+# For Render deployment
+chmod +x render-build.sh
+./render-build.sh
 
-# Run build script
-./build.sh
+# For Vercel deployment
+chmod +x deploy-vercel.sh
+./deploy-vercel.sh frontend
 ```
 
 ## 🚨 Troubleshooting

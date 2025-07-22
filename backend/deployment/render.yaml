@@ -4,7 +4,7 @@ services:
     name: ai-nudge-backend
     env: python
     plan: starter
-    buildCommand: cd backend && pip install -r requirements.txt
+    buildCommand: pip install -r backend/requirements.txt
     startCommand: cd backend && uvicorn api.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHONPATH
@@ -38,7 +38,7 @@ services:
     name: ai-nudge-celery-worker
     env: python
     plan: starter
-    buildCommand: cd backend && pip install -r requirements.txt
+    buildCommand: pip install -r backend/requirements.txt
     startCommand: cd backend && celery -A celery_worker.celery_app worker --loglevel=info
     envVars:
       - key: PYTHONPATH
@@ -72,7 +72,7 @@ services:
     name: ai-nudge-celery-beat
     env: python
     plan: starter
-    buildCommand: cd backend && pip install -r requirements.txt
+    buildCommand: pip install -r backend/requirements.txt
     startCommand: cd backend && celery -A celery_worker.celery_app beat --loglevel=info
     envVars:
       - key: PYTHONPATH
