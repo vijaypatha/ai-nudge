@@ -2,10 +2,10 @@ services:
   # Main Backend API Service
   - type: web
     name: ai-nudge-backend
-    env: python
-    plan: free
+    [cite_start]env: docker # Changed from python to docker [cite: 3]
+    plan: free # Or hobby, standard, etc.
     rootDir: backend
-    buildCommand: pip install -r requirements-render.txt
+    # [cite_start]buildCommand removed - Dockerfile will now handle the build [cite: 3]
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHONPATH
@@ -27,26 +27,26 @@ services:
         sync: false
       - key: TWILIO_AUTH_TOKEN
         sync: false
-      # --- Only these Twilio variables now ---
       - key: TWILIO_DEFAULT_MESSAGING_SERVICE_SID
         sync: false
       - key: TWILIO_VERIFY_SERVICE_SID
         sync: false
-      # -------------------------------------
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
         sync: false
       - key: ENVIRONMENT
         value: production
+      - key: FRONTEND_APP_URL # Added this for backend to know frontend URL
+        sync: false
 
   # Celery Worker Service
   - type: web
     name: ai-nudge-celery-worker
-    env: python
-    plan: free
+    [cite_start]env: docker # Changed from python to docker [cite: 3]
+    plan: free # Or hobby, standard, etc.
     rootDir: backend
-    buildCommand: pip install -r requirements-render.txt
+    # [cite_start]buildCommand removed - Dockerfile will now handle the build [cite: 3]
     startCommand: celery -A celery_worker.celery_app worker --loglevel=info
     envVars:
       - key: PYTHONPATH
@@ -68,22 +68,22 @@ services:
         sync: false
       - key: TWILIO_AUTH_TOKEN
         sync: false
-      # --- Only these Twilio variables now ---
       - key: TWILIO_DEFAULT_MESSAGING_SERVICE_SID
         sync: false
       - key: TWILIO_VERIFY_SERVICE_SID
         sync: false
-      # -------------------------------------
       - key: ENVIRONMENT
         value: production
+      - key: FRONTEND_APP_URL # Added this for backend to know frontend URL
+        sync: false
 
   # Celery Beat Scheduler Service
   - type: web
     name: ai-nudge-celery-beat
-    env: python
-    plan: free
+    [cite_start]env: docker # Changed from python to docker [cite: 3]
+    plan: free # Or hobby, standard, etc.
     rootDir: backend
-    buildCommand: pip install -r requirements-render.txt
+    # [cite_start]buildCommand removed - Dockerfile will now handle the build [cite: 3]
     startCommand: celery -A celery_worker.celery_app beat --loglevel=info
     envVars:
       - key: PYTHONPATH
@@ -105,24 +105,24 @@ services:
         sync: false
       - key: TWILIO_AUTH_TOKEN
         sync: false
-      # --- Only these Twilio variables now ---
       - key: TWILIO_DEFAULT_MESSAGING_SERVICE_SID
         sync: false
       - key: TWILIO_VERIFY_SERVICE_SID
         sync: false
-      # -------------------------------------
       - key: ENVIRONMENT
         value: production
+      - key: FRONTEND_APP_URL # Added this for backend to know frontend URL
+        sync: false
 
   # Redis Service
-  - type: redis
+  - type: redis # Explicitly define as a Redis service
     name: ai-nudge-redis
-    plan: free
-    ipAllowList: []
+    plan: free # Or hobby, standard, etc. (must be a valid Redis plan)
+    ipAllowList: [] # Allow all internal Render IPs to connect
 
 databases:
   # PostgreSQL Database
   - name: ai-nudge-db
     databaseName: ai_nudge_db
     user: ai_nudge_user
-    plan: free
+    plan: free # Or hobby, standard, etc. (must be a valid PostgreSQL plan)
