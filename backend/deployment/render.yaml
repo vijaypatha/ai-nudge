@@ -4,11 +4,12 @@ services:
     name: ai-nudge-backend
     env: python
     plan: starter
-    buildCommand: pip install -r backend/requirements.txt
-    startCommand: cd backend && uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHONPATH
-        value: ./backend
+        value: .
       - key: DATABASE_URL
         fromDatabase:
           name: ai-nudge-db
@@ -38,11 +39,12 @@ services:
     name: ai-nudge-celery-worker
     env: python
     plan: starter
-    buildCommand: pip install -r backend/requirements.txt
-    startCommand: cd backend && celery -A celery_worker.celery_app worker --loglevel=info
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A celery_worker.celery_app worker --loglevel=info
     envVars:
       - key: PYTHONPATH
-        value: ./backend
+        value: .
       - key: DATABASE_URL
         fromDatabase:
           name: ai-nudge-db
@@ -72,11 +74,12 @@ services:
     name: ai-nudge-celery-beat
     env: python
     plan: starter
-    buildCommand: pip install -r backend/requirements.txt
-    startCommand: cd backend && celery -A celery_worker.celery_app beat --loglevel=info
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A celery_worker.celery_app beat --loglevel=info
     envVars:
       - key: PYTHONPATH
-        value: ./backend
+        value: .
       - key: DATABASE_URL
         fromDatabase:
           name: ai-nudge-db
@@ -104,8 +107,9 @@ services:
   # Frontend Static Site
   - type: static_site
     name: ai-nudge-frontend
-    buildCommand: cd frontend && npm ci && npm run build
-    staticPublishPath: ./frontend/.next
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: .next
     envVars:
       - key: NEXT_PUBLIC_API_URL
         value: https://ai-nudge-backend.onrender.com

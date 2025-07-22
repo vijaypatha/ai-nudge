@@ -58,12 +58,12 @@ NEXT_PUBLIC_API_URL=https://your-backend-url.com
 
 ### Step 2: Deploy with Blueprint
 
-1. Render will automatically detect the `backend/deployment/render.yaml` file
-2. Configure the following services:
-   - **ai-nudge-backend**: Main API service
-   - **ai-nudge-celery-worker**: Background task processing
-   - **ai-nudge-celery-beat**: Scheduled task processing
-   - **ai-nudge-frontend**: Static frontend site
+1. Render will automatically detect the `render.yaml` file in the root directory
+2. The blueprint defines the following services with proper `rootDir` configuration:
+   - **ai-nudge-backend**: Main API service (rootDir: backend)
+   - **ai-nudge-celery-worker**: Background task processing (rootDir: backend)
+   - **ai-nudge-celery-beat**: Scheduled task processing (rootDir: backend)
+   - **ai-nudge-frontend**: Static frontend site (rootDir: frontend)
    - **ai-nudge-db**: PostgreSQL database
    - **ai-nudge-redis**: Redis cache
 
@@ -74,7 +74,7 @@ For each service, add the required environment variables:
 #### Backend Services (ai-nudge-backend, ai-nudge-celery-worker, ai-nudge-celery-beat)
 
 ```bash
-PYTHONPATH=./backend
+PYTHONPATH=.
 DATABASE_URL=<from database service>
 REDIS_URL=<from redis service>
 JWT_SECRET_KEY=<generate or set manually>
@@ -163,23 +163,49 @@ CREATE USER ai_nudge_user WITH PASSWORD 'your-password';
 GRANT ALL PRIVILEGES ON DATABASE ai_nudge_db TO ai_nudge_user;
 ```
 
-## 🔧 Build Scripts
+## 🔧 Build Configuration
 
-### Render Build Scripts
+### Monorepo Structure
 
-- **`render-build.sh`**: Simplified build script for Render deployment
-- **`build.sh`**: Comprehensive build script with error handling
+The AI Nudge project is a monorepo with the following structure:
+```
+ai-nudge/
+├── backend/          # Python FastAPI application
+├── frontend/         # Next.js application
+├── render.yaml       # Render blueprint configuration
+└── ...
+```
 
-### Vercel Build Scripts
+### Render Blueprint Configuration
 
+The `render.yaml` file properly configures each service with the correct `rootDir`:
+
+```yaml
+# Backend services
+- type: web
+  name: ai-nudge-backend
+  rootDir: backend
+  buildCommand: pip install -r requirements.txt
+  startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+
+# Frontend service
+- type: static_site
+  name: ai-nudge-frontend
+  rootDir: frontend
+  buildCommand: npm ci && npm run build
+  staticPublishPath: .next
+```
+
+### Build Scripts
+
+- **`render.yaml`**: Main blueprint configuration for Render
 - **`deploy-vercel.sh`**: Automated Vercel deployment script
 
 ### Usage
 
 ```bash
-# For Render deployment
-chmod +x render-build.sh
-./render-build.sh
+# For Render deployment (uses render.yaml blueprint)
+# Just connect your repository to Render and use the blueprint
 
 # For Vercel deployment
 chmod +x deploy-vercel.sh
