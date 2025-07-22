@@ -119,4 +119,5 @@ databases:
 
   # Redis Database
   - name: ai-nudge-redis
+    type: redis
     plan: free 
