@@ -70,14 +70,23 @@ async def get_all_campaigns(
             # Create a campaign briefing for each content recommendation
             content_briefing = CampaignBriefing(
                 id=recommendation['resource']['id'],
+                user_id=current_user.id,
                 campaign_type='content_recommendation',
-                title=f"Content: {recommendation['resource']['title']}",
-                description=recommendation['resource']['description'],
+                headline=f"Content: {recommendation['resource']['title']}",
+                original_draft=recommendation['generated_message'],
                 matched_audience=recommendation['matched_clients'],
-                edited_draft=recommendation['generated_message'],
-                status='DRAFT',
-                created_at=recommendation['resource']['created_at'],
-                updated_at=recommendation['resource']['updated_at']
+                key_intel={
+                    'content_preview': {
+                        'content_type': recommendation['resource']['content_type'],
+                        'url': recommendation['resource']['url'],
+                        'title': recommendation['resource']['title'],
+                        'description': recommendation['resource']['description'],
+                        'categories': recommendation['resource']['categories']
+                    },
+                    'strategic_context': f"Share this {recommendation['resource']['content_type']} with your client",
+                    'trigger_source': 'Content Library'
+                },
+                status=CampaignStatus.DRAFT
             )
             content_briefings.append(content_briefing)
         

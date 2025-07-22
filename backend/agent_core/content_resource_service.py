@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 from uuid import UUID
 from sqlmodel import Session, select
 
-from data.models.resource import ContentResource
+from data.models.resource import ContentResource, Resource
 from data.models.client import Client
 from data.database import engine
 from agent_core.llm_client import get_chat_completion
@@ -20,13 +20,23 @@ def get_content_recommendations_for_user(user_id: UUID) -> List[Dict[str, Any]]:
     try:
         with Session(engine) as session:
             # Get all active content resources for the user
-            resources = session.exec(
+            content_resources = session.exec(
                 select(ContentResource)
                 .where(ContentResource.user_id == user_id)
                 .where(ContentResource.status == 'active')
             ).all()
             
-            if not resources:
+            # Get all active web_content resources for the user (for seeded data)
+            web_resources = session.exec(
+                select(Resource)
+                .where(Resource.user_id == user_id)
+                .where(Resource.status == 'active')
+                .where(Resource.resource_type == 'web_content')
+            ).all()
+            
+            all_resources = content_resources + web_resources
+            
+            if not all_resources:
                 return []
             
             # Get all clients for the user
@@ -37,17 +47,18 @@ def get_content_recommendations_for_user(user_id: UUID) -> List[Dict[str, Any]]:
             
             recommendations = []
             
-            for resource in resources:
+            for resource in all_resources:
                 # Find matching clients based on resource categories and client tags
-                matched_clients = find_matching_clients(resource, clients)
+                matched_clients = find_matching_clients_generic(resource, clients)
                 
                 if matched_clients:
                     # Generate personalized message for each matched client
                     for client in matched_clients:
-                        message = generate_resource_message_sync(resource, client)
+                        message = generate_resource_message_sync_generic(resource, client)
                         
-                        recommendation = {
-                            'resource': {
+                        # Extract resource data based on type
+                        if isinstance(resource, ContentResource):
+                            resource_data = {
                                 'id': resource.id,
                                 'title': resource.title,
                                 'description': resource.description,
@@ -56,11 +67,25 @@ def get_content_recommendations_for_user(user_id: UUID) -> List[Dict[str, Any]]:
                                 'content_type': resource.content_type,
                                 'created_at': resource.created_at,
                                 'updated_at': resource.updated_at
-                            },
+                            }
+                        else:  # Resource with web_content type
+                            resource_data = {
+                                'id': resource.id,
+                                'title': resource.attributes.get('title', ''),
+                                'description': resource.attributes.get('description', ''),
+                                'url': resource.attributes.get('url', ''),
+                                'categories': resource.attributes.get('categories', []),
+                                'content_type': resource.attributes.get('content_type', 'article'),
+                                'created_at': resource.created_at,
+                                'updated_at': resource.updated_at
+                            }
+                        
+                        recommendation = {
+                            'resource': resource_data,
                             'matched_clients': [{
                                 'client_id': client.id,
                                 'client_name': client.full_name,
-                                'match_reason': f"Matches categories: {', '.join(resource.categories)}"
+                                'match_reason': f"Matches categories: {', '.join(resource_data['categories'])}"
                             }],
                             'generated_message': message
                         }
@@ -83,6 +108,30 @@ def find_matching_clients(resource: ContentResource, clients: List[Client]) -> L
         client_tags = set(client.user_tags or [])
         client_ai_tags = set(client.ai_tags or [])
         resource_categories = set(resource.categories or [])
+        
+        # Check for any overlap between client tags and resource categories
+        if client_tags.intersection(resource_categories) or client_ai_tags.intersection(resource_categories):
+            matched_clients.append(client)
+    
+    return matched_clients
+
+def find_matching_clients_generic(resource, clients: List[Client]) -> List[Client]:
+    """
+    Find clients that match the content resource based on categories and tags.
+    Works with both ContentResource and Resource objects.
+    """
+    matched_clients = []
+    
+    for client in clients:
+        # Check if client tags match resource categories
+        client_tags = set(client.user_tags or [])
+        client_ai_tags = set(client.ai_tags or [])
+        
+        # Extract categories based on resource type
+        if isinstance(resource, ContentResource):
+            resource_categories = set(resource.categories or [])
+        else:  # Resource with web_content type
+            resource_categories = set(resource.attributes.get('categories', []) or [])
         
         # Check for any overlap between client tags and resource categories
         if client_tags.intersection(resource_categories) or client_ai_tags.intersection(resource_categories):
@@ -231,6 +280,47 @@ def generate_resource_message_sync(resource: ContentResource, client: Client) ->
         logging.error(f"Error generating resource message: {e}", exc_info=True)
         # Fallback message
         return f"Hi {client.full_name}, I thought you might find this {resource.content_type} helpful: {resource.url}"
+
+def generate_resource_message_sync_generic(resource, client: Client) -> str:
+    """
+    Generate a personalized message for sharing content with a client (synchronous version).
+    Works with both ContentResource and Resource objects.
+    """
+    try:
+        # Create a simple personalized message without LLM for now
+        client_name = client.full_name.split()[0] if client.full_name else "there"
+        
+        # Extract resource data based on type
+        if isinstance(resource, ContentResource):
+            content_type = resource.content_type
+            categories = resource.categories or []
+            description = resource.description
+            url = resource.url
+        else:  # Resource with web_content type
+            content_type = resource.attributes.get('content_type', 'article')
+            categories = resource.attributes.get('categories', []) or []
+            description = resource.attributes.get('description', '')
+            url = resource.attributes.get('url', '')
+        
+        if content_type == "video":
+            base_message = f"I found a helpful video about {', '.join(categories)} that might be useful."
+        elif content_type == "document":
+            base_message = f"I have a helpful guide about {', '.join(categories)} that includes practical strategies."
+        else:  # article or default
+            base_message = f"I found a helpful article about {', '.join(categories)} that might be useful."
+        
+        if description:
+            base_message += f" {description}"
+        
+        base_message += f"\n\nHere's the link: {url}"
+        base_message += "\n\nLet me know if you find it helpful!"
+        
+        return f"Hi {client_name}, {base_message}"
+        
+    except Exception as e:
+        logging.error(f"Error generating resource message: {e}", exc_info=True)
+        # Fallback message
+        return f"Hi {client.full_name}, I thought you might find this content helpful."
 
 async def generate_resource_message(resource: ContentResource, client: Client) -> str:
     """

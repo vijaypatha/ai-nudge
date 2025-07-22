@@ -40,6 +40,7 @@ services:
     # --- THIS BLOCK IS REVERTED TO THE SECURE SETTING ---
     environment:
       WEBSOCKET_ALLOWED_ORIGINS: '["http://localhost:3000"]'
+      PYTHONPATH: .
     env_file:
       - ./backend/.env
     volumes:
@@ -80,7 +81,7 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      - PYTHONPATH=/app
+      - PYTHONPATH=.
     command: celery -A celery_worker.celery_app worker --loglevel=info
     networks:
       - ai_nudge_net
@@ -101,7 +102,7 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      - PYTHONPATH=/app
+      - PYTHONPATH=.
     command: celery -A celery_worker.celery_app beat --loglevel=info
     networks:
       - ai_nudge_net

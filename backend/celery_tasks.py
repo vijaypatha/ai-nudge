@@ -4,16 +4,44 @@
 import logging
 import asyncio
 import uuid
+import os
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 from sqlmodel import Session, select
+
+# --- ADDED: Load dummy environment variables for direct execution ---
+if os.getenv("RUNNING_IN_CELERY") is None:
+    dummy_env = {
+        "OPENAI_API_KEY": "dummy_key",
+        "GOOGLE_API_KEY": "dummy_key",
+        "GOOGLE_CSE_ID": "dummy_id",
+        "TWILIO_ACCOUNT_SID": "dummy_sid",
+        "TWILIO_AUTH_TOKEN": "dummy_token",
+        "TWILIO_PHONE_NUMBER": "dummy_number",
+        "TWILIO_VERIFY_SERVICE_SID": "dummy_sid",
+        "DATABASE_URL": "postgresql://user:password@host:5432/database",
+        "SECRET_KEY": "dummy_secret",
+        "MLS_PROVIDER": "flexmls",
+        "SPARK_API_DEMO_TOKEN": "dummy_token",
+        "RESO_API_BASE_URL": "https://api.flexmls.com",
+        "RESO_API_TOKEN": "dummy_token",
+        "GOOGLE_CLIENT_ID": "dummy_id",
+        "GOOGLE_CLIENT_SECRET": "dummy_secret",
+        "GOOGLE_REDIRECT_URI": "http://localhost:3000/auth/callback/google",
+        "MICROSOFT_CLIENT_ID": "dummy_id",
+        "MICROSOFT_CLIENT_SECRET": "dummy_secret",
+        "MICROSOFT_REDIRECT_URI": "http://localhost:3000/auth/callback/microsoft"
+    }
+    os.environ.update(dummy_env)
 
 # --- FIX: Import the single, centralized Celery app instance ---
 from celery_worker import celery_app
 from data.database import engine
 from data.models.message import (Message, MessageStatus, MessageDirection, 
                                  MessageSource, MessageSenderType, ScheduledMessage)
+from workflow.pipeline import run_main_opportunity_pipeline
+
 from data.models.user import User
 from data.models.client import Client
 from data import crm as crm_service
@@ -239,14 +267,30 @@ def health_check_task() -> dict:
         return {"status": "unhealthy", "error": str(e)}
 
 # Legacy tasks for compatibility
-@celery_app.task
+@celery_app.task(name="celery_tasks.main_opportunity_pipeline_task")
 def main_opportunity_pipeline_task():
-    """Legacy task - kept for compatibility"""
-    logger.info("CELERY: Legacy pipeline task called - no action taken")
-    return {"status": "legacy_task"}
+    """
+    Celery entry point to trigger the main opportunity pipeline, which fetches
+    live data from external sources (like FlexMLS) and processes it to find nudges.
+    """
+    logger.info("CELERY: Triggering main opportunity pipeline...")
+    try:
+        # Run the asynchronous pipeline function
+        asyncio.run(run_main_opportunity_pipeline())
+        logger.info("CELERY: Main opportunity pipeline completed successfully.")
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"CELERY: Main opportunity pipeline failed: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
 
 @celery_app.task
 def check_for_recency_nudges_task():
     """Legacy task - kept for compatibility"""
     logger.info("CELERY: Legacy recency task called - no action taken")
     return {"status": "legacy_task"}
+
+if __name__ == "__main__":
+    logger.info("Triggering main opportunity pipeline manually...")
+    main_opportunity_pipeline_task.delay()
+    logger.info("Main opportunity pipeline task triggered.")

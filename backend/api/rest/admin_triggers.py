@@ -82,7 +82,9 @@ async def trigger_comprehensive_test_suite(current_user: User = Depends(get_curr
 
 @router.post("/run-market-scan", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_market_scan(minutes_ago: int = 60, current_user: User = Depends(get_current_user_from_token)):
-    await nudge_engine.scan_for_all_market_events(realtor=current_user, minutes_ago=minutes_ago)
+    """Trigger the main opportunity pipeline for the current user"""
+    from workflow.pipeline import run_main_opportunity_pipeline
+    await run_main_opportunity_pipeline()
     return {"status": "accepted", "message": f"Full market scan initiated for current user, looking back {minutes_ago} minutes."}
 
 @router.post("/run-daily-scan", status_code=status.HTTP_202_ACCEPTED)
@@ -103,7 +105,7 @@ from data.models.message import Message, MessageStatus, ScheduledMessage
 from data.models.user import User
 from api.security import get_current_user_from_token
 
-router = APIRouter(prefix="/admin", tags=["Admin"])
+# Use the existing router from above, just add the monitoring endpoints
 
 @router.get("/health")
 async def health_check() -> Dict[str, Any]:

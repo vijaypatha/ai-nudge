@@ -37,12 +37,75 @@ def _get_client_score_for_event(client: Client, event: MarketEvent, resource_emb
     # Directly call the function from the vertical's config file
     return scorer_function(client, event, resource_embedding, vertical_config)
 
+def _build_content_preview(event: MarketEvent, resource: Resource) -> Dict[str, Any]:
+    """
+    Builds a standardized content_preview object for the frontend ActionDeck.
+    This function centralizes the logic for extracting preview data from various
+    resource and event types, ensuring a consistent data structure.
+    """
+    logging.info(f"NUDGE_ENGINE: Building content preview for resource {resource.id} of type {resource.resource_type}")
+    
+    # Handle 'web_content' resources (e.g., YouTube videos, articles)
+    if resource.resource_type == "web_content":
+        attrs = resource.attributes
+        content_type = attrs.get("content_type", "article") # Default to article
+        if "youtube.com" in attrs.get("url", "") or "youtu.be" in attrs.get("url", ""):
+            content_type = "youtube"
+            
+        preview = {
+            "content_type": content_type,
+            "url": attrs.get("url"),
+            "image_url": attrs.get("thumbnail_url") or attrs.get("image_url"),
+            "title": attrs.get("title"),
+            "description": attrs.get("summary") or attrs.get("description"),
+            "details": {
+                "author": attrs.get("author"),
+                "duration": attrs.get("duration"),
+                "channel": attrs.get("channel_name"),
+                "views": attrs.get("views"),
+                "published_date": attrs.get("published_date"),
+                "reading_time": attrs.get("reading_time"),
+            }
+        }
+        logging.info(f"NUDGE_ENGINE: Built web_content preview: {preview}")
+        return preview
+
+    # Handle 'property' resources from MLS events
+    if resource.resource_type == "property":
+        attrs = resource.attributes
+        preview = {
+            "content_type": "property",
+            "url": attrs.get("listing_url"),
+            "image_url": next((media.get('MediaURL') for media in attrs.get('Media', []) if media.get('Order') == 0), None),
+            "title": attrs.get("UnparsedAddress", "Property Listing"),
+            "description": attrs.get("PublicRemarks"),
+            "details": {
+                "price": attrs.get("ListPrice"),
+                "bedrooms": attrs.get("BedroomsTotal"),
+                "bathrooms": attrs.get("BathroomsTotalInteger"),
+                "sqft": attrs.get("LivingArea"),
+                "status": attrs.get("MlsStatus"),
+            }
+        }
+        logging.info(f"NUDGE_ENGINE: Built property preview: {preview}")
+        return preview
+
+    logging.warning(f"NUDGE_ENGINE: No content preview builder found for resource type {resource.resource_type}. Returning empty object.")
+    return {}
+
+
 async def _create_campaign_from_event(event: MarketEvent, user: User, resource: Resource, matched_audience: list[MatchedClient], db_session: Session):
+    """
+    Creates a CampaignBriefing from a market event, now with a standardized
+    'content_preview' object within the key_intel field for the frontend.
+    """
     vertical_config = VERTICAL_CONFIGS.get(user.vertical, {})
     campaign_config = vertical_config.get("campaign_configs", {}).get(event.event_type)
     if not campaign_config:
+        logging.warning(f"NUDGE_ENGINE: No campaign config found for event type {event.event_type}. Cannot create campaign.")
         return
 
+    # --- Build Headline and Base Intel ---
     headline_context = {
         "address": resource.attributes.get('UnparsedAddress', 'N/A'),
         "client_name": resource.attributes.get('full_name', 'N/A')
@@ -50,10 +113,18 @@ async def _create_campaign_from_event(event: MarketEvent, user: User, resource: 
     headline = campaign_config["headline"].format(**headline_context)
     key_intel = campaign_config["intel_builder"](event, resource)
 
+    # --- SURGICAL MODIFICATION: Add the standardized content preview ---
+    # This ensures the frontend ActionDeck always has the data it needs.
+    key_intel["content_preview"] = _build_content_preview(event, resource)
+    logging.info(f"NUDGE_ENGINE: Final key_intel for campaign: {key_intel}")
+    # --- END MODIFICATION ---
+
+    # --- Generate AI Draft ---
     ai_draft = await conversation_agent.draft_outbound_campaign_message(
         realtor=user, resource=resource, event_type=event.event_type, matched_audience=matched_audience
     )
 
+    # --- Create and Save the CampaignBriefing ---
     audience_for_db = [m.model_dump(mode='json') for m in matched_audience]
     new_briefing = CampaignBriefing(
         id=uuid.uuid4(),
@@ -62,12 +133,12 @@ async def _create_campaign_from_event(event: MarketEvent, user: User, resource: 
         campaign_type=event.event_type,
         status=CampaignStatus.DRAFT,
         headline=headline,
-        key_intel=key_intel,
-        listing_url=resource.attributes.get('listing_url'),
+        key_intel=key_intel, # This now contains the content_preview
         original_draft=ai_draft,
         matched_audience=audience_for_db
     )
     db_session.add(new_briefing)
+    logging.info(f"NUDGE_ENGINE: Successfully created CampaignBriefing {new_briefing.id} for event {event.id}.")
 
 async def process_market_event(event: MarketEvent, user: User, db_session: Session):
     vertical_config = VERTICAL_CONFIGS.get(user.vertical)
@@ -101,12 +172,13 @@ async def process_market_event(event: MarketEvent, user: User, db_session: Sessi
             db_session.add(resource)
         else:
             resource_create_payload = ResourceCreate(
+                user_id=user.id,
                 resource_type=resource_type,
                 status="active",
                 attributes=resource_payload,
                 entity_id=entity_identifier
             )
-            resource = Resource.model_validate(resource_create_payload, update={'user_id': user.id})
+            resource = Resource.model_validate(resource_create_payload)
             db_session.add(resource)
             db_session.flush()
             db_session.refresh(resource)
@@ -126,9 +198,10 @@ async def process_market_event(event: MarketEvent, user: User, db_session: Sessi
             logging.info(f"No existing resource found for entity_id {event.entity_id}. Creating new one.")
             resource_payload['listing_url'] = next((media['MediaURL'] for media in resource_payload.get('Media', []) if media.get('Order') == 0), None)
             resource_create_payload = ResourceCreate(
+                user_id=user.id,
                 resource_type="property", status="active", attributes=resource_payload, entity_id=event.entity_id
             )
-            resource = Resource.model_validate(resource_create_payload, update={'user_id': user.id})
+            resource = Resource.model_validate(resource_create_payload)
             db_session.add(resource)
             db_session.flush() # Flush to get the ID for the new resource
             db_session.refresh(resource)

@@ -38,6 +38,7 @@ class Resource(SQLModel, table=True):
 
 class ResourceCreate(SQLModel):
     """Defines the structure for creating a new resource."""
+    user_id: UUID
     resource_type: ResourceType
     status: ResourceStatus = ResourceStatus.ACTIVE
     entity_id: Optional[str] = None
