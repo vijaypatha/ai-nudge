@@ -3,14 +3,14 @@
   "name": "ai-nudge-backend",
   "builds": [
     {
-      "src": "api/main.py",
+      "src": "api/vercel_handler.py",
       "use": "@vercel/python"
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "api/main.py"
+      "dest": "api/vercel_handler.py"
     }
   ],
   "env": {
@@ -18,7 +18,7 @@
     "ENVIRONMENT": "production"
   },
   "functions": {
-    "api/main.py": {
+    "api/vercel_handler.py": {
       "maxDuration": 30
     }
   },
