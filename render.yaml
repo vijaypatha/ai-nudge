@@ -5,8 +5,7 @@ services:
     env: docker
     plan: free
     rootDir: backend
-    # buildCommand is removed as it's handled by Dockerfile now
-    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    # startCommand removed as it's defined in Dockerfile
     envVars:
       - key: PYTHONPATH
         value: .
@@ -38,24 +37,24 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: FRONTEND_APP_URL
-        sync: false # Set this value manually in Render dashboard to your Vercel frontend URL
-      - key: GOOGLE_API_KEY # Added from your .env
         sync: false
-      - key: GOOGLE_CSE_ID # Added from your .env
+      - key: GOOGLE_API_KEY
         sync: false
-      - key: FAQ_AUTO_REPLY_ENABLED # Added from your .env
+      - key: GOOGLE_CSE_ID
         sync: false
-      - key: MLS_PROVIDER # Added from your .env
+      - key: FAQ_AUTO_REPLY_ENABLED
         sync: false
-      - key: SPARK_API_DEMO_TOKEN # Added from your .env
+      - key: MLS_PROVIDER
         sync: false
-      - key: RESO_API_BASE_URL # Added from your .env
+      - key: SPARK_API_DEMO_TOKEN
         sync: false
-      - key: RESO_API_TOKEN # Added from your .env
+      - key: RESO_API_BASE_URL
         sync: false
-      - key: LLM_PROVIDER # Added from your .env
+      - key: RESO_API_TOKEN
         sync: false
-      - key: SECRET_KEY # Added from your .env
+      - key: LLM_PROVIDER
+        sync: false
+      - key: SECRET_KEY
         sync: false
 
 
@@ -65,8 +64,7 @@ services:
     env: docker
     plan: free
     rootDir: backend
-    # buildCommand removed
-    startCommand: celery -A celery_worker.celery_app worker --loglevel=info
+    # startCommand removed as it's defined in Dockerfile
     envVars:
       - key: PYTHONPATH
         value: .
@@ -121,8 +119,7 @@ services:
     env: docker
     plan: free
     rootDir: backend
-    # buildCommand removed
-    startCommand: celery -A celery_worker.celery_app beat --loglevel=info
+    # startCommand removed as it's defined in Dockerfile
     envVars:
       - key: PYTHONPATH
         value: .
