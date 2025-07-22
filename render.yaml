@@ -1,0 +1,124 @@
+services:
+  # Main Backend API Service
+  - type: web
+    name: ai-nudge-backend
+    env: python
+    plan: starter
+    buildCommand: bash build-simple.sh
+    startCommand: cd backend && uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHONPATH
+        value: ./backend
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-nudge-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ai-nudge-redis
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: ENVIRONMENT
+        value: production
+
+  # Celery Worker Service
+  - type: background_worker
+    name: ai-nudge-celery-worker
+    env: python
+    plan: starter
+    buildCommand: bash build-simple.sh
+    startCommand: cd backend && celery -A celery_worker.celery_app worker --loglevel=info
+    envVars:
+      - key: PYTHONPATH
+        value: ./backend
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-nudge-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ai-nudge-redis
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        fromService:
+          type: web
+          name: ai-nudge-backend
+          property: envVar
+          key: JWT_SECRET_KEY
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: ENVIRONMENT
+        value: production
+
+  # Celery Beat Scheduler Service
+  - type: background_worker
+    name: ai-nudge-celery-beat
+    env: python
+    plan: starter
+    buildCommand: bash build-simple.sh
+    startCommand: cd backend && celery -A celery_worker.celery_app beat --loglevel=info
+    envVars:
+      - key: PYTHONPATH
+        value: ./backend
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-nudge-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ai-nudge-redis
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        fromService:
+          type: web
+          name: ai-nudge-backend
+          property: envVar
+          key: JWT_SECRET_KEY
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: ENVIRONMENT
+        value: production
+
+  # Frontend Static Site
+  - type: static_site
+    name: ai-nudge-frontend
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/.next
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://ai-nudge-backend.onrender.com
+      - key: NEXT_PUBLIC_ENVIRONMENT
+        value: production
+
+databases:
+  # PostgreSQL Database
+  - name: ai-nudge-db
+    databaseName: ai_nudge_db
+    user: ai_nudge_user
+    plan: starter
+
+  # Redis Database
+  - name: ai-nudge-redis
+    plan: starter 
