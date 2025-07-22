@@ -3,7 +3,7 @@ services:
   - type: web
     name: ai-nudge-backend
     env: python
-    plan: free
+    plan: free # Or hobby, standard, etc.
     rootDir: backend
     buildCommand: pip install -r requirements-render.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
@@ -38,7 +38,7 @@ services:
   - type: web
     name: ai-nudge-celery-worker
     env: python
-    plan: free
+    plan: free # Or hobby, standard, etc.
     rootDir: backend
     buildCommand: pip install -r requirements-render.txt
     startCommand: celery -A celery_worker.celery_app worker --loglevel=info
@@ -69,7 +69,7 @@ services:
   - type: web
     name: ai-nudge-celery-beat
     env: python
-    plan: free
+    plan: free # Or hobby, standard, etc.
     rootDir: backend
     buildCommand: pip install -r requirements-render.txt
     startCommand: celery -A celery_worker.celery_app beat --loglevel=info
@@ -100,24 +100,24 @@ services:
   - type: web
     name: ai-nudge-frontend
     env: node
-    plan: starter
+    plan: starter # Or free, standard, etc. for Node.js web services
     rootDir: frontend
     buildCommand: npm ci && npm run build
     startCommand: npm start
     envVars:
       - key: NEXT_PUBLIC_API_URL
-        value: https://ai-nudge-backend.onrender.com
+        value: https://ai-nudge-backend.onrender.com # IMPORTANT: Update this to your actual deployed backend URL
       - key: NEXT_PUBLIC_ENVIRONMENT
         value: production
+
+  # Redis Service (Moved from 'databases' section)
+  - type: redis # Explicitly define as a Redis service
+    name: ai-nudge-redis
+    plan: free # Or hobby, standard, etc. (must be a valid Redis plan)
 
 databases:
   # PostgreSQL Database
   - name: ai-nudge-db
     databaseName: ai_nudge_db
     user: ai_nudge_user
-    plan: free
-
-  # Redis Database
-  - name: ai-nudge-redis
-    type: redis
-    plan: free
+    plan: free # Or hobby, standard, etc. (must be a valid PostgreSQL plan)
