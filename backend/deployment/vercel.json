@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "name": "ai-nudge-backend",
+  "builds": [
+    {
+      "src": "api/main.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "api/main.py"
+    }
+  ],
+  "env": {
+    "PYTHONPATH": ".",
+    "ENVIRONMENT": "production"
+  },
+  "functions": {
+    "api/main.py": {
+      "maxDuration": 30
+    }
+  },
+  "regions": ["iad1"]
+}
