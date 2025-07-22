@@ -3,7 +3,7 @@ services:
   - type: web
     name: ai-nudge-backend
     env: python
-    plan: starter
+    plan: free
     rootDir: backend
     buildCommand: pip install -r requirements-render.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
@@ -38,7 +38,7 @@ services:
   - type: web
     name: ai-nudge-celery-worker
     env: python
-    plan: starter
+    plan: free
     rootDir: backend
     buildCommand: pip install -r requirements-render.txt
     startCommand: celery -A celery_worker.celery_app worker --loglevel=info
