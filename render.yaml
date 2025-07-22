@@ -115,8 +115,8 @@ databases:
   - name: ai-nudge-db
     databaseName: ai_nudge_db
     user: ai_nudge_user
-    plan: starter
+    plan: free
 
   # Redis Database
   - name: ai-nudge-redis
-    plan: starter 
+    plan: free 
