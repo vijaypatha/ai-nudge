@@ -3,7 +3,7 @@ services:
   - type: web
     name: ai-nudge-backend
     env: python
-    plan: free # Or hobby, standard, etc.
+    plan: free
     rootDir: backend
     buildCommand: pip install -r requirements-render.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
@@ -38,7 +38,7 @@ services:
   - type: web
     name: ai-nudge-celery-worker
     env: python
-    plan: free # Or hobby, standard, etc.
+    plan: free
     rootDir: backend
     buildCommand: pip install -r requirements-render.txt
     startCommand: celery -A celery_worker.celery_app worker --loglevel=info
@@ -69,7 +69,7 @@ services:
   - type: web
     name: ai-nudge-celery-beat
     env: python
-    plan: free # Or hobby, standard, etc.
+    plan: free
     rootDir: backend
     buildCommand: pip install -r requirements-render.txt
     startCommand: celery -A celery_worker.celery_app beat --loglevel=info
@@ -100,13 +100,13 @@ services:
   - type: web
     name: ai-nudge-frontend
     env: node
-    plan: starter # Or free, standard, etc. for Node.js web services
+    plan: starter
     rootDir: frontend
     buildCommand: npm ci && npm run build
     startCommand: npm start
     envVars:
       - key: NEXT_PUBLIC_API_URL
-        value: https://ai-nudge-backend.onrender.com # IMPORTANT: Update this to your actual deployed backend URL
+        value: https://ai-nudge-backend.onrender.com
       - key: NEXT_PUBLIC_ENVIRONMENT
         value: production
 
@@ -114,6 +114,7 @@ services:
   - type: redis # Explicitly define as a Redis service
     name: ai-nudge-redis
     plan: free # Or hobby, standard, etc. (must be a valid Redis plan)
+    ipAllowList: [] # Allow all internal Render IPs to connect
 
 databases:
   # PostgreSQL Database
