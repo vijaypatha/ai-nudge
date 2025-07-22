@@ -55,11 +55,7 @@ services:
           name: ai-nudge-redis
           property: connectionString
       - key: JWT_SECRET_KEY
-        fromService:
-          type: web
-          name: ai-nudge-backend
-          property: envVar
-          key: JWT_SECRET_KEY
+        generateValue: true
       - key: OPENAI_API_KEY
         sync: false
       - key: TWILIO_ACCOUNT_SID
@@ -90,11 +86,7 @@ services:
           name: ai-nudge-redis
           property: connectionString
       - key: JWT_SECRET_KEY
-        fromService:
-          type: web
-          name: ai-nudge-backend
-          property: envVar
-          key: JWT_SECRET_KEY
+        generateValue: true
       - key: OPENAI_API_KEY
         sync: false
       - key: TWILIO_ACCOUNT_SID
