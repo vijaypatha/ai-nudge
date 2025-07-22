@@ -2,10 +2,10 @@ services:
   # Main Backend API Service
   - type: web
     name: ai-nudge-backend
-    [cite_start]env: docker # Changed from python to docker [cite: 3]
-    plan: free # Or hobby, standard, etc.
+    env: docker
+    plan: free
     rootDir: backend
-    # [cite_start]buildCommand removed - Dockerfile will now handle the build [cite: 3]
+    # buildCommand is removed as it's handled by Dockerfile now
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHONPATH
@@ -37,16 +37,35 @@ services:
         sync: false
       - key: ENVIRONMENT
         value: production
-      - key: FRONTEND_APP_URL # Added this for backend to know frontend URL
+      - key: FRONTEND_APP_URL
+        sync: false # Set this value manually in Render dashboard to your Vercel frontend URL
+      - key: GOOGLE_API_KEY # Added from your .env
         sync: false
+      - key: GOOGLE_CSE_ID # Added from your .env
+        sync: false
+      - key: FAQ_AUTO_REPLY_ENABLED # Added from your .env
+        sync: false
+      - key: MLS_PROVIDER # Added from your .env
+        sync: false
+      - key: SPARK_API_DEMO_TOKEN # Added from your .env
+        sync: false
+      - key: RESO_API_BASE_URL # Added from your .env
+        sync: false
+      - key: RESO_API_TOKEN # Added from your .env
+        sync: false
+      - key: LLM_PROVIDER # Added from your .env
+        sync: false
+      - key: SECRET_KEY # Added from your .env
+        sync: false
+
 
   # Celery Worker Service
   - type: web
     name: ai-nudge-celery-worker
-    [cite_start]env: docker # Changed from python to docker [cite: 3]
-    plan: free # Or hobby, standard, etc.
+    env: docker
+    plan: free
     rootDir: backend
-    # [cite_start]buildCommand removed - Dockerfile will now handle the build [cite: 3]
+    # buildCommand removed
     startCommand: celery -A celery_worker.celery_app worker --loglevel=info
     envVars:
       - key: PYTHONPATH
@@ -74,16 +93,35 @@ services:
         sync: false
       - key: ENVIRONMENT
         value: production
-      - key: FRONTEND_APP_URL # Added this for backend to know frontend URL
+      - key: FRONTEND_APP_URL
         sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_ID
+        sync: false
+      - key: FAQ_AUTO_REPLY_ENABLED
+        sync: false
+      - key: MLS_PROVIDER
+        sync: false
+      - key: SPARK_API_DEMO_TOKEN
+        sync: false
+      - key: RESO_API_BASE_URL
+        sync: false
+      - key: RESO_API_TOKEN
+        sync: false
+      - key: LLM_PROVIDER
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+
 
   # Celery Beat Scheduler Service
   - type: web
     name: ai-nudge-celery-beat
-    [cite_start]env: docker # Changed from python to docker [cite: 3]
-    plan: free # Or hobby, standard, etc.
+    env: docker
+    plan: free
     rootDir: backend
-    # [cite_start]buildCommand removed - Dockerfile will now handle the build [cite: 3]
+    # buildCommand removed
     startCommand: celery -A celery_worker.celery_app beat --loglevel=info
     envVars:
       - key: PYTHONPATH
@@ -111,18 +149,36 @@ services:
         sync: false
       - key: ENVIRONMENT
         value: production
-      - key: FRONTEND_APP_URL # Added this for backend to know frontend URL
+      - key: FRONTEND_APP_URL
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_ID
+        sync: false
+      - key: FAQ_AUTO_REPLY_ENABLED
+        sync: false
+      - key: MLS_PROVIDER
+        sync: false
+      - key: SPARK_API_DEMO_TOKEN
+        sync: false
+      - key: RESO_API_BASE_URL
+        sync: false
+      - key: RESO_API_TOKEN
+        sync: false
+      - key: LLM_PROVIDER
+        sync: false
+      - key: SECRET_KEY
         sync: false
 
   # Redis Service
-  - type: redis # Explicitly define as a Redis service
+  - type: redis
     name: ai-nudge-redis
-    plan: free # Or hobby, standard, etc. (must be a valid Redis plan)
-    ipAllowList: [] # Allow all internal Render IPs to connect
+    plan: free
+    ipAllowList: []
 
 databases:
   # PostgreSQL Database
   - name: ai-nudge-db
     databaseName: ai_nudge_db
     user: ai_nudge_user
-    plan: free # Or hobby, standard, etc. (must be a valid PostgreSQL plan)
+    plan: free
