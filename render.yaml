@@ -104,12 +104,14 @@ services:
       - key: ENVIRONMENT
         value: production
 
-  # Frontend Static Site
-  - type: static_site
+  # Frontend Web Service
+  - type: web
     name: ai-nudge-frontend
+    env: node
+    plan: starter
     rootDir: frontend
     buildCommand: npm ci && npm run build
-    staticPublishPath: .next
+    startCommand: npm start
     envVars:
       - key: NEXT_PUBLIC_API_URL
         value: https://ai-nudge-backend.onrender.com
