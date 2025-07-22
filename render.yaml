@@ -5,7 +5,7 @@ services:
     env: python
     plan: starter
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements-render.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHONPATH
@@ -35,12 +35,12 @@ services:
         value: production
 
   # Celery Worker Service
-  - type: background_worker
+  - type: web
     name: ai-nudge-celery-worker
     env: python
     plan: starter
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements-render.txt
     startCommand: celery -A celery_worker.celery_app worker --loglevel=info
     envVars:
       - key: PYTHONPATH
@@ -70,12 +70,12 @@ services:
         value: production
 
   # Celery Beat Scheduler Service
-  - type: background_worker
+  - type: web
     name: ai-nudge-celery-beat
     env: python
     plan: starter
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements-render.txt
     startCommand: celery -A celery_worker.celery_app beat --loglevel=info
     envVars:
       - key: PYTHONPATH
