@@ -17,6 +17,7 @@ click-repl==0.3.0
 distro==1.9.0
 dnspython==2.7.0
 email_validator==2.2.0
+faiss-cpu==1.8.0
 fastapi==0.111.0
 fastapi-cli==0.0.7
 frozenlist==1.7.0
@@ -40,8 +41,9 @@ pluggy==1.6.0
 prompt_toolkit==3.0.51
 propcache==0.3.2
 psycopg2-binary==2.9.10
-pydantic>=2.8.0
-pydantic-settings>=2.10.1
+pydantic==2.7.1
+pydantic-settings==2.10.1
+pydantic_core==2.18.2
 Pygments==2.19.2
 PyJWT==2.10.1
 pytest==8.4.1
@@ -53,6 +55,7 @@ PyYAML==6.0.2
 redis==5.0.7
 requests==2.31.0
 rich==14.0.0
+sentence-transformers==3.0.1
 rich-toolkit==0.14.7
 shellingham==1.5.4
 six==1.17.0
@@ -85,4 +88,4 @@ google-auth-httplib2
 google-auth-oauthlib
 msal
 thefuzz
-pytz==2024.1
+pytz==2024.1 
