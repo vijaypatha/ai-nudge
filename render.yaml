@@ -27,6 +27,12 @@ services:
         sync: false
       - key: TWILIO_AUTH_TOKEN
         sync: false
+      # --- Only these Twilio variables now ---
+      - key: TWILIO_DEFAULT_MESSAGING_SERVICE_SID
+        sync: false
+      - key: TWILIO_VERIFY_SERVICE_SID
+        sync: false
+      # -------------------------------------
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
@@ -62,6 +68,12 @@ services:
         sync: false
       - key: TWILIO_AUTH_TOKEN
         sync: false
+      # --- Only these Twilio variables now ---
+      - key: TWILIO_DEFAULT_MESSAGING_SERVICE_SID
+        sync: false
+      - key: TWILIO_VERIFY_SERVICE_SID
+        sync: false
+      # -------------------------------------
       - key: ENVIRONMENT
         value: production
 
@@ -93,32 +105,24 @@ services:
         sync: false
       - key: TWILIO_AUTH_TOKEN
         sync: false
+      # --- Only these Twilio variables now ---
+      - key: TWILIO_DEFAULT_MESSAGING_SERVICE_SID
+        sync: false
+      - key: TWILIO_VERIFY_SERVICE_SID
+        sync: false
+      # -------------------------------------
       - key: ENVIRONMENT
         value: production
 
-  # Frontend Web Service
-  - type: web
-    name: ai-nudge-frontend
-    env: node
-    plan: starter
-    rootDir: frontend
-    buildCommand: npm ci && npm run build
-    startCommand: npm start
-    envVars:
-      - key: NEXT_PUBLIC_API_URL
-        value: https://ai-nudge-backend.onrender.com
-      - key: NEXT_PUBLIC_ENVIRONMENT
-        value: production
-
-  # Redis Service (Moved from 'databases' section)
-  - type: redis # Explicitly define as a Redis service
+  # Redis Service
+  - type: redis
     name: ai-nudge-redis
-    plan: free # Or hobby, standard, etc. (must be a valid Redis plan)
-    ipAllowList: [] # Allow all internal Render IPs to connect
+    plan: free
+    ipAllowList: []
 
 databases:
   # PostgreSQL Database
   - name: ai-nudge-db
     databaseName: ai_nudge_db
     user: ai_nudge_user
-    plan: free # Or hobby, standard, etc. (must be a valid PostgreSQL plan)
+    plan: free
