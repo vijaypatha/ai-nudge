@@ -69,7 +69,7 @@ services:
   - type: web
     name: ai-nudge-celery-beat
     env: python
-    plan: starter
+    plan: free
     rootDir: backend
     buildCommand: pip install -r requirements-render.txt
     startCommand: celery -A celery_worker.celery_app beat --loglevel=info
