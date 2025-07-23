@@ -4,7 +4,7 @@ services:
     plan: free
     env: docker
     rootDir: backend
-    startCommand: "python run_migrations.py"
+    startCommand: "alembic upgrade head"
     envVars:
       - fromGroup: ainudge-env-group
 
