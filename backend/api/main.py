@@ -35,16 +35,13 @@ from data.database import create_db_and_tables
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Context manager to create database tables on startup.
-    This is the recommended way to handle startup/shutdown logic in FastAPI.
+    Context manager for application startup/shutdown logic.
+    Database initialization is now handled by a separate Render Job.
     """
     print("--- Application Startup ---")
-    create_db_and_tables()
-    
-    # Seed the database with test data
-    print("--- Seeding database with test data ---")
-    await seed_database()
-    print("--- Database seeding completed ---")
+    # create_db_and_tables() # This is now handled by the Render Job
+    # await seed_database()    # This is also handled by the Render Job
+    print("--- Application startup complete. ---")
     
     yield
     print("--- Application Shutdown ---")

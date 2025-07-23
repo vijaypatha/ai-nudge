@@ -1,4 +1,13 @@
 services:
+  - type: job
+    name: db-migration
+    plan: free
+    env: docker
+    rootDir: backend
+    startCommand: "python run_migrations.py"
+    envVars:
+      - fromGroup: ainudge-env-group
+
   # Main Backend API Service
   - type: web
     name: ai-nudge-backend
@@ -57,7 +66,6 @@ services:
       - key: SECRET_KEY
         sync: false
 
-
   # Celery Worker Service
   - type: web
     name: ai-nudge-celery-worker
@@ -111,7 +119,6 @@ services:
         sync: false
       - key: SECRET_KEY
         sync: false
-
 
   # Celery Beat Scheduler Service
   - type: web

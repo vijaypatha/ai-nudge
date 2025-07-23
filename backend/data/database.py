@@ -25,16 +25,18 @@ engine = create_engine(DATABASE_URL, echo=False)
 
 def create_db_and_tables():
     """
-    Initializes the database. It first DROPS ALL existing tables to ensure a
-    perfectly clean state, then creates all new tables based on the registered SQLModels.
+    Initializes the database. It creates all tables based on the registered SQLModels.
+    The destructive 'drop_all' command has been commented out for production safety.
     """
     print("DATABASE: Initializing database...")
     
-    print("DATABASE: Dropping all existing tables...")
-    SQLModel.metadata.drop_all(engine)
-    print("DATABASE: Tables dropped successfully.")
+    # ⚠️ DANGEROUS FOR PROD: This line is now commented out to prevent data loss.
+    # print("DATABASE: Dropping all existing tables...")
+    # SQLModel.metadata.drop_all(engine)
+    # print("DATABASE: Tables dropped successfully.")
 
     print("DATABASE: Creating new tables...")
+    # This safely creates only missing tables without deleting existing data.
     SQLModel.metadata.create_all(engine)
     print("DATABASE: Tables created successfully.")
 
