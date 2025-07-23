@@ -17,6 +17,7 @@ from data.database import engine
 from data.models.message import (MessageStatus, ScheduledMessage,
                                  ScheduledMessageCreate, ScheduledMessageUpdate)
 from data.models.user import User
+from data.database import get_session
 
 router = APIRouter(
     prefix="/scheduled-messages",
@@ -95,54 +96,59 @@ async def create_scheduled_message(
 async def update_scheduled_message(
     message_id: UUID,
     message_data: ScheduledMessageUpdate,
-    current_user: User = Depends(get_current_user_from_token)
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
 ):
     """
     Updates a pending scheduled message. Revokes the old Celery task and creates a new one.
     """
-    with Session(engine) as session:
-        db_message = crm_service.get_scheduled_message_by_id(message_id)
-        if not db_message or db_message.user_id != current_user.id:
-             raise HTTPException(status_code=404, detail="Scheduled message not found.")
+    db_message = crm_service.get_scheduled_message_by_id(message_id)
+    if not db_message or db_message.user_id != current_user.id:
+         raise HTTPException(status_code=404, detail="Scheduled message not found.")
 
-        if db_message.status != MessageStatus.PENDING:
-            raise HTTPException(status_code=400, detail="Can only edit messages that are pending.")
+    if db_message.status != MessageStatus.PENDING:
+        raise HTTPException(status_code=400, detail="Can only edit messages that are pending.")
 
-        # 1. Revoke the old Celery task
-        if db_message.celery_task_id:
-            celery_app.control.revoke(db_message.celery_task_id)
-            logging.info(f"API: Revoked old task {db_message.celery_task_id} for message {message_id}.")
+    # 1. Revoke the old Celery task
+    if db_message.celery_task_id:
+        celery_app.control.revoke(db_message.celery_task_id)
+        logging.info(f"API: Revoked old task {db_message.celery_task_id} for message {message_id}.")
 
-        # 2. Update fields
-        update_dict = message_data.model_dump(exclude_unset=True)
-        db_message.content = update_dict.get("content", db_message.content)
-        new_timezone_str = update_dict.get("timezone", db_message.timezone)
+    # 2. Update fields
+    update_dict = message_data.model_dump(exclude_unset=True)
+    db_message.content = update_dict.get("content", db_message.content)
+    new_timezone_str = update_dict.get("timezone", db_message.timezone)
 
-        # 3. Recalculate UTC time if time or timezone changed
-        new_local_time = update_dict.get("scheduled_at_local")
-        if new_local_time:
-            try:
-                tz = pytz.timezone(new_timezone_str)
-                if new_local_time.tzinfo is None:
-                    new_local_time = tz.localize(new_local_time)
-                db_message.scheduled_at_utc = new_local_time.astimezone(pytz.utc)
-                db_message.timezone = new_timezone_str
-            except pytz.UnknownTimeZoneError:
-                raise HTTPException(status_code=400, detail=f"Unknown timezone: '{new_timezone_str}'")
+    # 3. Recalculate UTC time if time or timezone changed
+    new_local_time = update_dict.get("scheduled_at_local")
+    if new_local_time:
+        try:
+            tz = pytz.timezone(new_timezone_str)
+            if new_local_time.tzinfo is None:
+                new_local_time = tz.localize(new_local_time)
+            db_message.scheduled_at_utc = new_local_time.astimezone(pytz.utc)
+            db_message.timezone = new_timezone_str
+        except pytz.UnknownTimeZoneError:
+            raise HTTPException(status_code=400, detail=f"Unknown timezone: '{new_timezone_str}'")
 
-        # 4. Schedule a new task with the message ID
-        from celery_tasks import send_scheduled_message_task
-        new_task = send_scheduled_message_task.apply_async(
-            (str(db_message.id),),  # Only pass the message ID
-            eta=db_message.scheduled_at_utc
-        )
-        db_message.celery_task_id = new_task.id
-        logging.info(f"API: Scheduled new task {new_task.id} for updated message {message_id}.")
+    # 4. Schedule a new task with the message ID
+    from celery_tasks import send_scheduled_message_task
+    new_task = send_scheduled_message_task.apply_async(
+        (str(db_message.id),),  # Only pass the message ID
+        eta=db_message.scheduled_at_utc
+    )
+    db_message.celery_task_id = new_task.id
+    logging.info(f"API: Scheduled new task {new_task.id} for updated message {message_id}.")
 
-        session.add(db_message)
-        session.commit()
-        session.refresh(db_message)
-        return db_message
+    # Update the message using the CRM service with the session
+    updated_message = crm_service.update_scheduled_message(
+        message_id=message_id,
+        update_data={"content": db_message.content, "celery_task_id": db_message.celery_task_id},
+        user_id=current_user.id,
+        session=session
+    )
+    
+    return updated_message
 
 
 @router.delete("/{message_id}", status_code=200, response_model=ScheduledMessage)

@@ -18,7 +18,7 @@ from agent_core import audience_builder
 from sqlalchemy import func
 from data.models.client import Client
 from data.models.message import MessageStatus
-from data.database import get_session as get_db
+from data.database import get_session
 
 
 router = APIRouter(prefix="/conversations", tags=["Conversations"])
@@ -41,8 +41,10 @@ class ConversationDetailResponse(BaseModel):
     immediate_recommendations: Optional[RecommendationSlateResponse] = None
     active_plan: Optional[RecommendationSlateResponse] = None
     
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
+
+# Rebuild the model to ensure all dependencies are resolved
+ConversationDetailResponse.model_rebuild()
 
 class SendReplyPayload(BaseModel):
     content: str
@@ -53,7 +55,7 @@ class ConversationSearchQuery(BaseModel):
 
 @router.get("", response_model=List[ConversationSummary])
 def get_conversations(
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
 ):
     """
@@ -140,36 +142,36 @@ def get_conversations(
 @router.get("/messages/", response_model=ConversationDetailResponse)
 async def get_conversation_history_by_client_id(
     client_id: uuid.UUID,
-    current_user: User = Depends(get_current_user_from_token)
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
 ):
     """
     Retrieves message history and separates active AI recommendations into an immediate
     slate and a long-term plan, prioritizing Co-Pilot briefings.
     """
     try:
-        with Session(crm_service.engine) as session:
-            history = crm_service.get_conversation_history(client_id=client_id, user_id=current_user.id)
-            
-            all_active_slates = crm_service.get_all_active_slates_for_client(
-                client_id=client_id, user_id=current_user.id, session=session
-            )
-            
-            # --- DEFINITIVE FIX IS HERE ---
-            # Explicitly find the Co-Pilot briefing. If it exists, it MUST be the immediate recommendation.
-            # This prevents the UI from accidentally showing an older, stale recommendation.
-            co_pilot_briefing = next((s for s in all_active_slates if s.campaign_type == 'co_pilot_briefing'), None)
-            
-            if co_pilot_briefing:
-                immediate_rec_slate = co_pilot_briefing
-                # The active plan is the one *associated* with the co-pilot briefing, which is now paused.
-                # We show the plan that IS paused, not a different DRAFT plan.
-                paused_plan_id_str = co_pilot_briefing.key_intel.get("paused_plan_id")
-                paused_plan_id = uuid.UUID(paused_plan_id_str) if paused_plan_id_str else None
-                active_plan_slate = session.get(CampaignBriefing, paused_plan_id) if paused_plan_id else None
-            else:
-                # Standard logic: find the latest draft plan and the latest draft recommendation.
-                immediate_rec_slate = next((s for s in all_active_slates if not s.is_plan), None)
-                active_plan_slate = next((s for s in all_active_slates if s.is_plan), None)
+        history = crm_service.get_conversation_history(client_id=client_id, user_id=current_user.id)
+        
+        all_active_slates = crm_service.get_all_active_slates_for_client(
+            client_id=client_id, user_id=current_user.id, session=session
+        )
+        
+        # --- DEFINITIVE FIX IS HERE ---
+        # Explicitly find the Co-Pilot briefing. If it exists, it MUST be the immediate recommendation.
+        # This prevents the UI from accidentally showing an older, stale recommendation.
+        co_pilot_briefing = next((s for s in all_active_slates if s.campaign_type == 'co_pilot_briefing'), None)
+        
+        if co_pilot_briefing:
+            immediate_rec_slate = co_pilot_briefing
+            # The active plan is the one *associated* with the co-pilot briefing, which is now paused.
+            # We show the plan that IS paused, not a different DRAFT plan.
+            paused_plan_id_str = co_pilot_briefing.key_intel.get("paused_plan_id")
+            paused_plan_id = uuid.UUID(paused_plan_id_str) if paused_plan_id_str else None
+            active_plan_slate = session.get(CampaignBriefing, paused_plan_id) if paused_plan_id else None
+        else:
+            # Standard logic: find the latest draft plan and the latest draft recommendation.
+            immediate_rec_slate = next((s for s in all_active_slates if not s.is_plan), None)
+            active_plan_slate = next((s for s in all_active_slates if s.is_plan), None)
 
         return ConversationDetailResponse(
             messages=history if history else [],

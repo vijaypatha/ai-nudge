@@ -24,21 +24,40 @@ async def test_mls_new_listing_event_creates_campaign(session: Session):
     with patch("agent_core.brain.nudge_engine.conversation_agent.draft_outbound_campaign_message", new_callable=AsyncMock) as mock_draft:
         mock_draft.return_value = "Check out this amazing new property!"
         
-        realtor = User(id=uuid.uuid4(), full_name="Test Realtor", email="realtor@test.com", phone_number="+15551112222")
+        realtor = User(
+            id=uuid.uuid4(), 
+            full_name="Test Realtor", 
+            email="realtor@test.com", 
+            phone_number="+15551112222",
+            vertical="real_estate"  # Set the vertical for the nudge engine
+        )
         
         matching_client = Client(
             id=uuid.uuid4(), user_id=realtor.id, full_name="Matching Client",
             email="matching@test.com", phone_number="+15553334444",
-            preferences={"budget_max": 800000, "locations": ["Pleasant Grove"], "min_bedrooms": 4}
+            preferences={
+                "budget_max": 800000, 
+                "locations": ["Pleasant Grove"], 
+                "min_bedrooms": 4
+            },
+            user_tags=["buyer"]  # Add the buyer tag
         )
         session.add(realtor)
         session.add(matching_client)
         
         # --- MODIFIED: This payload is now stored in the 'attributes' field of a Resource ---
         property_attributes = {
-            "address": "123 Main St, Pleasant Grove, UT", "price": 750000.0, "bedrooms": 4,
-            "property_type": "SingleFamily", "listing_url": "http://example.com/123",
-            "last_updated": "2025-07-07T12:00:00Z"
+            "address": "123 Main St, Pleasant Grove, UT", 
+            "price": 750000.0, 
+            "bedrooms": 4,
+            "property_type": "SingleFamily", 
+            "listing_url": "http://example.com/123",
+            "last_updated": "2025-07-07T12:00:00Z",
+            "ListPrice": 750000,  # Add the ListPrice field that the scoring function expects
+            "BedroomsTotal": 4,    # Add the BedroomsTotal field
+            "City": "Pleasant Grove",  # Add the City field
+            "SubdivisionName": "Pleasant Grove",  # Add the SubdivisionName field
+            "PublicRemarks": "Beautiful home in Pleasant Grove with 4 bedrooms"  # Add remarks for scoring
         }
         entity_id = uuid.uuid5(uuid.NAMESPACE_DNS, property_attributes["address"])
 
@@ -60,7 +79,7 @@ async def test_mls_new_listing_event_creates_campaign(session: Session):
         )
 
         # 2. ACT
-        await nudge_engine.process_market_event(event=new_listing_event, realtor=realtor, db_session=session)
+        await nudge_engine.process_market_event(event=new_listing_event, user=realtor, db_session=session)
 
         # 3. ASSERT
         statement = select(CampaignBriefing).where(CampaignBriefing.user_id == realtor.id)

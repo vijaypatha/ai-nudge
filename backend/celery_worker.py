@@ -3,9 +3,11 @@
 
 from celery import Celery
 from celery.schedules import crontab
+from common.config import get_settings
 
-# Define the Redis URL for our message broker.
-REDIS_URL = "redis://redis:6379/0" # Use the service name 'redis' from docker-compose
+# Get Redis URL from configuration
+settings = get_settings()
+REDIS_URL = settings.REDIS_URL
 
 # Create the Celery app instance with production-grade configuration
 celery_app = Celery(

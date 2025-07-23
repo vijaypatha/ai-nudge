@@ -56,6 +56,40 @@ def update_user(user_id: uuid.UUID, update_data: UserUpdate) -> Optional[User]:
 
 # --- Client Functions ---
 
+def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tuple[Client, bool]:
+    """
+    Creates a new client or updates an existing one based on deduplication logic.
+    Returns a tuple of (client, is_new) where is_new indicates if this is a new client.
+    """
+    with Session(engine) as session:
+        # Check for existing duplicate
+        existing_client = find_strong_duplicate(session, user_id, client_data)
+        
+        if existing_client:
+            # Update existing client with new data
+            update_dict = client_data.model_dump(exclude_unset=True)
+            for key, value in update_dict.items():
+                if hasattr(existing_client, key):
+                    setattr(existing_client, key, value)
+            
+            session.add(existing_client)
+            session.commit()
+            session.refresh(existing_client)
+            logging.info(f"CRM: Updated existing client {existing_client.id} for user {user_id}")
+            return existing_client, False
+        else:
+            # Create new client
+            new_client = Client(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                **client_data.model_dump()
+            )
+            session.add(new_client)
+            session.commit()
+            session.refresh(new_client)
+            logging.info(f"CRM: Created new client {new_client.id} for user {user_id}")
+            return new_client, True
+
 def get_client_by_id(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Client]:
     """Retrieves a single client by their unique ID, ensuring it belongs to the user."""
     with Session(engine) as session:
@@ -700,18 +734,24 @@ def get_all_scheduled_messages(user_id: uuid.UUID) -> List[ScheduledMessage]:
         statement = select(ScheduledMessage).where(ScheduledMessage.user_id == user_id)
         return session.exec(statement).all()
 
-def update_scheduled_message(message_id: uuid.UUID, update_data: Dict[str, Any], user_id: uuid.UUID) -> Optional[ScheduledMessage]:
-    with Session(engine) as session:
-        message = session.exec(select(ScheduledMessage).where(ScheduledMessage.id == message_id, ScheduledMessage.user_id == user_id)).first()
+def update_scheduled_message(message_id: uuid.UUID, update_data: Dict[str, Any], user_id: uuid.UUID, session: Optional[Session] = None) -> Optional[ScheduledMessage]:
+    def _update(db_session: Session):
+        message = db_session.exec(select(ScheduledMessage).where(ScheduledMessage.id == message_id, ScheduledMessage.user_id == user_id)).first()
         if not message:
             return None
         for key, value in update_data.items():
             if value is not None:
                 setattr(message, key, value)
-        session.add(message)
-        session.commit()
-        session.refresh(message)
+        db_session.add(message)
+        db_session.commit()
+        db_session.refresh(message)
         return message
+    
+    if session:
+        return _update(session)
+    else:
+        with Session(engine) as db_session:
+            return _update(db_session)
 
 def cancel_scheduled_message(message_id: uuid.UUID, user_id: uuid.UUID) -> Optional[ScheduledMessage]:
     """
@@ -1014,7 +1054,12 @@ def get_resource_by_entity_id(entity_id: str, session: Session) -> Optional[Reso
     Finds a resource by its external entity ID from the data provider.
     This is crucial for preventing duplicate resource creation.
     """
-    statement = select(Resource).where(Resource.entity_id == entity_id)
+    # Convert UUID to string if needed for SQLite compatibility
+    entity_id_str = str(entity_id) if entity_id else None
+    if not entity_id_str:
+        return None
+        
+    statement = select(Resource).where(Resource.entity_id == entity_id_str)
     return session.exec(statement).first()
 
 

@@ -199,7 +199,7 @@ async def process_market_event(event: MarketEvent, user: User, db_session: Sessi
             resource_payload['listing_url'] = next((media['MediaURL'] for media in resource_payload.get('Media', []) if media.get('Order') == 0), None)
             resource_create_payload = ResourceCreate(
                 user_id=user.id,
-                resource_type="property", status="active", attributes=resource_payload, entity_id=event.entity_id
+                resource_type="property", status="active", attributes=resource_payload, entity_id=str(event.entity_id)
             )
             resource = Resource.model_validate(resource_create_payload)
             db_session.add(resource)
