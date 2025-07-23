@@ -57,9 +57,9 @@ class Settings(BaseSettings):
     GOOGLE_REDIRECT_URI: str
 
     # Microsoft OAuth
-    MICROSOFT_CLIENT_ID: str
-    MICROSOFT_CLIENT_SECRET: str
-    MICROSOFT_REDIRECT_URI: str
+    MICROSOFT_CLIENT_ID: Optional[str] = None
+    MICROSOFT_CLIENT_SECRET: Optional[str] = None
+    MICROSOFT_REDIRECT_URI: Optional[str] = None
 
     class Config:
         env_file = ".env"
