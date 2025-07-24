@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     curl \
     git \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust toolchain (required by some Python packages like cryptography)
@@ -37,10 +38,11 @@ COPY . .
 # Create a non-root user for security (optional but recommended)
 RUN useradd --create-home --shell /bin/bash app && \
     chown -R app:app /app
+
 USER app
 
 # Expose port 8000 for the FastAPI app
 EXPOSE 8000
 
-# Default command to run the application
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Use a shell command to run migrations and start the app
+CMD ["sh", "-c", "while ! pg_isready -h db -p 5432 -U postgres; do sleep 1; done && alembic upgrade head && python -c \"import asyncio; from data.seed import seed_database; asyncio.run(seed_database())\" && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"]

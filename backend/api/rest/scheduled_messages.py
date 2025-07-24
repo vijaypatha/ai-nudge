@@ -2,7 +2,7 @@
 # --- FULLY REVISED AND HARDENED ---
 
 import logging
-from datetime import datetime, timezone, time
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
@@ -71,7 +71,7 @@ async def create_bulk_scheduled_messages(
             local_time = tz.localize(local_time)
         utc_time = local_time.astimezone(pytz.utc)
 
-        if utc_time <= datetime.now(timezone.utc):
+        if utc_time <= (datetime.now(timezone.utc) - timedelta(seconds=10)):
             logging.warning(f"API Bulk: Skipping client {client_id}, scheduled time is in the past.")
             continue
 
@@ -110,30 +110,40 @@ async def create_scheduled_message(
     Now uses recipient-centric timezone logic.
     """
     try:
+        # --- START: ADD THIS TEMPORARY DEBUGGING CODE ---
+        logging.info(f"--- SCHEDULING DEBUG: Received payload: {message_data.model_dump_json()} ---")
+        # --- END: ADD THIS TEMPORARY DEBUGGING CODE ---
+
         # 1. Fetch client to determine the correct timezone
         client = crm_service.get_client_by_id(client_id=message_data.client_id, user_id=current_user.id)
         if not client:
             raise HTTPException(status_code=404, detail="Client not found.")
             
-        # --- MODIFIED: Use client's timezone first, fall back to user's, then UTC ---
-        target_tz_str = client.timezone or current_user.timezone or 'UTC'
+        target_tz_str = message_data.timezone
+        # --- START: ADD THIS TEMPORARY DEBUGGING CODE ---
+        logging.info(f"--- SCHEDULING DEBUG: Using timezone: {target_tz_str} ---")
+        # --- END: ADD THIS TEMPORARY DEBUGGING CODE ---
 
         try:
             tz = pytz.timezone(target_tz_str)
         except pytz.UnknownTimeZoneError:
             raise HTTPException(status_code=400, detail=f"Invalid timezone configured: '{target_tz_str}'")
 
-        # 2. Convert local time from frontend to UTC for storage
         local_time = message_data.scheduled_at_local
         if local_time.tzinfo is None:
             local_time = tz.localize(local_time)
 
         utc_time = local_time.astimezone(pytz.utc)
         
-        if utc_time <= datetime.now(timezone.utc):
+        # --- START: ADD THIS TEMPORARY DEBUGGING CODE ---
+        server_now_utc = datetime.now(timezone.utc)
+        logging.info(f"--- SCHEDULING DEBUG: Comparing schedule time {utc_time} <= server time {server_now_utc} ---")
+        # --- END: ADD THIS TEMPORARY DEBUGGING CODE ---
+
+        if utc_time <= (server_now_utc - timedelta(seconds=10)):
             raise HTTPException(status_code=400, detail="Scheduled time must be in the future.")
 
-        # 3. Save the record to our database first
+        # Create the scheduled message
         db_message = ScheduledMessage(
             client_id=message_data.client_id,
             user_id=current_user.id,
@@ -143,27 +153,23 @@ async def create_scheduled_message(
             status=MessageStatus.PENDING,
         )
         session.add(db_message)
-        session.commit()
-        session.refresh(db_message)
+        session.flush()  # Flush to get the ID for the task
 
-        # 4. Create the Celery task with the message ID
+        # Create Celery task
         from celery_tasks import send_scheduled_message_task
         task = send_scheduled_message_task.apply_async((str(db_message.id),), eta=utc_time)
-        logging.info(f"API: Scheduled message task {task.id} for message {db_message.id} at {utc_time} UTC.")
-        
-        # 5. Update the message with the task ID
         db_message.celery_task_id = task.id
         session.add(db_message)
         session.commit()
         session.refresh(db_message)
+
         return db_message
 
     except HTTPException:
         raise
     except Exception as e:
-        logging.error(f"API: Failed to schedule message: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error while scheduling message.")
-
+        logging.error(f"Error creating scheduled message: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create scheduled message.")
 
 @router.put("/{message_id}", response_model=ScheduledMessage)
 async def update_scheduled_message(

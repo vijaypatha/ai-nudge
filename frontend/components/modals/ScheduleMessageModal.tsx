@@ -31,8 +31,12 @@ export const ScheduleMessageModal: FC<ScheduleMessageModalProps> = ({
         if (isOpen) {
             // Set default time to 30 mins in the future
             const futureDate = new Date(Date.now() + 30 * 60 * 1000);
-            const localISOString = new Date(futureDate.getTime() - (futureDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
-            setDate(localISOString);
+            const year = futureDate.getFullYear();
+            const month = (futureDate.getMonth() + 1).toString().padStart(2, '0');
+            const day = futureDate.getDate().toString().padStart(2, '0');
+            const hours = futureDate.getHours().toString().padStart(2, '0');
+            const minutes = futureDate.getMinutes().toString().padStart(2, '0');
+            setDate(`${year}-${month}-${day}T${hours}:${minutes}`);
             setContent(initialContent);
         }
     }, [isOpen, initialContent]);

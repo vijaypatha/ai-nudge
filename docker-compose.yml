@@ -1,3 +1,7 @@
+# Local Development Configuration
+# This file defines the services and databases for the AI Nudge local application.
+# It is used to run the application locally.
+# Docker Compose (Dev): ENVIRONMENT: development → dev-login endpoint available 
 services:
   # ---------- DATABASE ----------
   db:
@@ -43,6 +47,7 @@ services:
     ports:
       - "8001:8000"
     environment:
+      ENVIRONMENT: development
       WEBSOCKET_ALLOWED_ORIGINS: '["http://localhost:3000"]'
       PYTHONPATH: /app
       DATABASE_URL: postgresql://postgres:password123@db:5432/realestate_db
@@ -67,6 +72,7 @@ services:
     restart: unless-stopped
     command: celery -A celery_worker.celery_app worker --loglevel=info --concurrency=2
     environment:
+      ENVIRONMENT: development
       PYTHONPATH: /app
       RUNNING_IN_CELERY: "true"
       DATABASE_URL: postgresql://postgres:password123@db:5432/realestate_db
@@ -93,6 +99,7 @@ services:
     restart: unless-stopped
     command: celery -A celery_worker.celery_app beat --loglevel=info --schedule=/app/celerybeat-schedule.db
     environment:
+      ENVIRONMENT: development
       PYTHONPATH: /app
       RUNNING_IN_CELERY: "true"
       DATABASE_URL: postgresql://postgres:password123@db:5432/realestate_db

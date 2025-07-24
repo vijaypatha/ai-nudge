@@ -1,7 +1,5 @@
 # FILE: backend/data/seed.py
-# --- VERSION 7.0 ---
-# This version creates proper ContentResource objects for therapy content
-# and ensures AI suggestions are properly triggered during startup.
+# --- MODIFIED: This version corrects the data clearing logic to prevent foreign key violations.
 
 import logging
 import sys
@@ -15,6 +13,8 @@ from uuid import uuid4
 from .database import engine
 from .models.user import User, UserType
 from .models.client import Client
+# --- MODIFIED: Import all models to ensure correct deletion order ---
+from .models.message import Message, ScheduledMessage
 from .models.resource import Resource, ContentResource
 from .models.campaign import CampaignBriefing
 from .models.faq import Faq
@@ -34,15 +34,19 @@ async def seed_database():
     logger.info("--- Starting database seeding process ---")
     
     with Session(engine) as session:
-        # Clear existing data for a clean seed, but preserve existing campaigns and resources
+        # --- MODIFIED: Corrected deletion order to respect foreign key constraints ---
         logger.info("Clearing existing data...")
-        # Don't clear CampaignBriefing - preserve real MLS campaigns
-        # session.query(CampaignBriefing).delete()
-        # Don't clear Resource - preserve real MLS resources
-        # session.query(Resource).delete()
+        # Clear tables that depend on users or other primary tables first.
+        # The order here is critical to avoid integrity errors.
+        session.query(ScheduledMessage).delete()
+        session.query(Message).delete()
+        session.query(CampaignBriefing).delete()
         session.query(Faq).delete()
         session.query(Client).delete()
+        # Resources must be deleted before Users.
+        session.query(Resource).delete()
         session.query(ContentResource).delete()
+        # Finally, delete the Users, as all dependent records are now gone.
         session.query(User).delete()
         session.commit()
         

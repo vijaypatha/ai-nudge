@@ -1,3 +1,8 @@
+# Render.com Deployment Configuration
+# This file defines the services and databases for the AI Nudge application.
+# It is used to deploy the application to Render.com.
+# The services are defined in the services section, and the databases are defined in the databases section.
+# Render (Prod): No ENVIRONMENT set → defaults to "production" → dev-login endpoint NOT available
 services:
   - type: job
     name: db-migration
@@ -33,7 +38,7 @@ services:
       - fromGroup: ainudge-env-group
 
   # Celery Worker Service
-  - type: web
+  - type: worker
     name: ai-nudge-celery-worker
     env: docker
     plan: free
@@ -58,7 +63,7 @@ services:
       - fromGroup: ainudge-env-group
 
   # Celery Beat Scheduler Service
-  - type: web
+  - type: worker
     name: ai-nudge-celery-beat
     env: docker
     plan: free

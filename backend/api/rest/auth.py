@@ -170,7 +170,8 @@ async def google_callback(
 
 # --- Developer-Only Login Endpoint ---
 
-if os.getenv("ENVIRONMENT") == "development":
+# Use settings instead of os.getenv()
+if settings.ENVIRONMENT == "development":
     @router.post("/dev-login")
     async def developer_login(payload: DevLoginPayload):
         """
