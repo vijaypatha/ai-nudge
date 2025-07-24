@@ -110,19 +110,13 @@ async def create_scheduled_message(
     Now uses recipient-centric timezone logic.
     """
     try:
-        # --- START: ADD THIS TEMPORARY DEBUGGING CODE ---
-        logging.info(f"--- SCHEDULING DEBUG: Received payload: {message_data.model_dump_json()} ---")
-        # --- END: ADD THIS TEMPORARY DEBUGGING CODE ---
-
         # 1. Fetch client to determine the correct timezone
         client = crm_service.get_client_by_id(client_id=message_data.client_id, user_id=current_user.id)
         if not client:
             raise HTTPException(status_code=404, detail="Client not found.")
             
-        target_tz_str = message_data.timezone
-        # --- START: ADD THIS TEMPORARY DEBUGGING CODE ---
-        logging.info(f"--- SCHEDULING DEBUG: Using timezone: {target_tz_str} ---")
-        # --- END: ADD THIS TEMPORARY DEBUGGING CODE ---
+        # Use client's timezone, fallback to user's timezone, then UTC
+        target_tz_str = client.timezone or current_user.timezone or 'UTC'
 
         try:
             tz = pytz.timezone(target_tz_str)
@@ -134,13 +128,8 @@ async def create_scheduled_message(
             local_time = tz.localize(local_time)
 
         utc_time = local_time.astimezone(pytz.utc)
-        
-        # --- START: ADD THIS TEMPORARY DEBUGGING CODE ---
-        server_now_utc = datetime.now(timezone.utc)
-        logging.info(f"--- SCHEDULING DEBUG: Comparing schedule time {utc_time} <= server time {server_now_utc} ---")
-        # --- END: ADD THIS TEMPORARY DEBUGGING CODE ---
 
-        if utc_time <= (server_now_utc - timedelta(seconds=10)):
+        if utc_time <= (datetime.now(timezone.utc) - timedelta(seconds=10)):
             raise HTTPException(status_code=400, detail="Scheduled time must be in the future.")
 
         # Create the scheduled message
