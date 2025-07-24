@@ -22,6 +22,14 @@ class GoogleContacts:
         self.client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
         self.redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
 
+        # --- ADDED FOR DEBUGGING ---
+        logger.info(f"GoogleContacts Initializing... Client ID: {self.client_id}, Redirect URI: {self.redirect_uri}")
+        if self.client_secret:
+            logger.info(f"GoogleContacts Client Secret Loaded: Starts with '{self.client_secret[:4]}', Ends with '{self.client_secret[-4:]}'")
+        else:
+            logger.info("GoogleContacts Client Secret is NOT loaded or is empty.")
+        # --- END DEBUGGING BLOCK ---
+
         if not all([self.client_id, self.client_secret, self.redirect_uri]):
             raise ValueError("Google OAuth credentials are not fully configured in environment variables.")
 
@@ -35,9 +43,6 @@ class GoogleContacts:
             }
         }
 
-    # --- DEFINITIVE FIX ---
-    # Modified to accept and pass along the 'state' parameter. This is crucial
-    # for carrying the user's session token across the redirect.
     def get_auth_url(self, state: Optional[str] = None) -> str:
         """Generates the Google OAuth URL, including the state parameter if provided."""
         flow = Flow.from_client_config(
@@ -46,7 +51,6 @@ class GoogleContacts:
             redirect_uri=self.redirect_uri,
         )
         
-        # The 'state' parameter is included here. Google will return it to us untouched.
         auth_url, _ = flow.authorization_url(
             access_type='offline', 
             prompt='consent',
@@ -63,6 +67,9 @@ class GoogleContacts:
             scopes=SCOPES,
             redirect_uri=self.redirect_uri,
         )
+        # --- ADDED FOR DEBUGGING ---
+        logger.info(f"Attempting to fetch token with config: {self.client_config}")
+        # --- END DEBUGGING BLOCK ---
         flow.fetch_token(code=code)
         logger.info("Successfully exchanged authorization code for Google credentials.")
         return flow.credentials

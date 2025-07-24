@@ -1,25 +1,5 @@
 # FILE: backend/conftest.py
 
-# --- START: Manually Load Environment Variables ---
-# This block is added to ensure that environment variables from 'backend/.env'
-# are loaded before any other application modules are imported. This is the
-# definitive fix for the Pydantic ValidationError during test startup.
-import os
-from pathlib import Path
-from dotenv import load_dotenv
-
-# The path is constructed relative to this file's location (backend/conftest.py)
-# to reliably find the .env file inside the 'backend' directory.
-env_path = Path(__file__).parent / '.env'
-
-if env_path.exists():
-    load_dotenv(dotenv_path=env_path)
-    # This print statement provides observability during test runs.
-    print(f"\n--- conftest.py: Loaded environment variables from {env_path} ---\n")
-else:
-    print(f"\n--- conftest.py: WARNING! .env file not found at {env_path} ---\n")
-# --- END: Manually Load Environment Variables ---
-
 
 import pytest
 from typing import Generator

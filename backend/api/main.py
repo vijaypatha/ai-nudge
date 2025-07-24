@@ -85,3 +85,8 @@ async def test_db(session: Session = Depends(get_session)):
     Temporary endpoint to test the database connection.
     """
     return {"message": "Database connection successful."}
+
+@app.get("/debug/routes")
+def list_all_routes():
+    """Temporary endpoint to see all registered routes"""
+    return [{"path": route.path, "name": route.name} for route in app.routes]

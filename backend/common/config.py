@@ -7,7 +7,7 @@ from typing import Optional, List
 
 class Settings(BaseSettings):
     """
-    Manages application settings loaded from the .env file.
+    Manages application settings loaded from the environment.
     Provides type validation for all settings.
     """
     LLM_PROVIDER: str = "openai"
@@ -39,11 +39,7 @@ class Settings(BaseSettings):
     RESCAN_LOOKBACK_DAYS: int = 30
     FAQ_AUTO_REPLY_ENABLED: bool = True
     
-    # --- MODIFIED BLOCK ---
-    # WebSocket CORS origins. This List[str] type hint correctly parses a
-    # comma-separated string from an environment variable.
     WEBSOCKET_ALLOWED_ORIGINS: List[str] = ["http://localhost:3000"]
-    # --- END MODIFIED BLOCK ---
 
     # MLS Providers
     MLS_PROVIDER: str
@@ -60,10 +56,6 @@ class Settings(BaseSettings):
     MICROSOFT_CLIENT_ID: Optional[str] = None
     MICROSOFT_CLIENT_SECRET: Optional[str] = None
     MICROSOFT_REDIRECT_URI: Optional[str] = None
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = 'utf-8'
 
 @lru_cache()
 def get_settings():
