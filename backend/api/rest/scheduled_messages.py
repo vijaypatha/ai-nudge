@@ -8,7 +8,7 @@ from uuid import UUID
 
 import pytz
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from api.security import get_current_user_from_token
 from celery_worker import celery_app
@@ -37,7 +37,8 @@ router = APIRouter(
 @router.post("/bulk", status_code=status.HTTP_202_ACCEPTED)
 async def create_bulk_scheduled_messages(
     data: BulkScheduleCreate,
-    current_user: User = Depends(get_current_user_from_token)
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
 ):
     """
     Schedules a message for multiple clients, respecting each client's individual timezone.
@@ -55,46 +56,45 @@ async def create_bulk_scheduled_messages(
 
     # 2. Iterate and create messages and tasks
     scheduled_tasks = 0
-    with Session(engine) as session:
-        for client_id in data.client_ids:
-            # Determine the target timezone for this client
-            target_tz_str = client_tz_map.get(client_id) or current_user.timezone or 'UTC'
-            try:
-                tz = pytz.timezone(target_tz_str)
-            except pytz.UnknownTimeZoneError:
-                logging.warning(f"API Bulk: Skipping client {client_id} due to unknown timezone '{target_tz_str}'")
-                continue
+    for client_id in data.client_ids:
+        # Determine the target timezone for this client
+        target_tz_str = client_tz_map.get(client_id) or current_user.timezone or 'UTC'
+        try:
+            tz = pytz.timezone(target_tz_str)
+        except pytz.UnknownTimeZoneError:
+            logging.warning(f"API Bulk: Skipping client {client_id} due to unknown timezone '{target_tz_str}'")
+            continue
 
-            # Convert local time to UTC for this specific client
-            local_time = data.scheduled_at_local
-            if local_time.tzinfo is None:
-                local_time = tz.localize(local_time)
-            utc_time = local_time.astimezone(pytz.utc)
+        # Convert local time to UTC for this specific client
+        local_time = data.scheduled_at_local
+        if local_time.tzinfo is None:
+            local_time = tz.localize(local_time)
+        utc_time = local_time.astimezone(pytz.utc)
 
-            if utc_time <= datetime.now(timezone.utc):
-                logging.warning(f"API Bulk: Skipping client {client_id}, scheduled time is in the past.")
-                continue
+        if utc_time <= datetime.now(timezone.utc):
+            logging.warning(f"API Bulk: Skipping client {client_id}, scheduled time is in the past.")
+            continue
 
-            # Create and save the DB record
-            db_message = ScheduledMessage(
-                client_id=client_id,
-                user_id=current_user.id,
-                content=data.content,
-                scheduled_at_utc=utc_time,
-                timezone=target_tz_str,
-                status=MessageStatus.PENDING,
-            )
-            session.add(db_message)
-            session.flush() # Flush to get the ID for the task
+        # Create and save the DB record
+        db_message = ScheduledMessage(
+            client_id=client_id,
+            user_id=current_user.id,
+            content=data.content,
+            scheduled_at_utc=utc_time,
+            timezone=target_tz_str,
+            status=MessageStatus.PENDING,
+        )
+        session.add(db_message)
+        session.flush() # Flush to get the ID for the task
 
-            # Create Celery task
-            from celery_tasks import send_scheduled_message_task
-            task = send_scheduled_message_task.apply_async((str(db_message.id),), eta=utc_time)
-            db_message.celery_task_id = task.id
-            session.add(db_message)
-            scheduled_tasks += 1
+        # Create Celery task
+        from celery_tasks import send_scheduled_message_task
+        task = send_scheduled_message_task.apply_async((str(db_message.id),), eta=utc_time)
+        db_message.celery_task_id = task.id
+        session.add(db_message)
+        scheduled_tasks += 1
 
-        session.commit()
+    session.commit()
 
     return {"detail": f"Successfully scheduled {scheduled_tasks} out of {len(data.client_ids)} messages."}
 
@@ -102,7 +102,8 @@ async def create_bulk_scheduled_messages(
 @router.post("", response_model=ScheduledMessage, status_code=status.HTTP_201_CREATED)
 async def create_scheduled_message(
     message_data: ScheduledMessageCreate,
-    current_user: User = Depends(get_current_user_from_token)
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
 ):
     """
     Schedules a new message, handling time zones and creating a Celery task.
@@ -133,30 +134,29 @@ async def create_scheduled_message(
             raise HTTPException(status_code=400, detail="Scheduled time must be in the future.")
 
         # 3. Save the record to our database first
-        with Session(engine) as session:
-            db_message = ScheduledMessage(
-                client_id=message_data.client_id,
-                user_id=current_user.id,
-                content=message_data.content,
-                scheduled_at_utc=utc_time,
-                timezone=target_tz_str,
-                status=MessageStatus.PENDING,
-            )
-            session.add(db_message)
-            session.commit()
-            session.refresh(db_message)
+        db_message = ScheduledMessage(
+            client_id=message_data.client_id,
+            user_id=current_user.id,
+            content=message_data.content,
+            scheduled_at_utc=utc_time,
+            timezone=target_tz_str,
+            status=MessageStatus.PENDING,
+        )
+        session.add(db_message)
+        session.commit()
+        session.refresh(db_message)
 
-            # 4. Create the Celery task with the message ID
-            from celery_tasks import send_scheduled_message_task
-            task = send_scheduled_message_task.apply_async((str(db_message.id),), eta=utc_time)
-            logging.info(f"API: Scheduled message task {task.id} for message {db_message.id} at {utc_time} UTC.")
-            
-            # 5. Update the message with the task ID
-            db_message.celery_task_id = task.id
-            session.add(db_message)
-            session.commit()
-            session.refresh(db_message)
-            return db_message
+        # 4. Create the Celery task with the message ID
+        from celery_tasks import send_scheduled_message_task
+        task = send_scheduled_message_task.apply_async((str(db_message.id),), eta=utc_time)
+        logging.info(f"API: Scheduled message task {task.id} for message {db_message.id} at {utc_time} UTC.")
+        
+        # 5. Update the message with the task ID
+        db_message.celery_task_id = task.id
+        session.add(db_message)
+        session.commit()
+        session.refresh(db_message)
+        return db_message
 
     except HTTPException:
         raise
@@ -175,8 +175,13 @@ async def update_scheduled_message(
     """
     Updates a pending scheduled message. Revokes the old Celery task and creates a new one.
     """
-    db_message = crm_service.get_scheduled_message_by_id(message_id)
-    if not db_message or db_message.user_id != current_user.id:
+    # Use the session parameter to get the message from the same session
+    db_message = session.exec(select(ScheduledMessage).where(
+        ScheduledMessage.id == message_id, 
+        ScheduledMessage.user_id == current_user.id
+    )).first()
+    
+    if not db_message:
          raise HTTPException(status_code=404, detail="Scheduled message not found.")
 
     if db_message.status != MessageStatus.PENDING:

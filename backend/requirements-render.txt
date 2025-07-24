@@ -88,4 +88,5 @@ google-auth-httplib2
 google-auth-oauthlib
 msal
 thefuzz
-pytz==2024.1 
+pytz==2024.1
+alembic>=1.13.0

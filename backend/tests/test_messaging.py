@@ -56,21 +56,42 @@ def scheduled_message(session: Session, test_user: User) -> ScheduledMessage:
     session.refresh(msg)
     return msg
 
+from data.models.user import User
+from data.models.client import Client
+from data.models.message import ScheduledMessage
+from datetime import datetime, timezone
+import uuid
+
 @patch("celery_tasks.send_scheduled_message_task.apply_async")
-def test_update_scheduled_message_succeeds(mock_celery, authenticated_client: TestClient, scheduled_message: ScheduledMessage, session: Session):
-    # Mock the Celery task to avoid Redis connection issues
+def test_update_scheduled_message_succeeds(mock_celery, authenticated_client: TestClient, session: Session, test_user: User):
+    # --- Arrange ---
+    # 1. Mock the Celery task
     mock_celery.return_value = MagicMock(id="mock-task-id")
-    
+
+    # 2. Create all necessary records from scratch in the test DB
+    # Use the authenticated test_user instead of creating a new one
+    test_client = Client(id=uuid.uuid4(), user_id=test_user.id, full_name="Test Client")
+    test_message = ScheduledMessage(
+        user_id=test_user.id,
+        client_id=test_client.id,
+        content="Original message.",
+        scheduled_at_utc=datetime.now(timezone.utc),
+        timezone="UTC"
+    )
+    session.add(test_client)
+    session.add(test_message)
+    session.commit()
+
+    # --- Act ---
     update_payload = {"content": "This is the updated message content."}
     response = authenticated_client.put(
-        f"/api/scheduled-messages/{scheduled_message.id}",
+        f"/api/scheduled-messages/{test_message.id}",
         json=update_payload
     )
-    assert response.status_code == 200
-    
-    # Refresh the message from the database to verify the update
-    session.refresh(scheduled_message)
-    assert scheduled_message.content == "This is the updated message content."
+
+    # --- Assert ---
+    assert response.status_code == 200, response.json()
+    assert response.json()["content"] == "This is the updated message content."
 
 def test_delete_scheduled_message_succeeds(authenticated_client: TestClient, scheduled_message: ScheduledMessage, session: Session):
     response = authenticated_client.delete(f"/api/scheduled-messages/{scheduled_message.id}")
