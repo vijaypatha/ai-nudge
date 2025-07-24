@@ -1,53 +1,50 @@
 // frontend/components/modals/EditMessageModal.tsx
-// --- FINAL, CORRECTED VERSION ---
-// This version uses the correct 'scheduled_at_utc' property and provides full editing functionality.
-
 'use client';
 
 import { useState, FC, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ScheduledMessage, useAppContext } from '@/context/AppContext';
+import { Client, ScheduledMessage, useAppContext } from '@/context/AppContext';
 import { Button } from '@/components/ui/Button';
-import { TimezoneSelector } from '@/components/ui/TimezoneSelector';
-import { X, Loader2, Save } from 'lucide-react';
-import { formatInTimeZone } from 'date-fns-tz';
+import { X, Loader2, Save, Edit3 } from 'lucide-react';
+import { formatInTimeZone, getTimezoneOffset } from 'date-fns-tz';
 
 interface EditMessageModalProps {
     isOpen: boolean;
     onClose: () => void;
     message: ScheduledMessage | null;
     onSaveSuccess: () => void;
+    // --- NEW: Pass the full client object for timezone info ---
+    client: Client | null;
 }
 
-export const EditMessageModal: FC<EditMessageModalProps> = ({ isOpen, onClose, message, onSaveSuccess }) => {
+export const EditMessageModal: FC<EditMessageModalProps> = ({ isOpen, onClose, message, onSaveSuccess, client }) => {
     const { api } = useAppContext();
     const [content, setContent] = useState('');
     const [localDate, setLocalDate] = useState('');
-    const [timezone, setTimezone] = useState('');
     const [isSaving, setIsSaving] = useState(false);
+
+    // --- NEW: Determine the correct timezone to use ---
+    const targetTimezone = client?.timezone || message?.timezone || 'UTC';
+    const timezoneAbbr = new Date().toLocaleTimeString('en-us', { timeZone: targetTimezone, timeZoneName: 'short' }).split(' ')[2];
 
     useEffect(() => {
         if (message) {
             setContent(message.content);
-            setTimezone(message.timezone);
-
-            // --- THE FIX IS HERE ---
-            // This now correctly uses 'message.scheduled_at_utc' which exists on the type.
-            // The previous code was still referencing 'message.scheduled_at', causing the build to fail.
-            const scheduledTimeInOriginalTZ = formatInTimeZone(message.scheduled_at_utc, message.timezone, "yyyy-MM-dd'T'HH:mm");
-            setLocalDate(scheduledTimeInOriginalTZ);
+            // Convert the stored UTC time back to the client's local time for the input
+            const scheduledTimeInTargetTZ = formatInTimeZone(message.scheduled_at_utc, targetTimezone, "yyyy-MM-dd'T'HH:mm");
+            setLocalDate(scheduledTimeInTargetTZ);
         }
-    }, [message]);
+    }, [message, targetTimezone]);
 
     const handleSave = async () => {
-        if (!message || !content || !localDate || !timezone) return;
+        if (!message || !content || !localDate) return;
         setIsSaving(true);
         try {
-            // The API call correctly sends the local date string and the timezone.
             await api.put(`/api/scheduled-messages/${message.id}`, {
                 content,
+                // --- MODIFIED: Always send the client's timezone context ---
                 scheduled_at_local: localDate,
-                timezone: timezone,
+                timezone: targetTimezone,
             });
             onSaveSuccess();
         } catch (error) {
@@ -80,24 +77,19 @@ export const EditMessageModal: FC<EditMessageModalProps> = ({ isOpen, onClose, m
                             className="w-full h-32 p-3 bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-primary-action"
                         />
                     </div>
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="text-sm font-semibold text-gray-300 mb-2 block">Date & Time</label>
-                            <input
-                                type="datetime-local"
-                                value={localDate}
-                                onChange={(e) => setLocalDate(e.target.value)}
-                                className="w-full p-3 bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-primary-action"
-                            />
-                        </div>
-                        <div>
-                            <label className="text-sm font-semibold text-gray-300 mb-2 block">Time Zone</label>
-                             <TimezoneSelector
-                                value={timezone}
-                                onChange={(e) => setTimezone(e.target.value)}
-                                className="w-full p-3 bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-primary-action"
-                            />
-                        </div>
+                    <div>
+                        <label className="text-sm font-semibold text-gray-300 mb-2 block">Date & Time</label>
+                        <input
+                            type="datetime-local"
+                            value={localDate}
+                            onChange={(e) => setLocalDate(e.target.value)}
+                            className="w-full p-3 bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-primary-action"
+                        />
+                         {/* --- NEW: Confirmation Text --- */}
+                         <p className="text-xs text-gray-400 mt-2">
+                            Sends at the selected time in the client's local timezone ({timezoneAbbr}).
+                            <a href={`/conversations/${client?.id}`} className="underline ml-1 hover:text-white">Edit client timezone</a>.
+                        </p>
                     </div>
                 </main>
                 <footer className="flex justify-end gap-3 p-4 bg-black/20 border-t border-white/10">

@@ -124,6 +124,7 @@ export const ScheduledNudgesView: FC<ScheduledNudgesViewProps> = ({ messages, is
                 isOpen={!!editingMessage} 
                 onClose={() => setEditingMessage(null)} 
                 message={editingMessage} 
+                client={editingMessage ? (findClient(editingMessage.client_id) ?? null) : null}
                 onSaveSuccess={handleSaveSuccess} 
             />
             <div className="space-y-8 max-w-4xl mx-auto">

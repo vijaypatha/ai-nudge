@@ -1,5 +1,4 @@
 // frontend/components/nudges/InstantNudgeView.tsx
-
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, FC } from 'react';
@@ -10,7 +9,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Loader2, Bot, Send, Calendar, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
-import { getFutureTimeInTimezone } from '@/utils/timezone';
+// --- REMOVED: No longer need getFutureTimeInTimezone ---
 
 interface InstantNudgeViewProps {
     clients: Client[];
@@ -36,8 +35,6 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
     useEffect(() => {
         setFilteredClients(clients);
     }, [clients]);
-
-
 
     const allTags = useMemo(() => {
         const tags = new Set<string>();
@@ -113,7 +110,6 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
         }
     };
 
-    // --- THIS FUNCTION WAS MISSING ---
     const handleSendInstantNudge = async () => {
         if (selectedClients.size === 0 || !message.trim()) {
             alert("Please select at least one recipient and write a message.");
@@ -138,45 +134,37 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
         }
     };
 
+    // --- MODIFIED: Use the new bulk endpoint ---
     const handleScheduleInstantNudge = async () => {
         if (selectedClients.size === 0 || !message.trim() || !scheduleDateTime.trim()) {
             alert("Please select recipients, write a message, and pick a future date and time.");
             return;
         }
         setIsScheduling(true);
-        const recipients = Array.from(selectedClients);
-        
-        // Convert the datetime-local input to a proper datetime object
-        const scheduledDateTime = new Date(scheduleDateTime);
-        
-        // Validate that the scheduled time is in the future
-        const now = new Date();
-        if (scheduledDateTime <= now) {
+
+        const scheduledDateTimeObj = new Date(scheduleDateTime);
+        if (scheduledDateTimeObj <= new Date()) {
             alert("Please select a future date and time for scheduling.");
             setIsScheduling(false);
             return;
         }
         
-        const schedulePromises = recipients.map(clientId =>
-            api.post('/api/scheduled-messages', {
-                client_id: clientId,
-                content: message,
-                scheduled_at_local: scheduledDateTime,
-                timezone: user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-            })
-        );
         try {
-            await Promise.all(schedulePromises);
-            alert(`Successfully scheduled message for ${recipients.length} client(s).`);
+            await api.post('/api/scheduled-messages/bulk', {
+                client_ids: Array.from(selectedClients),
+                content: message,
+                scheduled_at_local: scheduledDateTimeObj,
+            });
 
+            alert(`Successfully scheduled message for ${selectedClients.size} client(s). Each will be sent at the specified time in their respective local timezone.`);
             setSelectedClients(new Set());
             setMessage('');
             setTopic('');
             setScheduleDateTime('');
             onScheduleSuccess();
         } catch (error) {
-            console.error("Failed to schedule instant nudge:", error);
-            alert("An error occurred while scheduling the message. Please check the console.");
+            console.error("Failed to bulk schedule nudge:", error);
+            alert("An error occurred while scheduling the messages. Please check the console.");
         } finally {
             setIsScheduling(false);
         }
@@ -275,6 +263,9 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
                                     onChange={e => setScheduleDateTime(e.target.value)}
                                     className="p-3 w-full bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
                                 />
+                                <p className="text-xs text-gray-400">
+                                    Each client will receive this message at the selected time in their own local timezone.
+                                </p>
                                 <div className="grid grid-cols-2 gap-3">
                                     <button onClick={() => setScheduleDateTime('')} className="p-3 bg-white/10 rounded-lg font-semibold hover:bg-white/20 w-full">Cancel</button>
                                     <button onClick={handleScheduleInstantNudge} disabled={isScheduling || selectedClients.size === 0 || !message.trim()} className="p-3 bg-cyan-500 text-brand-dark rounded-lg font-semibold hover:bg-cyan-400 disabled:opacity-50 whitespace-nowrap w-full flex items-center justify-center gap-2">
@@ -286,17 +277,9 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
                         ) : (
                             <motion.div key="send" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-2 gap-3">
                                 <button onClick={() => {
-                                    // Set default time to 30 minutes from now in user's local timezone
-                                    const userTimezone = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-                                    const defaultTime = getFutureTimeInTimezone(userTimezone, 30);
-                                    console.log('Timezone debug:', {
-                                        userTimezone,
-                                        browserTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                                        defaultTime,
-                                        currentTime: new Date().toLocaleString(),
-                                        currentTimeInUserTz: new Date().toLocaleString('en-US', { timeZone: userTimezone })
-                                    });
-                                    setScheduleDateTime(defaultTime);
+                                    const futureDate = new Date(Date.now() + 30 * 60 * 1000);
+                                    const localISOString = new Date(futureDate.getTime() - (futureDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+                                    setScheduleDateTime(localISOString);
                                 }} className="p-3 bg-white/10 rounded-lg font-semibold hover:bg-white/20 disabled:opacity-50 w-full flex items-center justify-center gap-2">
                                     <Calendar size={20} /> Schedule
                                 </button>
