@@ -58,6 +58,7 @@ export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDism
           isOpen={!!editingMessage}
           onClose={() => setEditingMessage(null)}
           message={editingMessage}
+          onSaveSuccess={() => setEditingMessage(null)}
         />
       )}
       
