@@ -1,5 +1,3 @@
-# backend/Dockerfile
-
 # Use a specific Python runtime as a parent image
 FROM python:3.11-slim-bookworm
 
@@ -9,6 +7,10 @@ ENV PYTHONUNBUFFERED 1
 
 # Set work directory
 WORKDIR /app
+
+# Create and activate a virtual environment
+RUN python -m venv /app/venv
+ENV PATH="/app/venv/bin:$PATH"
 
 # Install system dependencies for common Python packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -26,8 +28,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Copy requirements file first to leverage Docker cache
 COPY requirements-render.txt .
-
-# Install Python dependencies
+# Install Python dependencies into the virtual environment
 RUN pip install --no-cache-dir -r requirements-render.txt
 
 # Copy application code
@@ -36,5 +37,5 @@ COPY . .
 # Expose port 8000 for the FastAPI app
 EXPOSE 8000
 
-# Default command to run the application (will be overridden by Render's startCommand)
+# Default command to run the application
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

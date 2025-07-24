@@ -186,14 +186,18 @@ async def update_scheduled_message(
     if db_message.celery_task_id:
         celery_app.control.revoke(db_message.celery_task_id)
         logging.info(f"API: Revoked old task {db_message.celery_task_id} for message {message_id}.")
-    
+
     # 2. Update fields
     update_dict = message_data.model_dump(exclude_unset=True)
-    
+
     # --- MODIFIED: Ensure timezone from client record is used if not provided in payload ---
     new_timezone_str = update_dict.get("timezone")
     if not new_timezone_str:
         client = crm_service.get_client_by_id(db_message.client_id, current_user.id)
+        # --- NEW: Add a check for the client's existence ---
+        if not client:
+            logging.error(f"Data integrity error: ScheduledMessage {db_message.id} exists but Client {db_message.client_id} not found.")
+            raise HTTPException(status_code=500, detail="Data integrity error: Client for message not found.")
         new_timezone_str = client.timezone or current_user.timezone or 'UTC'
 
     # 3. Recalculate UTC time if time or timezone changed
@@ -226,7 +230,7 @@ async def update_scheduled_message(
     session.add(db_message)
     session.commit()
     session.refresh(db_message)
-    
+
     return db_message
 
 # --- DELETE endpoint is unchanged, no modification needed ---

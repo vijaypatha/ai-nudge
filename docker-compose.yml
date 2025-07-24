@@ -45,6 +45,7 @@ services:
       - ./backend/.env
     volumes:
       - ./backend:/app
+      - /app/venv
     networks:
       - ai_nudge_net
     depends_on:

@@ -56,6 +56,8 @@ class Message(SQLModel, table=True):
         }
 
 class ScheduledMessage(SQLModel, table=True):
+    __tablename__ = "scheduledmessage"  # Explicitly define the table name
+
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id", index=True)
     client_id: UUID = Field(foreign_key="client.id")
