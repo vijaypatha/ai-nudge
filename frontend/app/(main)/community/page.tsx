@@ -11,6 +11,7 @@ import { useAppContext, Client } from '@/context/AppContext';
 import { Users, Plus, UserCheck, UserX, MessageSquare, Bot, Mail } from 'lucide-react';
 import { MagicSearchBar } from '@/components/ui/MagicSearchBar';
 import { TagFilter } from '@/components/ui/TagFilter'; // NEW IMPORT
+import { AddContactModal } from '@/components/modals/AddContactModal';
 
 // --- HELPER TYPES & COMPONENTS (Unchanged) ---
 
@@ -102,6 +103,9 @@ export default function CommunityPage() {
   
   // State to hold the complete, unfiltered list of clients
   const [allClients, setAllClients] = useState<CommunityMember[]>([]);
+  
+  // State for the Add Contact modal
+  const [isAddContactModalOpen, setIsAddContactModalOpen] = useState(false);
 
   // Memoize all unique tags from the full client list for the filter component.
   const allTags = useMemo(() => {
@@ -189,6 +193,21 @@ export default function CommunityPage() {
     return () => clearTimeout(handler);
   }, [searchQuery, filterTags, loading, fetchFilteredData]);
   
+  // Handler for when a contact is successfully added
+  const handleContactAdded = useCallback(async () => {
+    // Refresh the community data to include the new contact
+    setLoading(true);
+    try {
+      const data = await api.get('/api/community');
+      setAllClients(data);
+      setCommunity(data);
+    } catch (err: any) {
+      setError(err.message || "Failed to refresh data after adding contact.");
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
+  
   const showImportPrompt = user && user.onboarding_complete && !user.onboarding_state?.google_sync_complete;
 
   const stats = {
@@ -215,7 +234,12 @@ export default function CommunityPage() {
       <div className="flex justify-between items-center mb-6 gap-4">
         {/* MagicSearchBar now updates state, which triggers the debounced useEffect */}
         <MagicSearchBar onSearch={setSearchQuery} isLoading={loading} className="flex-grow" placeholder="e.g., Clients who bought over 5 years ago..."/>
-        <button className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-primary-action text-brand-dark rounded-md hover:brightness-110 flex-shrink-0"><Plus size={16} /> Add Contact</button>
+        <button 
+          onClick={() => setIsAddContactModalOpen(true)}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-primary-action text-brand-dark rounded-md hover:brightness-110 flex-shrink-0"
+        >
+          <Plus size={16} /> Add Contact
+        </button>
       </div>
       
       {/* NEW: The TagFilter component is now rendered here */}
@@ -234,6 +258,13 @@ export default function CommunityPage() {
           <p className="text-brand-text-muted">Try clearing your search or adjusting your filters.</p>
         </div>
       )}
+      
+      {/* Add Contact Modal */}
+      <AddContactModal 
+        isOpen={isAddContactModalOpen}
+        onClose={() => setIsAddContactModalOpen(false)}
+        onContactAdded={handleContactAdded}
+      />
     </main>
   );
 }

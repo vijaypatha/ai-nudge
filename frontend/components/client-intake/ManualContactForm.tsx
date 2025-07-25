@@ -31,7 +31,7 @@ export const ManualContactForm = () => {
     try {
       // --- CORRECTED ---
       // The API call now uses the correct 'post' method and endpoint.
-      const newClient = await api.post('/api/clients', {
+      const newClient = await api.post('/api/clients/manual', {
         full_name: fullName,
         email: email || undefined,
         phone_number: phone || undefined,
