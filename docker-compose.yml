@@ -50,6 +50,7 @@ services:
       ENVIRONMENT: development
       WEBSOCKET_ALLOWED_ORIGINS: '["http://localhost:3000"]'
       PYTHONPATH: /app
+      RUNNING_IN_CELERY: "true"
       DATABASE_URL: postgresql://postgres:password123@db:5432/realestate_db
       REDIS_URL: redis://redis:6379
     env_file:
