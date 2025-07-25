@@ -56,12 +56,42 @@ def update_user(user_id: uuid.UUID, update_data: UserUpdate) -> Optional[User]:
 
 # --- Client Functions ---
 
+def format_phone_number(phone: str) -> str:
+    """
+    Formats a phone number to international format for US numbers.
+    Assumes US numbers and adds +1 prefix if not already present.
+    """
+    if not phone:
+        return phone
+    
+    # Remove all non-digit characters
+    cleaned = ''.join(filter(str.isdigit, phone))
+    
+    # If it's a 10-digit US number, add +1 prefix
+    if len(cleaned) == 10:
+        return f"+1{cleaned}"
+    
+    # If it's already in international format (11 digits starting with 1), add + prefix
+    if len(cleaned) == 11 and cleaned.startswith('1'):
+        return f"+{cleaned}"
+    
+    # If it already has + prefix, return as-is
+    if phone.startswith('+'):
+        return phone
+    
+    # For any other format, return as-is (could be international)
+    return phone
+
 def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tuple[Client, bool]:
     """
     Creates a new client or updates an existing one based on deduplication logic.
     Returns a tuple of (client, is_new) where is_new indicates if this is a new client.
     """
     with Session(engine) as session:
+        # Format phone number if provided
+        if client_data.phone:
+            client_data.phone = format_phone_number(client_data.phone)
+        
         # Check for existing duplicate
         existing_client = find_strong_duplicate(session, user_id, client_data)
         
@@ -138,6 +168,9 @@ async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUI
             notes_updated = True
 
         for key, value in update_dict.items():
+            # Format phone number if it's being updated
+            if key == 'phone' and value:
+                value = format_phone_number(value)
             setattr(client, key, value)
         
         if notes_updated:
@@ -154,6 +187,26 @@ async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUI
         session.refresh(client)
                 
         return client, notes_updated
+
+async def delete_client(client_id: UUID, user_id: UUID) -> bool:
+    """
+    Deletes a client and all associated data.
+    Returns True if the client was found and deleted, False otherwise.
+    """
+    with Session(engine) as session:
+        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
+        if not client:
+            return False
+
+        # Delete associated scheduled messages
+        session.exec(delete(ScheduledMessage).where(ScheduledMessage.client_id == client_id))
+        
+        # Delete the client
+        session.delete(client)
+        session.commit()
+        
+        logging.info(f"CRM: Deleted client {client_id} and all associated data for user {user_id}")
+        return True
 
 def update_last_interaction(client_id: uuid.UUID, user_id: uuid.UUID, session: Optional[Session] = None) -> Optional[Client]:
     """

@@ -52,13 +52,29 @@ def find_strong_duplicate(db: Session, user_id: UUID, new_contact: ClientCreate)
         
         # We only proceed if the normalized number is a reasonable length.
         if len(normalized_phone) >= 10:
-            # This assumes phone numbers in the DB are stored in a consistent, perhaps normalized, format.
-            # If not, this query would need to be more complex.
-            statement = select(Client).where(Client.user_id == user_id, Client.phone == normalized_phone)
+            # Check for exact match first
+            statement = select(Client).where(Client.user_id == user_id, Client.phone == new_contact.phone)
             existing_client = db.exec(statement).first()
             if existing_client:
-                logger.info(f"[Deduplication] Found strong duplicate for user {user_id} by normalized phone: {normalized_phone}")
+                logger.info(f"[Deduplication] Found strong duplicate for user {user_id} by exact phone: {new_contact.phone}")
                 return existing_client
+            
+            # Check for normalized match (without +1 prefix)
+            if len(normalized_phone) == 10:
+                # Try matching without +1 prefix
+                statement = select(Client).where(Client.user_id == user_id, Client.phone == normalized_phone)
+                existing_client = db.exec(statement).first()
+                if existing_client:
+                    logger.info(f"[Deduplication] Found strong duplicate for user {user_id} by normalized phone: {normalized_phone}")
+                    return existing_client
+                
+                # Try matching with +1 prefix
+                international_phone = f"+1{normalized_phone}"
+                statement = select(Client).where(Client.user_id == user_id, Client.phone == international_phone)
+                existing_client = db.exec(statement).first()
+                if existing_client:
+                    logger.info(f"[Deduplication] Found strong duplicate for user {user_id} by international phone: {international_phone}")
+                    return existing_client
 
     # --- Strategy 3: Fuzzy Name Match ---
     # This is a fallback for contacts without unique identifiers like email or phone.

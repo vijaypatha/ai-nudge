@@ -7,11 +7,13 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAppContext, Client } from '@/context/AppContext';
 import { Users, Plus, UserCheck, UserX, MessageSquare, Bot, Mail } from 'lucide-react';
 import { MagicSearchBar } from '@/components/ui/MagicSearchBar';
 import { TagFilter } from '@/components/ui/TagFilter'; // NEW IMPORT
 import { AddContactModal } from '@/components/modals/AddContactModal';
+import { EditContactModal } from '@/components/modals/EditContactModal';
 
 // --- HELPER TYPES & COMPONENTS (Unchanged) ---
 
@@ -73,20 +75,58 @@ const HealthBar = ({ score }: { score: number }) => {
   return <div className="w-full bg-white/10 rounded-full h-1.5 mt-2"><div className={`h-1.5 rounded-full ${getColor()}`} style={{ width: `${score}%` }} /></div>;
 };
 
-const CommunityCard = ({ member }: { member: CommunityMember }) => (
-  <Link href={`/conversations/${member.client_id}`} className="block bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 hover:border-white/20 transition-all duration-200 animate-in fade-in-0 zoom-in-95">
-    <div className="flex flex-col h-full">
-      <div className="flex-grow">
-        <h3 className="font-bold text-brand-text-main">{member.full_name}</h3>
-        <p className="text-xs text-brand-text-muted mt-1">{member.last_interaction_days !== null ? `Last contact: ${member.last_interaction_days} days ago` : 'No interactions yet'}</p>
-        <HealthBar score={member.health_score} />
-      </div>
-      <div className="mt-4 flex flex-wrap gap-1.5">
-        {[...member.user_tags, ...(member.ai_tags || [])].slice(0, 3).map(tag => <span key={tag} className="text-xs font-semibold bg-primary-action/20 text-brand-accent px-2 py-0.5 rounded-full">{tag}</span>)}
+const CommunityCard = ({ member, onEdit }: { member: CommunityMember; onEdit: (member: CommunityMember) => void }) => {
+  const router = useRouter();
+  
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Check if the click was on the edit button or its children
+    const target = e.target as HTMLElement;
+    if (target.closest('button[title="Edit contact"]')) {
+      return; // Don't navigate if edit button was clicked
+    }
+    
+    // Navigate to conversation page
+    router.push(`/conversations/${member.client_id}`);
+  };
+
+  return (
+    <div 
+      className="bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 hover:border-white/20 transition-all duration-200 animate-in fade-in-0 zoom-in-95 relative group cursor-pointer"
+      onClick={handleCardClick}
+    >
+      {/* Edit button positioned in top-right corner */}
+      <button
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onEdit(member);
+        }}
+        className="absolute top-2 right-2 z-50 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-white/10 rounded text-brand-text-muted hover:text-white"
+        title="Edit contact"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+        </svg>
+      </button>
+      
+      {/* Card content */}
+      <div className="flex flex-col h-full">
+        <div className="flex-grow">
+          <div className="flex justify-between items-start mb-2">
+            <h3 className="font-bold text-brand-text-main">{member.full_name}</h3>
+            {/* Empty space to maintain layout */}
+            <div className="w-6 h-6"></div>
+          </div>
+          <p className="text-xs text-brand-text-muted mt-1">{member.last_interaction_days !== null ? `Last contact: ${member.last_interaction_days} days ago` : 'No interactions yet'}</p>
+          <HealthBar score={member.health_score} />
+        </div>
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          {[...member.user_tags, ...(member.ai_tags || [])].slice(0, 3).map(tag => <span key={tag} className="text-xs font-semibold bg-primary-action/20 text-brand-accent px-2 py-0.5 rounded-full">{tag}</span>)}
+        </div>
       </div>
     </div>
-  </Link>
-);
+  );
+};
 
 
 // --- MAIN PAGE COMPONENT ---
@@ -103,6 +143,10 @@ export default function CommunityPage() {
   
   // State to hold the complete, unfiltered list of clients
   const [allClients, setAllClients] = useState<CommunityMember[]>([]);
+  
+  // State for edit contact modal
+  const [isEditContactModalOpen, setIsEditContactModalOpen] = useState(false);
+  const [selectedClient, setSelectedClient] = useState<CommunityMember | null>(null);
   
   // State for the Add Contact modal
   const [isAddContactModalOpen, setIsAddContactModalOpen] = useState(false);
@@ -207,6 +251,42 @@ export default function CommunityPage() {
       setLoading(false);
     }
   }, [api]);
+
+  // Handler for when a contact is successfully updated
+  const handleContactUpdated = useCallback(async () => {
+    // Refresh the community data to reflect the updated contact
+    setLoading(true);
+    try {
+      const data = await api.get('/api/community');
+      setAllClients(data);
+      setCommunity(data);
+    } catch (err: any) {
+      setError(err.message || "Failed to refresh data after updating contact.");
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
+
+  // Handler for when a contact is successfully deleted
+  const handleContactDeleted = useCallback(async () => {
+    // Refresh the community data to reflect the deleted contact
+    setLoading(true);
+    try {
+      const data = await api.get('/api/community');
+      setAllClients(data);
+      setCommunity(data);
+    } catch (err: any) {
+      setError(err.message || "Failed to refresh data after deleting contact.");
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
+
+  // Handler for opening the edit contact modal
+  const handleEditContact = useCallback((client: CommunityMember) => {
+    setSelectedClient(client);
+    setIsEditContactModalOpen(true);
+  }, []);
   
   const showImportPrompt = user && user.onboarding_complete && !user.onboarding_state?.google_sync_complete;
 
@@ -249,7 +329,7 @@ export default function CommunityPage() {
        : error ? (<div className="p-8 text-center text-red-400">Error: {error}</div>)
        : community.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {community.map(member => <CommunityCard key={member.client_id} member={member} />)}
+          {community.map(member => <CommunityCard key={member.client_id} member={member} onEdit={handleEditContact} />)}
         </div>
       ) : (
         <div className="text-center py-20 border-2 border-dashed border-white/10 rounded-xl">
@@ -264,6 +344,18 @@ export default function CommunityPage() {
         isOpen={isAddContactModalOpen}
         onClose={() => setIsAddContactModalOpen(false)}
         onContactAdded={handleContactAdded}
+      />
+      
+      {/* Edit Contact Modal */}
+      <EditContactModal 
+        isOpen={isEditContactModalOpen}
+        onClose={() => {
+          setIsEditContactModalOpen(false);
+          setSelectedClient(null);
+        }}
+        client={selectedClient}
+        onContactUpdated={handleContactUpdated}
+        onContactDeleted={handleContactDeleted}
       />
     </main>
   );

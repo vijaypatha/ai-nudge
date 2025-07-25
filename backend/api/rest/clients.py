@@ -268,6 +268,59 @@ async def update_client_details(
 
     return updated_client
 
+@router.delete("/{client_id}")
+async def delete_client(
+    client_id: UUID,
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Deletes a client and all associated data.
+    """
+    logging.info(f"API: Received DELETE request for client {client_id} from user {current_user.id}")
+    
+    success = await crm_service.delete_client(
+        client_id=client_id,
+        user_id=current_user.id
+    )
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    logging.info(f"API: Successfully deleted client {client_id} for user {current_user.id}")
+    return {"message": "Client deleted successfully"}
+
+# --- TEMPORARY ENDPOINT TO FIX PHONE NUMBER FORMATTING ---
+@router.post("/fix-phone-formatting", response_model=List[Client])
+async def fix_phone_number_formatting(
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Temporary endpoint to fix phone number formatting for existing clients.
+    This adds +1 prefix to US phone numbers that don't have it.
+    """
+    from data.crm import format_phone_number
+    
+    clients = crm_service.get_all_clients(user_id=current_user.id)
+    updated_clients = []
+    
+    for client in clients:
+        if client.phone and not client.phone.startswith('+'):
+            # Format the phone number
+            formatted_phone = format_phone_number(client.phone)
+            if formatted_phone != client.phone:
+                # Update the client with the formatted phone number
+                update_data = ClientUpdate(phone=formatted_phone)
+                updated_client, _ = await crm_service.update_client(
+                    client_id=client.id,
+                    update_data=update_data,
+                    user_id=current_user.id
+                )
+                if updated_client:
+                    updated_clients.append(updated_client)
+                    logging.info(f"API: Fixed phone number for client {client.id}: {client.phone} -> {formatted_phone}")
+    
+    return updated_clients
+
 @router.delete("/{client_id}/scheduled-messages", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_client_scheduled_messages(client_id: UUID, current_user: User = Depends(get_current_user_from_token)):
     print(f"API: Received request to delete all scheduled messages for client {client_id}")
