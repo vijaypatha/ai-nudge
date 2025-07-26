@@ -170,7 +170,22 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                         </Link>
                     </div>
                 </aside>
-                {children}
+                <div className="flex-1 flex flex-col min-w-0">
+                    {/* Mobile header with hamburger menu */}
+                    <header className="flex items-center justify-between p-4 border-b border-white/10 bg-brand-dark/50 backdrop-blur-sm sticky top-0 z-10 md:hidden">
+                        <button 
+                            onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
+                            className="p-2 rounded-full text-brand-text-muted hover:bg-white/10"
+                        >
+                            <Menu className="w-6 h-6" />
+                        </button>
+                        <div className="flex items-center gap-2">
+                            <Image src="/AI Nudge Logo.png" alt="AI Nudge Logo" width={120} height={30} priority />
+                        </div>
+                        <div className="w-10"></div> {/* Spacer for centering */}
+                    </header>
+                    {children}
+                </div>
             </div>
         </Suspense>
     );

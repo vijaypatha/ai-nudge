@@ -10,6 +10,7 @@ import { useAppContext, User as UserType } from '@/context/AppContext';
 import { TimezoneSelector } from "@/components/ui/TimezoneSelector";
 import { ContentDiscovery } from "@/components/profile/ContentDiscovery";
 import { ContentResourceManager } from "@/components/profile/ContentResourceManager";
+import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 
 
 export interface FaqItem {
@@ -278,6 +279,13 @@ export default function ProfilePage() {
                 <div className="bg-gray-800/40 rounded-xl border border-white/10 p-8">
                     <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3"><Briefcase /> Business Details</h2>
                     {renderBusinessDetails()}
+                </div>
+                
+                {/* Theme Switcher Section */}
+                <div className="bg-gray-800/40 rounded-xl border border-white/10 p-8">
+                    <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">🎨 App Theme</h2>
+                    <p className="text-sm text-gray-400 mb-4">Choose your preferred color scheme for the entire app.</p>
+                    <ThemeSwitcher />
                 </div>
                 
                 {/* Content Resources Section */}

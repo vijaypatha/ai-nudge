@@ -8,7 +8,6 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import clsx from 'clsx';
 import { useAppContext, Client, Message, ScheduledMessage, CampaignBriefing } from '@/context/AppContext';
-import { useSidebar } from '@/context/SidebarContext';
 
 import { Tabs, TabOption } from '@/components/ui/Tabs';
 import { DynamicTaggingCard } from '@/components/conversation/DynamicTaggingCard';
@@ -20,7 +19,7 @@ import { ContentSuggestionsCard } from '@/components/conversation/ContentSuggest
 import { ScheduleMessageModal } from '@/components/modals/ScheduleMessageModal';
 import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
-import { Users, Menu, Phone, Video, Loader2 } from 'lucide-react';
+import { Users, Phone, Video, Loader2 } from 'lucide-react';
 
 export interface ConversationDisplayConfig {
     client_intel: { title: string; icon: string; };
@@ -48,7 +47,7 @@ interface MessageComposerHandle {
 export default function ConversationPage({ params }: ConversationPageProps) {
     const { clientId } = params;
     const { user, api, token, properties, updateClientInList, refetchScheduledMessagesForClient, refreshConversations } = useAppContext();
-    const { setIsSidebarOpen } = useSidebar();
+
     const router = useRouter();
     
     const [pageState, setPageState] = useState<'loading' | 'error' | 'loaded'>('loading');
@@ -290,7 +289,6 @@ export default function ConversationPage({ params }: ConversationPageProps) {
             <main className="flex-1 flex flex-col min-w-0 lg:border-l lg:border-r border-white/10">
                 <header className="flex items-center justify-between p-4 border-b border-white/10 bg-brand-dark/50 backdrop-blur-sm sticky top-0 z-10">
                     <div className="flex items-center gap-4">
-                        <button onClick={() => setIsSidebarOpen(true)} className="p-2 rounded-full text-brand-text-muted hover:bg-white/10 md:hidden"><Menu className="w-6 h-6" /></button>
                         <Avatar name={selectedClient.full_name} className="w-11 h-11 hidden sm:flex" />
                         <div>
                             <h2 className="text-xl font-bold text-brand-text-main">{selectedClient.full_name}</h2>

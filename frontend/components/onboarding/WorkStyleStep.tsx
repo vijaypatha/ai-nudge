@@ -45,6 +45,7 @@ export const WorkStyleStep = ({ onComplete }: { onComplete: () => void }) => {
             const updatedState = { ...user?.onboarding_state, work_style_set: true };
             await api.put('/api/users/me', {
                 user_type: formData.user_type,
+                vertical: formData.user_type === 'therapist' ? 'therapy' : 'real_estate',
                 onboarding_state: updatedState
             });
             await refreshUser(); // Refresh user data in context
