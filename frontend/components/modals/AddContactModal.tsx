@@ -11,9 +11,10 @@ interface AddContactModalProps {
     isOpen: boolean;
     onClose: () => void;
     onContactAdded: () => void;
+    onShowConfetti?: () => void;
 }
 
-export const AddContactModal: FC<AddContactModalProps> = ({ isOpen, onClose, onContactAdded }) => {
+export const AddContactModal: FC<AddContactModalProps> = ({ isOpen, onClose, onContactAdded, onShowConfetti }) => {
     const { api } = useAppContext();
     const [fullName, setFullName] = useState('');
     const [email, setEmail] = useState('');
@@ -52,6 +53,10 @@ export const AddContactModal: FC<AddContactModalProps> = ({ isOpen, onClose, onC
             setTimeout(() => {
                 setSuccess(null);
                 onClose();
+                // Trigger confetti on the parent page
+                if (onShowConfetti) {
+                    onShowConfetti();
+                }
             }, 2000);
 
         } catch (err: any) {

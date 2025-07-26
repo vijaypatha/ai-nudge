@@ -14,6 +14,8 @@ import { MagicSearchBar } from '@/components/ui/MagicSearchBar';
 import { TagFilter } from '@/components/ui/TagFilter'; // NEW IMPORT
 import { AddContactModal } from '@/components/modals/AddContactModal';
 import { EditContactModal } from '@/components/modals/EditContactModal';
+import Confetti from 'react-confetti';
+import { ACTIVE_THEME } from '@/utils/theme';
 
 // --- HELPER TYPES & COMPONENTS (Unchanged) ---
 
@@ -170,6 +172,8 @@ export default function CommunityPage() {
   
   // State for the Add Contact modal
   const [isAddContactModalOpen, setIsAddContactModalOpen] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
 
   // Memoize all unique tags from the full client list for the filter component.
   const allTags = useMemo(() => {
@@ -316,8 +320,36 @@ export default function CommunityPage() {
     atRisk: community.filter(c => c.health_score <= 40).length,
   };
 
+  useEffect(() => {
+      const handleResize = () => setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+      window.addEventListener('resize', handleResize);
+      handleResize();
+      return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const handleShowConfetti = useCallback(() => {
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 5000);
+  }, []);
+
   return (
     <main className="flex-1 overflow-y-auto p-6 md:p-8">
+      {showConfetti && (
+          <Confetti
+              width={windowSize.width}
+              height={windowSize.height}
+              recycle={false}
+              numberOfPieces={300}
+              tweenDuration={5000}
+              colors={[
+                  ACTIVE_THEME.primary.from, 
+                  ACTIVE_THEME.primary.to, 
+                  ACTIVE_THEME.accent, 
+                  ACTIVE_THEME.action,
+                  '#ffffff'
+              ]}
+          />
+      )}
       <header className="mb-8">
         <h1 className="text-3xl font-bold text-white flex items-center gap-3"><Users size={32} />Community</h1>
         <p className="text-brand-text-muted mt-1">A strategic overview of your entire client audience.</p>
@@ -364,6 +396,7 @@ export default function CommunityPage() {
         isOpen={isAddContactModalOpen}
         onClose={() => setIsAddContactModalOpen(false)}
         onContactAdded={handleContactAdded}
+        onShowConfetti={handleShowConfetti}
       />
       
       {/* Edit Contact Modal */}
