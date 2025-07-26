@@ -172,7 +172,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 </aside>
                 <div className="flex-1 flex flex-col min-w-0">
                     {/* Mobile header with hamburger menu */}
-                    <header className="flex items-center justify-between p-4 border-b border-white/10 bg-brand-dark/50 backdrop-blur-sm sticky top-0 z-10 md:hidden">
+                    <header className="flex items-center justify-between p-4 border-b border-white/10 bg-brand-dark/50 backdrop-blur-sm sticky top-0 z-40 md:hidden">
                         <button 
                             onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
                             className="p-2 rounded-full text-brand-text-muted hover:bg-white/10"

@@ -287,7 +287,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                 initialContent={composerContent}
             />
             <main className="flex-1 flex flex-col min-w-0 lg:border-l lg:border-r border-white/10">
-                <header className="flex items-center justify-between p-4 border-b border-white/10 bg-brand-dark/50 backdrop-blur-sm sticky top-0 z-10">
+                <header className="flex items-center justify-between p-4 border-b border-white/10 bg-brand-dark/50 backdrop-blur-sm md:sticky md:top-0 z-30">
                     <div className="flex items-center gap-4">
                         <Avatar name={selectedClient.full_name} className="w-11 h-11 hidden sm:flex" />
                         <div>
