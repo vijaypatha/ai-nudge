@@ -41,14 +41,9 @@ export const ManualContactForm = ({ onContactAdded }: { onContactAdded?: (client
     try {
       const newClient = await api.post('/api/clients', formData);
       
-      // Check if this is a milestone contact
-      const totalContacts = await api.get('/api/clients').then(res => res.length);
-      const isMilestone = [1, 10, 25, 50, 100].includes(totalContacts);
-      
-      if (isMilestone) {
-        setShowConfetti(true);
-        setTimeout(() => setShowConfetti(false), 4000); // Hide after 4 seconds
-      }
+      // Show confetti for every successful contact addition
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 7000); // Hide after 7 seconds
       
       setSuccess(`Successfully added ${newClient.full_name}!`);
       setFormData({ full_name: '', email: '', phone: '', company: '', notes: '' });
@@ -68,14 +63,14 @@ export const ManualContactForm = ({ onContactAdded }: { onContactAdded?: (client
 
   return (
     <>
-      {/* Confetti for milestone contacts */}
+      {/* Confetti for successful contact additions */}
       {showConfetti && (
         <Confetti
           width={windowSize.width}
           height={windowSize.height}
           recycle={false}
-          numberOfPieces={200}
-          tweenDuration={4000}
+          numberOfPieces={600}
+          tweenDuration={7000}
           colors={[
             ACTIVE_THEME.primary.from,
             ACTIVE_THEME.primary.to,

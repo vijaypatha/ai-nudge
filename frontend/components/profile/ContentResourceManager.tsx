@@ -101,7 +101,7 @@ export const ContentResourceManager: FC<ContentResourceManagerProps> = ({ api })
       
       // Show confetti for successful resource addition
       setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 4000);
+      setTimeout(() => setShowConfetti(false), 7000);
     } catch (err: any) {
       setError(err.message || 'Failed to add resource');
     }
@@ -214,8 +214,8 @@ export const ContentResourceManager: FC<ContentResourceManagerProps> = ({ api })
           width={windowSize.width}
           height={windowSize.height}
           recycle={false}
-          numberOfPieces={200}
-          tweenDuration={4000}
+          numberOfPieces={600}
+          tweenDuration={7000}
           colors={[
             ACTIVE_THEME.primary.from,
             ACTIVE_THEME.primary.to,

@@ -71,8 +71,8 @@ export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDism
           width={windowSize.width}
           height={windowSize.height}
           recycle={false}
-          numberOfPieces={300}
-          tweenDuration={4000}
+          numberOfPieces={600}
+          tweenDuration={7000}
           colors={[
             ACTIVE_THEME.primary.from,
             ACTIVE_THEME.primary.to,

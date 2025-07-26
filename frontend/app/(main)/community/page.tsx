@@ -329,7 +329,7 @@ export default function CommunityPage() {
 
   const handleShowConfetti = useCallback(() => {
       setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 5000);
+      setTimeout(() => setShowConfetti(false), 7000);
   }, []);
 
   return (
@@ -339,8 +339,8 @@ export default function CommunityPage() {
               width={windowSize.width}
               height={windowSize.height}
               recycle={false}
-              numberOfPieces={300}
-              tweenDuration={5000}
+              numberOfPieces={600}
+              tweenDuration={7000}
               colors={[
                   ACTIVE_THEME.primary.from, 
                   ACTIVE_THEME.primary.to, 

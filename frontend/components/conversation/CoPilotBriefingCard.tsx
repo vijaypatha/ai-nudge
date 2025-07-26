@@ -54,7 +54,7 @@ export const CoPilotBriefingCard = ({ briefing, onActionSuccess }: CoPilotBriefi
       
       // Show confetti on success
       setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 4000); // Hide after 4 seconds
+      setTimeout(() => setShowConfetti(false), 7000); // Hide after 7 seconds
       
       // On success, call the parent's callback function to refresh the conversation view
       onActionSuccess();
@@ -75,8 +75,8 @@ export const CoPilotBriefingCard = ({ briefing, onActionSuccess }: CoPilotBriefi
           width={windowSize.width}
           height={windowSize.height}
           recycle={false}
-          numberOfPieces={200}
-          tweenDuration={4000}
+          numberOfPieces={600}
+          tweenDuration={7000}
           colors={[
             ACTIVE_THEME.primary.from,
             ACTIVE_THEME.primary.to,

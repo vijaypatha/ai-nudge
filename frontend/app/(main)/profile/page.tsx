@@ -213,7 +213,7 @@ export default function ProfilePage() {
                 await api.post('/api/faqs/', payload);
                 // Show confetti for new FAQ
                 setShowConfetti(true);
-                setTimeout(() => setShowConfetti(false), 4000);
+                setTimeout(() => setShowConfetti(false), 7000);
             } else {
                 await api.put(`/api/faqs/${id}`, payload);
             }
@@ -273,8 +273,8 @@ export default function ProfilePage() {
                     width={windowSize.width}
                     height={windowSize.height}
                     recycle={false}
-                    numberOfPieces={200}
-                    tweenDuration={4000}
+                    numberOfPieces={600}
+                    tweenDuration={7000}
                     colors={[
                         ACTIVE_THEME.primary.from,
                         ACTIVE_THEME.primary.to,

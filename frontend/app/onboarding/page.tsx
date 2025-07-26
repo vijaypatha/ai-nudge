@@ -100,6 +100,17 @@ const Step2ContactImport: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({
     const [isLoading, setIsLoading] = useState(false);
     const [contactAdded, setContactAdded] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [showConfetti, setShowConfetti] = useState(false);
+    const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+
+    // Add window size tracking for confetti
+    useEffect(() => {
+        const handleResize = () => setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+        window.addEventListener('resize', handleResize);
+        handleResize();
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
     const handleManualAdd = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoading(true);
@@ -108,6 +119,11 @@ const Step2ContactImport: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({
             await api.post('/api/clients/manual', { full_name: manualContact.name, email: manualContact.email, phone_number: manualContact.phone });
             setContactAdded(true);
             setManualContact({ name: '', email: '', phone: '' });
+            
+            // Show confetti for successful manual add
+            setShowConfetti(true);
+            setTimeout(() => setShowConfetti(false), 7000); // Hide after 7 seconds
+            
             setTimeout(() => setContactAdded(false), 3000);
         } catch (err: any) {
             setError(err.message || 'Failed to add contact. Please check the backend.');
@@ -136,7 +152,25 @@ const Step2ContactImport: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({
         }
     };
     return (
-        <div className="bg-glass-card p-8 rounded-2xl">
+        <>
+            {/* Confetti for successful manual contact addition */}
+            {showConfetti && (
+                <Confetti
+                    width={windowSize.width}
+                    height={windowSize.height}
+                    recycle={false}
+                    numberOfPieces={600}
+                    tweenDuration={7000}
+                    colors={[
+                        ACTIVE_THEME.primary.from, 
+                        ACTIVE_THEME.primary.to, 
+                        ACTIVE_THEME.accent, 
+                        ACTIVE_THEME.action,
+                        '#ffffff'
+                    ]}
+                />
+            )}
+            <div className="bg-glass-card p-8 rounded-2xl">
             <h1 className="text-3xl font-bold text-center text-white mb-2">Now, let's bring in your people.</h1>
             <p className="text-center text-gray-400 mb-8">Import contacts to let your AI co-pilot find opportunities.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -178,6 +212,7 @@ const Step2ContactImport: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({
             <p className="text-xs text-center text-gray-500 mb-8">We never store your passwords and only access basic contact information.</p>
             <button onClick={() => setStep(3)} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-400 to-blue-500 text-white font-bold py-4 rounded-lg text-lg hover:opacity-90 transition-all shadow-button">Continue<ArrowRight className="w-5 h-5" /></button>
         </div>
+        </>
     );
 };
 const Step3ActivateNumber: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({ setStep }) => {
@@ -243,8 +278,8 @@ const Step4Celebration: FC = () => {
                 width={windowSize.width} 
                 height={windowSize.height} 
                 recycle={false} 
-                numberOfPieces={500} 
-                tweenDuration={8000} 
+                numberOfPieces={600} 
+                tweenDuration={7000} 
                 colors={[
                     ACTIVE_THEME.primary.from, 
                     ACTIVE_THEME.primary.to, 
@@ -298,8 +333,8 @@ const ImportCelebration: FC<{ onDismiss: () => void }> = ({ onDismiss }) => {
                 width={windowSize.width}
                 height={windowSize.height}
                 recycle={false}
-                numberOfPieces={400}
-                tweenDuration={5000}
+                numberOfPieces={600}
+                tweenDuration={7000}
                 colors={[
                     ACTIVE_THEME.primary.from, 
                     ACTIVE_THEME.primary.to, 
