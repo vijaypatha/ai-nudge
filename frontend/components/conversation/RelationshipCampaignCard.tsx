@@ -4,12 +4,15 @@
 
 'use client';
 
-import { useState, ReactNode } from 'react';
+import { useState, ReactNode, useEffect } from 'react';
 import { Zap, Sparkles, Calendar, Edit2, Loader2, Check, X, PauseCircle, BrainCircuit, ArrowRight } from 'lucide-react';
 import { ScheduledMessage, CampaignBriefing } from '@/context/AppContext';
 import { InfoCard } from '../ui/InfoCard';
 import { EditMessageModal } from './EditMessageModal';
 import { ConversationDisplayConfig } from '@/app/(main)/conversations/[clientId]/page';
+import { motion } from 'framer-motion';
+import { ACTIVE_THEME } from '@/utils/theme';
+import Confetti from 'react-confetti';
 
 const ICONS: Record<string, ReactNode> = {
     BrainCircuit: <BrainCircuit className="h-4 w-4 text-gray-400" />,
@@ -29,6 +32,15 @@ interface RelationshipCampaignCardProps {
 
 export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDismissPlan, isProcessing, isSuccess, onViewScheduled, displayConfig }: RelationshipCampaignCardProps) => {
   const [editingMessage, setEditingMessage] = useState<ScheduledMessage | null>(null);
+  const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+
+  // Add window size tracking for confetti
+  useEffect(() => {
+    const handleResize = () => setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // --- DYNAMIC CONFIGURATION ---
   const config = displayConfig?.relationship_campaign || { title: 'Relationship Campaign', icon: 'Default' };
@@ -53,6 +65,24 @@ export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDism
   
   return (
     <>
+      {/* Confetti for successful plan activation */}
+      {isSuccess && (
+        <Confetti
+          width={windowSize.width}
+          height={windowSize.height}
+          recycle={false}
+          numberOfPieces={300}
+          tweenDuration={4000}
+          colors={[
+            ACTIVE_THEME.primary.from,
+            ACTIVE_THEME.primary.to,
+            ACTIVE_THEME.accent,
+            ACTIVE_THEME.action,
+            '#ffffff'
+          ]}
+        />
+      )}
+
       {editingMessage && (
         <EditMessageModal
           isOpen={!!editingMessage}
@@ -67,8 +97,9 @@ export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDism
             <div className="p-3 -m-2 rounded-lg bg-green-600/10 text-center animate-fade-in">
                 <div className="flex items-center justify-center gap-2 font-semibold text-green-300">
                     <Check className="h-5 w-5" />
-                    <p>Plan Activated!</p>
+                    <p>🎉 Plan Activated!</p>
                 </div>
+                <p className="text-sm text-green-200 mt-1">Your relationship campaign is now live!</p>
                 <button
                     onClick={onViewScheduled}
                     className="mt-3 text-sm text-white font-semibold flex items-center justify-center gap-2 w-full bg-white/10 hover:bg-white/20 py-2 rounded-md transition-colors"

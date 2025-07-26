@@ -2,125 +2,159 @@
 // DEFINITIVE FIX: Replaces the non-existent 'addManualClient' with the correct 'api.post' method.
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { motion } from 'framer-motion';
 import { useAppContext } from "@/context/AppContext";
-import { CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Loader2, UserPlus } from 'lucide-react';
+import { ACTIVE_THEME } from '@/utils/theme';
+import Confetti from 'react-confetti';
 
-export const ManualContactForm = () => {
+export const ManualContactForm = ({ onContactAdded }: { onContactAdded?: (client: any) => void }) => {
   const { api } = useAppContext();
-
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  
+  const [formData, setFormData] = useState({
+    full_name: '',
+    email: '',
+    phone: '',
+    company: '',
+    notes: ''
+  });
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+
+  // Add window size tracking for confetti
+  useEffect(() => {
+    const handleResize = () => setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName) {
-      setError("Full name is required.");
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
     setSuccess(null);
 
     try {
-      // --- CORRECTED ---
-      // The API call now uses the correct 'post' method and endpoint.
-      const newClient = await api.post('/api/clients/manual', {
-        full_name: fullName,
-        email: email || undefined,
-        phone_number: phone || undefined,
-      });
-
+      const newClient = await api.post('/api/clients', formData);
+      
+      // Check if this is a milestone contact
+      const totalContacts = await api.get('/api/clients').then(res => res.length);
+      const isMilestone = [1, 10, 25, 50, 100].includes(totalContacts);
+      
+      if (isMilestone) {
+        setShowConfetti(true);
+        setTimeout(() => setShowConfetti(false), 4000); // Hide after 4 seconds
+      }
+      
       setSuccess(`Successfully added ${newClient.full_name}!`);
-      setFullName('');
-      setEmail('');
-      setPhone('');
-
+      setFormData({ full_name: '', email: '', phone: '', company: '', notes: '' });
+      
+      if (onContactAdded) {
+        onContactAdded(newClient);
+      }
+      
+      // Auto-hide success message
       setTimeout(() => setSuccess(null), 4000);
-
     } catch (err: any) {
-      const errorMessage = err.message || "An unknown error occurred.";
-      setError(errorMessage);
-      console.error(err);
+      setError(err.message || 'Failed to add contact');
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-6">
-       <h3 className="text-lg font-semibold leading-none tracking-tight">Add Manually</h3>
-       <p className="text-sm text-muted-foreground mt-1 mb-4">
-        Add a single contact directly.
-      </p>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label htmlFor="full_name" className="block text-sm font-medium text-gray-300">Full Name</label>
-          <input 
-            type="text" 
-            id="full_name"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            className="w-full input-field mt-1" 
-            placeholder="e.g., Alex Martinez"
-            required
-          />
-        </div>
-        <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-300">Email</label>
-          <input 
-            type="email" 
-            id="email" 
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full input-field mt-1"
-            placeholder="alex@example.com"
-          />
-        </div>
-         <div>
-          <label htmlFor="phone" className="block text-sm font-medium text-gray-300">Phone</label>
-          <input 
-            type="tel" 
-            id="phone" 
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            className="w-full input-field mt-1"
-            placeholder="(555) 123-4567"
-          />
-        </div>
-        <button 
-            type="submit" 
-            disabled={isLoading} 
-            className="w-full btn-secondary flex items-center justify-center gap-2"
-        >
-          {isLoading ? (
-            <>
-              <Loader2 size={16} className="animate-spin" />
-              <span>Adding...</span>
-            </>
-          ) : (
-            'Add Contact'
-          )}
-        </button>
-        {success && (
+    <>
+      {/* Confetti for milestone contacts */}
+      {showConfetti && (
+        <Confetti
+          width={windowSize.width}
+          height={windowSize.height}
+          recycle={false}
+          numberOfPieces={200}
+          tweenDuration={4000}
+          colors={[
+            ACTIVE_THEME.primary.from,
+            ACTIVE_THEME.primary.to,
+            ACTIVE_THEME.accent,
+            ACTIVE_THEME.action,
+            '#ffffff'
+          ]}
+        />
+      )}
+
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <UserPlus className="w-5 h-5" />
+          Add New Contact
+        </h3>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="full_name" className="block text-sm font-medium text-gray-300">Full Name</label>
+            <input 
+              type="text" 
+              id="full_name"
+              value={formData.full_name}
+              onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+              className="w-full input-field mt-1" 
+              placeholder="e.g., Alex Martinez"
+              required
+            />
+          </div>
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-300">Email</label>
+            <input 
+              type="email" 
+              id="email" 
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              className="w-full input-field mt-1"
+              placeholder="alex@example.com"
+            />
+          </div>
+           <div>
+            <label htmlFor="phone" className="block text-sm font-medium text-gray-300">Phone</label>
+            <input 
+              type="tel" 
+              id="phone" 
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              className="w-full input-field mt-1"
+              placeholder="(555) 123-4567"
+            />
+          </div>
+          <button 
+              type="submit" 
+              disabled={isLoading} 
+              className="w-full btn-secondary flex items-center justify-center gap-2"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                <span>Adding...</span>
+              </>
+            ) : (
+              'Add Contact'
+            )}
+          </button>
+          {success && (
             <div className="mt-4 flex items-center gap-2 text-sm text-green-400 animate-in fade-in-0">
-                <CheckCircle2 size={16}/> 
-                <span>{success}</span>
+              <CheckCircle2 size={16}/> 
+              <span>{success}</span>
             </div>
-        )}
-        {error && (
+          )}
+          {error && (
             <div className="mt-4 flex items-center gap-2 text-sm text-red-400 animate-in fade-in-0">
-                <AlertTriangle size={16}/> 
-                <span>{error}</span>
+              <AlertTriangle size={16}/> 
+              <span>{error}</span>
             </div>
-        )}
-      </form>
-    </div>
+          )}
+        </form>
+      </div>
+    </>
   );
 };

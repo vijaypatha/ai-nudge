@@ -2,11 +2,15 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { CampaignBriefing } from '@/context/AppContext';
 import { Button } from '@/components/ui/Button';
 import { Lightbulb, Check, RefreshCw, Loader } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext'; // Assuming you have this for API calls
+import { InfoCard } from '@/components/ui/InfoCard';
+import { ACTIVE_THEME } from '@/utils/theme';
+import Confetti from 'react-confetti';
 
 interface CoPilotBriefingCardProps {
   briefing: CampaignBriefing;
@@ -16,6 +20,16 @@ interface CoPilotBriefingCardProps {
 export const CoPilotBriefingCard = ({ briefing, onActionSuccess }: CoPilotBriefingCardProps) => {
   const { api } = useAppContext();
   const [processingAction, setProcessingAction] = useState<string | null>(null);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+
+  // Add window size tracking for confetti
+  useEffect(() => {
+    const handleResize = () => setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const actions = briefing.key_intel.actions || [];
 
@@ -37,6 +51,11 @@ export const CoPilotBriefingCard = ({ briefing, onActionSuccess }: CoPilotBriefi
       await api.post(`/api/campaigns/${briefing.id}/action`, {
         action_type: actionType,
       });
+      
+      // Show confetti on success
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 4000); // Hide after 4 seconds
+      
       // On success, call the parent's callback function to refresh the conversation view
       onActionSuccess();
     } catch (error) {
@@ -49,26 +68,51 @@ export const CoPilotBriefingCard = ({ briefing, onActionSuccess }: CoPilotBriefi
   };
 
   return (
-    <div className="bg-yellow-900/40 border border-dashed border-yellow-500/50 rounded-lg p-4 my-4 shadow-lg animate-fade-in-up">
-      <h4 className="flex items-center gap-2 text-sm font-bold text-yellow-300 mb-2">
-        <Lightbulb className="w-4 h-4 text-yellow-400" />
-        Co-Pilot Suggestion
-      </h4>
-      <p className="text-sm text-yellow-200/90 mb-4">{briefing.original_draft}</p>
-      <div className="flex flex-wrap gap-3">
-        {actions.map((action: any) => (
-          <Button
-            key={action.type}
-            onClick={() => handleAction(action.type)}
-            disabled={!!processingAction}
-            variant="secondary"
-            className="bg-yellow-500/10 text-yellow-200 hover:bg-yellow-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {getIconForAction(action.type)}
-            {action.label}
-          </Button>
-        ))}
-      </div>
-    </div>
+    <>
+      {/* Confetti for successful action completion */}
+      {showConfetti && (
+        <Confetti
+          width={windowSize.width}
+          height={windowSize.height}
+          recycle={false}
+          numberOfPieces={200}
+          tweenDuration={4000}
+          colors={[
+            ACTIVE_THEME.primary.from,
+            ACTIVE_THEME.primary.to,
+            ACTIVE_THEME.accent,
+            ACTIVE_THEME.action,
+            '#ffffff'
+          ]}
+        />
+      )}
+
+      <InfoCard title="AI Co-Pilot Briefing" icon="BrainCircuit">
+        <div className="space-y-4">
+          <div className="text-sm text-gray-300">
+            {briefing.key_intel.summary}
+          </div>
+          
+          {actions.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-sm font-semibold text-white">Recommended Actions:</h4>
+              <div className="flex flex-wrap gap-2">
+                {actions.map((action: any, index: number) => (
+                  <button
+                    key={index}
+                    onClick={() => handleAction(action.type)}
+                    disabled={processingAction !== null}
+                    className="flex items-center gap-2 px-3 py-2 text-sm bg-white/10 hover:bg-white/20 rounded-md transition-colors disabled:opacity-50"
+                  >
+                    {getIconForAction(action.type)}
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </InfoCard>
+    </>
   );
 };

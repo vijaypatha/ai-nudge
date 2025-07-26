@@ -13,6 +13,8 @@ import { useAppContext } from '@/context/AppContext';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { Building, Handshake, ShoppingCart, CheckCircle, ArrowRight, UserPlus, Check, Search, Sparkles, Briefcase } from 'lucide-react';
 import Confetti from 'react-confetti';
+import { ACTIVE_THEME } from '@/utils/theme';
+import Image from 'next/image';
 
 // All sub-components (ProgressBar, Step1, Step2, etc.) remain unchanged...
 const roles = [
@@ -237,12 +239,40 @@ const Step4Celebration: FC = () => {
     }, []);
     return (
         <>
-            <Confetti width={windowSize.width} height={windowSize.height} recycle={false} numberOfPieces={500} tweenDuration={8000} colors={['#22d3ee', '#3b82f6', '#a5f3fc', '#fff']} />
+            <Confetti 
+                width={windowSize.width} 
+                height={windowSize.height} 
+                recycle={false} 
+                numberOfPieces={500} 
+                tweenDuration={8000} 
+                colors={[
+                    ACTIVE_THEME.primary.from, 
+                    ACTIVE_THEME.primary.to, 
+                    ACTIVE_THEME.accent, 
+                    ACTIVE_THEME.action,
+                    '#ffffff'
+                ]} 
+            />
             <div className="text-center p-8">
-                <div className="inline-block p-4 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 rounded-full mb-6 ring-4 ring-cyan-500/20"><Sparkles className="w-16 h-16 text-cyan-300" /></div>
-                <h1 className="text-4xl font-bold text-white mb-4">You're all set!</h1>
-                <p className="text-xl text-gray-300 mb-8">Your AI co-pilot is ready to find opportunities in your network.</p>
-                <button onClick={() => router.push('/community')} className="px-8 flex items-center mx-auto justify-center gap-2 bg-gradient-to-r from-cyan-400 to-blue-500 text-white font-bold py-4 rounded-lg text-lg hover:opacity-90 transition-all shadow-button">Go to My Community <ArrowRight /></button>
+                <div className="inline-block p-4 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 rounded-full mb-6 ring-4 ring-cyan-500/20">
+                    <Sparkles className="w-16 h-16 text-cyan-300" />
+                </div>
+                <div className="mb-6">
+                    <Image 
+                        src="/AI Nudge Logo.png" 
+                        alt="AI Nudge" 
+                        width={200} 
+                        height={50} 
+                        className="mx-auto"
+                        priority 
+                    />
+                </div>
+                <h1 className="text-4xl font-bold text-white mb-4">🎉 Welcome to AI Nudge!</h1>
+                <p className="text-xl text-gray-300 mb-4">Your AI co-pilot is ready to find opportunities in your network.</p>
+                <p className="text-lg text-gray-400 mb-8">Start discovering hidden connections and growing your business.</p>
+                <button onClick={() => router.push('/community')} className="px-8 flex items-center mx-auto justify-center gap-2 bg-gradient-to-r from-cyan-400 to-blue-500 text-white font-bold py-4 rounded-lg text-lg hover:opacity-90 transition-all shadow-button">
+                    Explore My Community <ArrowRight />
+                </button>
             </div>
         </>
     );
@@ -270,7 +300,13 @@ const ImportCelebration: FC<{ onDismiss: () => void }> = ({ onDismiss }) => {
                 recycle={false}
                 numberOfPieces={400}
                 tweenDuration={5000}
-                colors={['#22d3ee', '#3b82f6', '#a5f3fc', '#fff']}
+                colors={[
+                    ACTIVE_THEME.primary.from, 
+                    ACTIVE_THEME.primary.to, 
+                    ACTIVE_THEME.accent, 
+                    ACTIVE_THEME.action,
+                    '#ffffff'
+                ]}
             />
             <motion.div
                 initial={{ opacity: 0, y: 50, scale: 0.9 }}
@@ -281,13 +317,14 @@ const ImportCelebration: FC<{ onDismiss: () => void }> = ({ onDismiss }) => {
                 <div className="inline-block p-3 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 rounded-full mb-4 ring-4 ring-cyan-500/20">
                     <CheckCircle className="w-12 h-12 text-cyan-300" />
                 </div>
-                <h2 className="text-3xl font-bold text-white mb-2">Contacts Imported!</h2>
-                <p className="text-lg text-gray-300 mb-6">Great! Now for the final step.</p>
+                <h2 className="text-3xl font-bold text-white mb-2">✅ Contacts Successfully Imported!</h2>
+                <p className="text-lg text-gray-300 mb-4">Your network is now connected to AI Nudge.</p>
+                <p className="text-sm text-gray-400 mb-6">Ready to discover opportunities in your contacts.</p>
                 <button
                     onClick={onDismiss}
                     className="px-6 py-3 bg-gradient-to-r from-cyan-400 to-blue-500 text-white font-bold rounded-lg hover:opacity-90 transition-opacity"
                 >
-                    Continue
+                    Continue Setup
                 </button>
             </motion.div>
         </motion.div>
