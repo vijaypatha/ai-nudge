@@ -98,13 +98,13 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 )}
 
                 <aside className={clsx(
-                    "bg-brand-dark border-r border-white/10 flex flex-col transition-transform duration-300 ease-in-out z-40",
+                    "bg-brand-dark border-r border-white/10 flex flex-col transition-transform duration-300 ease-in-out z-50 [backface-visibility:hidden]",
                     "absolute md:relative inset-y-0 left-0 w-80",
                     isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
                 )}>
                     <div className="p-4 flex-shrink-0">
                         <button onClick={() => router.push('/dashboard')}>
-                            <Image src="/AI Nudge Logo.png" alt="AI Nudge Logo" width={260} height={60} priority />
+                            <Image src="/AI Nudge Logo.png" alt="AI Nudge Logo" width={260} height={60} sizes="260px" priority  />
                         </button>
                     </div>
                     <nav className="px-4 space-y-1.5 flex-shrink-0">
