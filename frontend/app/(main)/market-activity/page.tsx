@@ -298,7 +298,7 @@ export default function MarketActivityPage() {
       .filter((media: any) => media.MediaCategory === 'Photo' || media.Category === 'Photo')
       .map((media: any) => media.MediaURL || media.URL || media.Url);
     
-    return photos.filter(url => url); // Filter out any null/undefined URLs
+    return photos.filter((url: string | undefined | null) => url); // Filter out any null/undefined URLs
   };
 
   const getMainPhotoUrl = (standardFields: any): string => {

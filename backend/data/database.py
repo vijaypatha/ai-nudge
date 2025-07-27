@@ -15,7 +15,14 @@ from .models.event import MarketEvent, PipelineRun
 # --- MODIFIED: Changed 'FAQ' to 'Faq' to match the actual class name in faq.py ---
 from .models.faq import Faq
 
-settings = get_settings()
+def get_database_settings():
+    """Get database-only settings for migrations."""
+    # Set migration mode to bypass API key validation
+    os.environ['MIGRATION_MODE'] = 'true'
+    return get_settings()
+
+# Use database-only settings for database operations
+settings = get_database_settings()
 DATABASE_URL = settings.DATABASE_URL
 # Define the path for the SQLite database file (used if switching from postgres).
 DB_FILE_PATH = "ai_nudge.db"

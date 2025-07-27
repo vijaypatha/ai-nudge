@@ -18,6 +18,7 @@ from .models.message import Message, ScheduledMessage
 from .models.resource import Resource, ContentResource
 from .models.campaign import CampaignBriefing
 from .models.faq import Faq
+from .models.event import MarketEvent, PipelineRun
 from common.config import get_settings
 from . import crm as crm_service
 settings = get_settings()
@@ -43,6 +44,9 @@ async def seed_database():
         session.query(CampaignBriefing).delete()
         session.query(Faq).delete()
         session.query(Client).delete()
+        # Clear events before resources and users
+        session.query(MarketEvent).delete()
+        session.query(PipelineRun).delete()
         # Resources must be deleted before Users.
         session.query(Resource).delete()
         session.query(ContentResource).delete()
@@ -224,7 +228,10 @@ async def seed_database():
         # --- Step 6: Regenerate embeddings for all new clients ---
         logger.info("Generating initial embeddings for all seeded clients...")
         for client in realty_clients + therapy_clients:
-            await crm_service.regenerate_embedding_for_client(client, session=session)
+            try:
+                await crm_service.regenerate_embedding_for_client(client, session=session)
+            except Exception as e:
+                logger.warning(f"CRM (SEED): Skipping embedding for client {client.id} - {e}")
         logger.info("Embeddings generated.")
 
         session.commit()

@@ -374,10 +374,15 @@ async def regenerate_embedding_for_client(client: Client, session: Session):
     This is a helper designed for seeding or backfilling operations.
     """
     if client.notes and client.notes.strip():
-        logging.info(f"CRM (SEED): Generating embedding for client {client.id} - {client.full_name}")
-        embedding = await llm_client.generate_embedding(client.notes)
-        client.notes_embedding = embedding
-        session.add(client)
+        try:
+            logging.info(f"CRM (SEED): Generating embedding for client {client.id} - {client.full_name}")
+            embedding = await llm_client.generate_embedding(client.notes)
+            client.notes_embedding = embedding
+            session.add(client)
+        except Exception as e:
+            logging.warning(f"CRM (SEED): Failed to generate embedding for client {client.id} - {client.full_name}: {e}")
+            client.notes_embedding = None
+            session.add(client)
     else:
         logging.info(f"CRM (SEED): Skipping embedding for client {client.id} - no notes.")
         client.notes_embedding = None

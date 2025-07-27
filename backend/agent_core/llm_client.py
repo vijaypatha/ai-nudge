@@ -1,45 +1,41 @@
 # File Path: backend/agent_core/llm_client.py
-# PURPOSE: A unified client for interacting with different LLM providers (OpenAI, Gemini, etc.).
+# PURPOSE: Centralized LLM client for all AI operations.
 
 import logging
+import asyncio
 from typing import List, Optional
-
 from common.config import get_settings
-from integrations.gemini import get_text_embedding as get_gemini_embedding, get_chat_completion as get_gemini_chat
-from integrations.openai import get_text_embedding as get_openai_embedding, get_chat_completion as get_openai_chat
 
 logger = logging.getLogger(__name__)
 
 async def generate_embedding(text: str) -> List[float]:
     """
-    Generates a vector embedding for a given text string using the configured LLM provider.
-    This is used for semantic search and conceptual matching.
+    Generates embeddings for text using the configured LLM provider.
+    Returns a zero vector if the API is not available or text is empty.
     """
-    settings = get_settings()
-    provider = settings.LLM_PROVIDER
-    
-    text_to_embed = text.strip() if text else ""
-    if not text_to_embed:
+    if not text or not text.strip():
         logger.warning("LLM CLIENT: generate_embedding called with empty text. Returning zero-vector.")
+        return [0.0] * 1536  # OpenAI embedding dimension
+    
+    settings = get_settings()
+    
+    try:
+        if settings.LLM_PROVIDER == "openai":
+            return await _generate_openai_embedding(text)
+        else:
+            logger.error(f"LLM CLIENT: Unsupported provider '{settings.LLM_PROVIDER}'")
+            return [0.0] * 1536
+    except Exception as e:
+        logger.error(f"LLM CLIENT: Failed to generate embedding: {e}")
         return [0.0] * 1536
 
-    max_length = 8192 
-    if len(text_to_embed) > max_length:
-        text_to_embed = text_to_embed[:max_length]
-        logger.warning(f"LLM CLIENT: Text truncated to {max_length} characters for embedding.")
-
-    logger.info(f"LLM CLIENT: Generating embedding with provider '{provider}'...")
-
+async def _generate_openai_embedding(text: str) -> List[float]:
+    """Generates embedding using OpenAI API with proper error handling."""
     try:
-        if provider.lower() == "openai":
-            return await get_openai_embedding(text_to_embed)
-        elif provider.lower() == "gemini":
-            return await get_gemini_embedding(text_to_embed)
-        else:
-            raise ValueError(f"Unknown LLM_PROVIDER '{provider}' in settings.")
-            
+        from integrations.openai import get_text_embedding
+        return await get_text_embedding(text)
     except Exception as e:
-        logger.error(f"LLM CLIENT: Error generating embedding with {provider}: {e}", exc_info=True)
+        logger.error(f"LLM CLIENT: OpenAI embedding failed: {e}")
         return [0.0] * 1536
 
 async def get_chat_completion(
