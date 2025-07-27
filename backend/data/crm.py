@@ -23,6 +23,7 @@ from agent_core.agents import profiler as profiler_agent
 
 from uuid import UUID
 import asyncio
+import os
 
 # --- User Functions (Unchanged) ---
 
@@ -119,12 +120,27 @@ async def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate)
             session.refresh(new_client)
             logging.info(f"CRM: Created new client {new_client.id} for user {user_id}")
             
-            # Immediately process new client against existing events
-            try:
-                campaigns_created = await process_new_contact_for_existing_events(new_client, user_id)
-                logging.info(f"CRM: Created {campaigns_created} immediate campaigns for new client {new_client.full_name}")
-            except Exception as e:
-                logging.error(f"CRM: Error processing immediate campaigns for new client {new_client.id}: {e}")
+            # Check if immediate processing should be skipped
+            # This can be controlled by user preferences or environment variables
+            skip_immediate_processing = os.getenv("SKIP_IMMEDIATE_CONTACT_PROCESSING", "false").lower() == "true"
+            
+            if skip_immediate_processing:
+                logging.info(f"CRM: Skipping immediate processing for new client {new_client.full_name} (disabled by configuration)")
+            else:
+                # Process new client against existing events ASYNCHRONOUSLY
+                # This prevents blocking the API response
+                try:
+                    from celery_tasks import process_new_contact_async
+                    process_new_contact_async.delay(str(new_client.id), str(user_id))
+                    logging.info(f"CRM: Queued async processing for new client {new_client.full_name}")
+                except Exception as e:
+                    logging.error(f"CRM: Error queuing async processing for new client {new_client.id}: {e}")
+                    # Fallback to synchronous processing if async fails
+                    try:
+                        campaigns_created = await process_new_contact_for_existing_events(new_client, user_id)
+                        logging.info(f"CRM: Created {campaigns_created} immediate campaigns for new client {new_client.full_name}")
+                    except Exception as e:
+                        logging.error(f"CRM: Error processing immediate campaigns for new client {new_client.id}: {e}")
             
             return new_client, True
 
@@ -1175,6 +1191,13 @@ async def process_new_contact_for_existing_events(client: Client, user_id: UUID)
     with Session(engine) as session:
         events = session.exec(select(MarketEvent).where(MarketEvent.user_id == user_id)).all()
         logging.info(f"PROCESSING NEW CONTACT: Found {len(events)} existing events to score against")
+        
+        # OPTIMIZATION: Limit the number of events processed to prevent performance issues
+        MAX_EVENTS_TO_PROCESS = 50  # Process only the most recent 50 events
+        if len(events) > MAX_EVENTS_TO_PROCESS:
+            # Sort by creation date and take the most recent events
+            events = sorted(events, key=lambda e: e.created_at, reverse=True)[:MAX_EVENTS_TO_PROCESS]
+            logging.info(f"PROCESSING NEW CONTACT: Limited to {MAX_EVENTS_TO_PROCESS} most recent events for performance")
         
         campaigns_created = 0
         

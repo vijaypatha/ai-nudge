@@ -7,6 +7,7 @@ import uuid
 from typing import Optional, Dict, Any
 from datetime import datetime
 from sqlmodel import Field, SQLModel, Column, JSON
+from sqlalchemy import Column, Index
 
 class MarketEvent(SQLModel, table=True):
     """
@@ -20,8 +21,8 @@ class MarketEvent(SQLModel, table=True):
     user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
     # ---------------------
 
-    event_type: str
-    entity_id: str # The unique ID of the entity from the source system (e.g., ListingKey)
+    event_type: str = Field(index=True) # Index for event type filtering
+    entity_id: str = Field(index=True) # Index for entity lookup
     entity_type: str = Field(default="property")
     
     payload: Dict[str, Any] = Field(sa_column=Column(JSON))
@@ -29,8 +30,14 @@ class MarketEvent(SQLModel, table=True):
     market_area: str
     status: str = Field(default="unprocessed", index=True) # e.g., unprocessed, processed, error
 
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False, index=True) # Index for sorting by date
     processed_at: Optional[datetime] = Field(default=None)
+
+    # Add composite index for common query patterns
+    __table_args__ = (
+        Index('ix_marketevent_user_created', 'user_id', 'created_at'),  # For user's recent events
+        Index('ix_marketevent_user_type', 'user_id', 'event_type'),  # For user's events by type
+    )
 
 class PipelineRun(SQLModel, table=True):
     """

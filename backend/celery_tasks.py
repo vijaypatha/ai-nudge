@@ -57,6 +57,53 @@ logger = logging.getLogger(__name__)
 # --- REMOVED: Celery app configuration is now centralized in celery_worker.py ---
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def process_new_contact_async(self, client_id: str, user_id: str) -> dict:
+    """
+    Asynchronously processes a new contact against existing events.
+    This prevents blocking the API response during contact creation.
+    """
+    try:
+        logger.info(f"CELERY: Starting async processing for new client {client_id}")
+        
+        # Convert string IDs to UUIDs
+        client_uuid = UUID(client_id)
+        user_uuid = UUID(user_id)
+        
+        # Get the client and user
+        session = Session(engine)
+        client = session.exec(select(Client).where(Client.id == client_uuid)).first()
+        user = session.exec(select(User).where(User.id == user_uuid)).first()
+        
+        if not client:
+            logger.error(f"CELERY: Client {client_id} not found")
+            return {"status": "error", "reason": "client_not_found"}
+        
+        if not user:
+            logger.error(f"CELERY: User {user_id} not found")
+            return {"status": "error", "reason": "user_not_found"}
+        
+        # Process the new contact against existing events
+        # This is the same logic as before, but now runs asynchronously
+        from data.crm import process_new_contact_for_existing_events
+        
+        # Run the async function in the event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            campaigns_created = loop.run_until_complete(
+                process_new_contact_for_existing_events(client, user_uuid)
+            )
+            logger.info(f"CELERY: Created {campaigns_created} campaigns for new client {client.full_name}")
+            return {"status": "success", "campaigns_created": campaigns_created}
+        finally:
+            loop.close()
+            
+    except Exception as e:
+        logger.error(f"CELERY: Error processing new contact {client_id}: {e}")
+        # Retry the task if it fails
+        raise self.retry(countdown=60, max_retries=3)
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def send_scheduled_message_task(self, message_id: str) -> dict:
     """
     Sends a scheduled message with production-grade error handling and monitoring.
