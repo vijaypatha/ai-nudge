@@ -47,9 +47,10 @@ def get_mls_client(user: User) -> Optional[MlsApiInterface]:
         return None
         
     try:
-        # Create an instance of the appropriate client (e.g., FlexmlsResoApi())
+        # Use global API token (Personal Access Token approach)
         client_instance = client_class()
-        logger.info(f"Successfully instantiated MLS client: {client_class.__name__}")
+        logger.info(f"Successfully instantiated MLS client with Personal Access Token for user {user.id}")
+        
         return client_instance
     except Exception as e:
         logger.error(f"Failed to instantiate MLS client for provider {provider_name}. Error: {e}", exc_info=True)

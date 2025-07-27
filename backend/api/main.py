@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from data.database import get_session
 
 try:
-    from api.rest.router import api_router
+    from api.rest.api_endpoints import api_router
     from api.webhooks.router import webhooks_router
     from common.config import get_settings
     from celery_tasks import main_opportunity_pipeline_task
@@ -19,7 +19,7 @@ try:
     from agent_core import audience_builder
     from agent_core.agents import profiler as profiler_agent
 except ImportError:
-    from .rest.router import api_router
+    from .rest.api_endpoints import api_router
     from .webhooks.router import webhooks_router
     from ..common.config import get_settings
     from ..celery_tasks import main_opportunity_pipeline_task

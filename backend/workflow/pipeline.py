@@ -24,31 +24,43 @@ async def run_main_opportunity_pipeline():
     """
     logger.info("PIPELINE: Starting main opportunity pipeline run...")
     
-    # 1. Get all users who can have market events (e.g., realtors)
+    # 1. Get all users who can have market events (all verticals)
     all_users = crm_service.get_all_users()
-    realtor_users = [user for user in all_users if user.user_type == UserType.REALTOR and user.onboarding_complete]
+    active_users = [user for user in all_users if user.onboarding_complete]
     
-    if not realtor_users:
-        logger.info("PIPELINE: No active realtors found. Ending pipeline run.")
+    if not active_users:
+        logger.info("PIPELINE: No active users found. Ending pipeline run.")
         return
 
-    logger.info(f"PIPELINE: Found {len(realtor_users)} active realtor(s) to process.")
+    logger.info(f"PIPELINE: Found {len(active_users)} active user(s) to process.")
 
     # 2. Process events for each user
-    for user in realtor_users:
+    for user in active_users:
         logger.info(f"PIPELINE: Processing events for user {user.id} ({user.full_name})...")
         try:
-            # 3. Initialize the correct data source client (e.g., FlexMLS RESO)
-            mls_client = get_mls_client(user)
-            if not mls_client:
-                logger.warning(f"PIPELINE: Could not get MLS client for user {user.id}. Skipping.")
+            # 3. Initialize the correct data source client based on user's vertical
+            data_source_client = None
+            
+            if user.vertical == "real_estate":
+                from integrations.mls.factory import get_mls_client
+                data_source_client = get_mls_client(user)
+                if not data_source_client:
+                    logger.warning(f"PIPELINE: Could not get MLS client for user {user.id}. Skipping.")
+                    continue
+            elif user.vertical == "therapy":
+                # For therapy, we might have different data sources
+                # For now, skip therapy users as they don't have market events
+                logger.info(f"PIPELINE: User {user.id} is in therapy vertical. No market events to process.")
+                continue
+            else:
+                logger.warning(f"PIPELINE: Unknown vertical '{user.vertical}' for user {user.id}. Skipping.")
                 continue
 
             # 4. Fetch recent market events from the live API
             # This looks for any changes in the last 7 days (10080 minutes).
             # MLS properties typically stay active for days/weeks, not minutes.
             # The get_events method is part of the MlsApiInterface
-            market_events = mls_client.get_events(minutes_ago=10080)
+            market_events = data_source_client.get_events(minutes_ago=10080)
             
             if not market_events:
                 logger.info(f"PIPELINE: No new market events found for user {user.id}.")
@@ -69,8 +81,13 @@ async def run_main_opportunity_pipeline():
                         entity_id=event.entity_id,
                         entity_type="property",
                         payload=event.raw_data,  # Convert raw_data to payload
-                        market_area="default"
+                        market_area="default",
+                        status="processed"  # Add status field
                     )
+                    
+                    # Add the market event to the database session
+                    db_session.add(market_event)
+                    logger.info(f"PIPELINE: Added market event {market_event.id} to database session for user {user.id}")
                     
                     # The nudge engine expects an async call, so we await it
                     await nudge_engine.process_market_event(event=market_event, user=user, db_session=db_session)

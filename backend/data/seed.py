@@ -63,7 +63,8 @@ async def seed_database():
             market_focus=["St. George", "Washington", "Hurricane", "Santa Clara"],
             tool_provider=settings.MLS_PROVIDER,
             vertical="real_estate",
-            specialties=[]
+            specialties=[],
+            onboarding_complete=True
         )
         session.add(realtor_user)
         
@@ -130,9 +131,10 @@ async def seed_database():
             user_tags=["buyer", "first-time"],
             preferences={
                 "budget_max": 800000,
-                "locations": ["St. George", "Washington"],
+                "locations": ["St. George", "Washington", "Hurricane", "Santa Clara"],
                 "min_bedrooms": 3,
-                "keywords": ["family", "move-in ready", "good schools"]
+                "min_bathrooms": 2,
+                "keywords": ["family", "move-in ready", "good schools", "single family"]
             }
         )
         seller_client = Client(
@@ -141,8 +143,8 @@ async def seed_database():
             phone="+13856268825",
             user_tags=["prospective-seller"],
             preferences={
-                "locations": ["St. George", "Hurricane"],
-                "keywords": ["market analysis", "comparable sales"]
+                "locations": ["St. George", "Hurricane", "Washington"],
+                "keywords": ["market analysis", "comparable sales", "property value"]
             }
         )
         investor_client = Client(
@@ -150,8 +152,9 @@ async def seed_database():
             full_name="Carlos Rodriguez (Investor)",
             user_tags=["investor"],
             preferences={
-                "locations": ["St. George", "Washington", "Hurricane"],
-                "keywords": ["duplex", "multi-family", "cash flow", "investment", "rental"]
+                "budget_max": 1000000,
+                "locations": ["St. George", "Washington", "Hurricane", "Santa Clara"],
+                "keywords": ["duplex", "multi-family", "cash flow", "investment", "rental", "income property"]
             }
         )
         luxury_client = Client(
@@ -160,8 +163,10 @@ async def seed_database():
             user_tags=["buyer", "luxury"],
             preferences={
                 "budget_max": 1500000,
-                "locations": ["Snow Canyon", "The Cliffs", "Entrada"],
-                "keywords": ["luxury", "golf", "mountain view", "high-end", "country club"]
+                "locations": ["Snow Canyon", "The Cliffs", "Entrada", "St. George"],
+                "min_bedrooms": 4,
+                "min_bathrooms": 3,
+                "keywords": ["luxury", "golf", "mountain view", "high-end", "country club", "premium"]
             }
         )
         

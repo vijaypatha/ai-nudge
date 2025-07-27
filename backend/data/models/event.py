@@ -31,3 +31,24 @@ class MarketEvent(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     processed_at: Optional[datetime] = Field(default=None)
+
+class PipelineRun(SQLModel, table=True):
+    """
+    Tracks automated pipeline executions for status monitoring.
+    """
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True, index=True)
+    
+    pipeline_type: str = Field(default="main_opportunity_pipeline")  # e.g., main_opportunity_pipeline
+    status: str = Field(default="running")  # running, completed, failed
+    
+    started_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    completed_at: Optional[datetime] = Field(default=None)
+    
+    # Results summary
+    events_processed: int = Field(default=0)
+    campaigns_created: int = Field(default=0)
+    errors: Optional[str] = Field(default=None)
+    
+    # Metadata
+    duration_seconds: Optional[float] = Field(default=None)
+    user_count: int = Field(default=0)

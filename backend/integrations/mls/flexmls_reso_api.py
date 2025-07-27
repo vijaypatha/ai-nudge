@@ -21,14 +21,17 @@ class FlexmlsResoApi(MlsApiInterface):
     """
     Connects to the Flexmls RESO Web API (OData) using live credentials.
     """
-    def __init__(self):
+    def __init__(self, access_token: Optional[str] = None, api_base_url: Optional[str] = None):
         settings = get_settings()
+        
+        # Use Personal Access Token approach
         self.access_token = settings.RESO_API_TOKEN
         self.api_base_url = settings.RESO_API_BASE_URL
 
         if not self.access_token or not self.api_base_url:
-            raise ValueError("RESO_API_TOKEN and RESO_API_BASE_URL must be set.")
+            raise ValueError("Access token and API base URL must be provided.")
         
+        # Use Bearer token format for Personal Access Token
         self.headers = {
             "Authorization": f"Bearer {self.access_token}",
             "Accept-Encoding": "gzip, deflate"

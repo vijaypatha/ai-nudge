@@ -30,11 +30,26 @@ class FlexmlsSparkApi(MlsApiInterface):
         if not self.access_token:
             raise ValueError("SPARK_API_DEMO_TOKEN must be set.")
         
-        self.api_base_url = "https://api.sparkapi.com/v1"
+        self.api_base_url = "https://replication.sparkapi.com/v1"
         self.headers = {"Authorization": f"Bearer {self.access_token}"}
 
     def authenticate(self) -> bool:
         return bool(self.access_token)
+
+    def _get_photos_for_listing(self, listing_id: str) -> List[Dict[str, Any]]:
+        """
+        Fetch photos for a specific listing.
+        """
+        try:
+            photos_url = f"{self.api_base_url}/listings/{listing_id}/photos"
+            response = requests.get(photos_url, headers=self.headers, timeout=30)
+            response.raise_for_status()
+            photos = response.json().get('D', {}).get('Results', [])
+            logger.info(f"✅ Fetched {len(photos)} photos for listing {listing_id}")
+            return photos
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to fetch photos for listing {listing_id}: {e}")
+            return []
 
     def _get_all_recent_listings(self) -> Optional[List[Dict[str, Any]]]:
         """
@@ -58,6 +73,16 @@ class FlexmlsSparkApi(MlsApiInterface):
             response.raise_for_status()
             results = response.json().get('D', {}).get('Results', [])
             logger.info(f"✅ Successfully fetched {len(results)} total records from Spark API.")
+            
+            # Try to fetch photos for each listing (limit to first 10 to avoid too many API calls)
+            for i, listing in enumerate(results[:10]):
+                if listing.get("StandardFields", {}).get("PhotosCount", 0) > 0:
+                    listing_id = listing.get("Id")
+                    if listing_id:
+                        photos = self._get_photos_for_listing(listing_id)
+                        if photos:
+                            listing["StandardFields"]["Media"] = photos
+            
             CACHED_LISTINGS = results # Cache the results
             return results
         except requests.exceptions.RequestException as e:

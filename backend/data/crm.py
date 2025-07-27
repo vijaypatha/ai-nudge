@@ -82,7 +82,7 @@ def format_phone_number(phone: str) -> str:
     # For any other format, return as-is (could be international)
     return phone
 
-def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tuple[Client, bool]:
+async def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tuple[Client, bool]:
     """
     Creates a new client or updates an existing one based on deduplication logic.
     Returns a tuple of (client, is_new) where is_new indicates if this is a new client.
@@ -118,6 +118,14 @@ def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tu
             session.commit()
             session.refresh(new_client)
             logging.info(f"CRM: Created new client {new_client.id} for user {user_id}")
+            
+            # Immediately process new client against existing events
+            try:
+                campaigns_created = await process_new_contact_for_existing_events(new_client, user_id)
+                logging.info(f"CRM: Created {campaigns_created} immediate campaigns for new client {new_client.full_name}")
+            except Exception as e:
+                logging.error(f"CRM: Error processing immediate campaigns for new client {new_client.id}: {e}")
+            
             return new_client, True
 
 def get_client_by_id(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Client]:
@@ -1138,3 +1146,83 @@ def does_nudge_exist_for_client_and_resource(client_id: uuid.UUID, resource_id: 
             if audience_member.get("client_id") == str(client_id):
                 return True
     return False
+
+async def process_new_contact_for_existing_events(client: Client, user_id: UUID):
+    """
+    Immediately score new contact against all existing events and create campaigns.
+    This provides instant nudges without waiting for the next pipeline run.
+    """
+    from agent_core.brain.nudge_engine import _get_client_score_for_event, _create_campaign_from_event
+    from agent_core.brain.verticals import VERTICAL_CONFIGS
+    from data.models.user import User
+    from data.models.event import MarketEvent
+    from data.models.campaign import MatchedClient
+    
+    logging.info(f"PROCESSING NEW CONTACT: Immediately scoring {client.full_name} against existing events")
+    
+    # Get the user
+    user = get_user_by_id(user_id)
+    if not user:
+        logging.error(f"PROCESSING NEW CONTACT: User {user_id} not found")
+        return 0
+    
+    vertical_config = VERTICAL_CONFIGS.get(user.vertical)
+    if not vertical_config:
+        logging.error(f"PROCESSING NEW CONTACT: No vertical config found for user {user_id}")
+        return 0
+    
+    # Get all existing market events for this user
+    with Session(engine) as session:
+        events = session.exec(select(MarketEvent).where(MarketEvent.user_id == user_id)).all()
+        logging.info(f"PROCESSING NEW CONTACT: Found {len(events)} existing events to score against")
+        
+        campaigns_created = 0
+        
+        for event in events:
+            # Get the resource for this event
+            resource = get_resource_by_entity_id(event.entity_id, session)
+            if not resource:
+                logging.warning(f"PROCESSING NEW CONTACT: No resource found for event {event.id}")
+                continue
+            
+            # Check if nudge already exists for this client and resource
+            if does_nudge_exist_for_client_and_resource(client.id, resource.id, session, event.event_type):
+                logging.info(f"PROCESSING NEW CONTACT: Nudge already exists for client {client.id} and resource {resource.id}")
+                continue
+            
+            # Score ONLY this new client against this event
+            try:
+                # Get resource embedding if needed
+                resource_embedding = None
+                if resource.resource_type == "property":
+                    remarks = resource.attributes.get('PublicRemarks')
+                    if remarks:
+                        from agent_core import llm_client
+                        resource_embedding = await llm_client.generate_embedding(remarks)
+                
+                # Score the single client
+                score, reasons = _get_client_score_for_event(client, event, resource_embedding, vertical_config)
+                
+                if score >= 25:  # Use same threshold as nudge_engine
+                    logging.info(f"PROCESSING NEW CONTACT: Client {client.full_name} matched event {event.id} with score {score}. Reasons: {reasons}")
+                    
+                    # Create matched audience with just this client
+                    matched_audience = [MatchedClient(
+                        client_id=client.id, 
+                        client_name=client.full_name, 
+                        match_score=score, 
+                        match_reasons=reasons
+                    )]
+                    
+                    # Create campaign for this single client
+                    await _create_campaign_from_event(event, user, resource, matched_audience, db_session=session)
+                    campaigns_created += 1
+                    logging.info(f"PROCESSING NEW CONTACT: Created campaign for event {event.id}")
+                else:
+                    logging.info(f"PROCESSING NEW CONTACT: Client {client.full_name} did not match event {event.id}. Score: {score}")
+                    
+            except Exception as e:
+                logging.error(f"PROCESSING NEW CONTACT: Error processing event {event.id}: {e}")
+        
+        logging.info(f"PROCESSING NEW CONTACT: Created {campaigns_created} campaigns for {client.full_name}")
+        return campaigns_created

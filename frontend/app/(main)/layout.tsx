@@ -15,10 +15,76 @@ import { useSidebar } from '@/context/SidebarContext';
 import { Avatar } from '@/components/ui/Avatar';
 import { MagicSearchBar } from '@/components/ui/MagicSearchBar';
 import { ConversationListItem } from '@/components/conversation/ConversationListItem';
-import { MessageCircleHeart, Users, Zap, User as UserIcon, Menu, RefreshCw } from "lucide-react";
+import { MessageCircleHeart, Users, Zap, User as UserIcon, Menu, RefreshCw, Clock, TrendingUp } from "lucide-react";
+
+// Pipeline Status Indicator Component
+const PipelineStatusIndicator = () => {
+    const [status, setStatus] = useState<any>(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    const fetchStatus = useCallback(async () => {
+        try {
+            const response = await fetch('http://localhost:8001/api/pipeline-status');
+            if (response.ok) {
+                const data = await response.json();
+                setStatus(data);
+            } else {
+                setStatus({ status: 'error', hours_ago: null });
+            }
+        } catch (error) {
+            console.error('Failed to fetch pipeline status:', error);
+            setStatus({ status: 'error', hours_ago: null });
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchStatus();
+        // Refresh status every 5 minutes
+        const interval = setInterval(fetchStatus, 5 * 60 * 1000);
+        return () => clearInterval(interval);
+    }, [fetchStatus]);
+
+    if (isLoading) {
+        return (
+            <div className="mt-2 p-2 text-xs text-brand-text-muted bg-white/5 rounded-lg">
+                <div className="flex items-center gap-2">
+                    <Clock className="w-3 h-3" />
+                    <span>Loading status...</span>
+                </div>
+            </div>
+        );
+    }
+
+    const getStatusColor = () => {
+        if (status?.status === 'active' && status?.hours_ago !== null) {
+            if (status.hours_ago <= 2) return 'text-green-400';
+            if (status.hours_ago <= 4) return 'text-yellow-400';
+            return 'text-red-400';
+        }
+        return 'text-brand-text-muted';
+    };
+
+    const getStatusText = () => {
+        if (status?.status === 'active' && status?.hours_ago !== null) {
+            return `Last updated: ${status.hours_ago} hours ago`;
+        }
+        return 'Status unknown';
+    };
+
+    return (
+        <div className="mt-2 p-2 text-xs bg-white/5 rounded-lg">
+            <div className="flex items-center gap-2">
+                <Clock className={`w-3 h-3 ${getStatusColor()}`} />
+                <span className={getStatusColor()}>{getStatusText()}</span>
+            </div>
+        </div>
+    );
+};
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
-    const { conversations: initialConversations, api, forceRefreshAllData } = useAppContext();
+    const { conversations: initialConversations, api, forceRefreshAllData, user } = useAppContext();
     const router = useRouter();
     const pathname = usePathname();
     const { isSidebarOpen, setIsSidebarOpen } = useSidebar();
@@ -114,8 +180,13 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                         <Link href="/dashboard" className={clsx("flex items-center gap-3 p-2.5 rounded-lg transition-colors", pathname.startsWith('/conversations') || pathname === '/dashboard' ? 'bg-brand-accent/10 border border-brand-accent/30 text-brand-accent font-semibold' : 'text-brand-text-muted hover:bg-white/5')}>
                             <MessageCircleHeart className="w-5 h-5" /> All Conversations
                         </Link>
+                        {user?.user_type === 'realtor' && (
+                            <Link href="/market-activity" className={clsx("flex items-center gap-3 p-2.5 rounded-lg transition-colors", pathname === '/market-activity' ? 'bg-brand-accent/10 border border-brand-accent/30 text-brand-accent font-semibold' : 'text-brand-text-muted hover:bg-white/5')}>
+                                <TrendingUp className="w-5 h-5" /> Live Market Activity
+                            </Link>
+                        )}
                         <Link href="/nudges" className={clsx("flex items-center gap-3 p-2.5 rounded-lg transition-colors", pathname === '/nudges' ? 'bg-brand-accent/10 border border-brand-accent/30 text-brand-accent font-semibold' : 'text-brand-text-muted hover:bg-white/5')}>
-                            <Zap className="w-5 h-5" /> AI Nudges
+                            <Zap className="w-5 h-5" /> My AI Nudges
                         </Link>
                     </nav>
 
@@ -133,6 +204,9 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                             <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
                             {isRefreshing ? 'Refreshing...' : 'Refresh Data'}
                         </button>
+                        
+                        {/* Pipeline Status Indicator */}
+                        <PipelineStatusIndicator />
                     </div>
 
                     <div className="flex-grow overflow-y-auto">

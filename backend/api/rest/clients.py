@@ -43,7 +43,7 @@ async def add_manual_client(
     """
     Creates a single new client and updates the user's onboarding state.
     """
-    client, _ = crm_service.create_or_update_client(
+    client, is_new = await crm_service.create_or_update_client(
         user_id=current_user.id, 
         client_data=client_data
     )

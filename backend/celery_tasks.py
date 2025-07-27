@@ -267,20 +267,77 @@ def health_check_task() -> dict:
         return {"status": "unhealthy", "error": str(e)}
 
 # Legacy tasks for compatibility
-@celery_app.task(name="celery_tasks.main_opportunity_pipeline_task")
+@celery_app.task(name="celery_tasks.main_opportunity_pipeline_task", time_limit=600, soft_time_limit=480)
 def main_opportunity_pipeline_task():
     """
     Celery entry point to trigger the main opportunity pipeline, which fetches
     live data from external sources (like FlexMLS) and processes it to find nudges.
     """
     logger.info("CELERY: Triggering main opportunity pipeline...")
+    
+    # Create pipeline run record
+    from data.models.event import PipelineRun
+    from data.database import get_session
+    
+    pipeline_run = None
+    start_time = datetime.now(timezone.utc)
+    
     try:
+        # Create pipeline run record
+        with next(get_session()) as session:
+            pipeline_run = PipelineRun(
+                pipeline_type="main_opportunity_pipeline",
+                status="running",
+                started_at=start_time
+            )
+            session.add(pipeline_run)
+            session.commit()
+            session.refresh(pipeline_run)
+            logger.info(f"CELERY: Created pipeline run record with ID {pipeline_run.id}")
+        
         # Run the asynchronous pipeline function
-        asyncio.run(run_main_opportunity_pipeline())
+        result = asyncio.run(run_main_opportunity_pipeline())
+        
+        # Update pipeline run with success
+        end_time = datetime.now(timezone.utc)
+        duration = (end_time - start_time).total_seconds()
+        
+        with next(get_session()) as session:
+            pipeline_run = session.exec(
+                select(PipelineRun).where(PipelineRun.id == pipeline_run.id)
+            ).first()
+            if pipeline_run:
+                pipeline_run.status = "completed"
+                pipeline_run.completed_at = end_time
+                pipeline_run.duration_seconds = duration
+                # TODO: Extract actual metrics from pipeline result
+                pipeline_run.events_processed = 1  # Placeholder
+                pipeline_run.campaigns_created = 1  # Placeholder
+                session.add(pipeline_run)
+                session.commit()
+        
         logger.info("CELERY: Main opportunity pipeline completed successfully.")
-        return {"status": "success"}
+        return {"status": "success", "pipeline_run_id": str(pipeline_run.id)}
+        
     except Exception as e:
         logger.error(f"CELERY: Main opportunity pipeline failed: {e}", exc_info=True)
+        
+        # Update pipeline run with failure
+        if pipeline_run:
+            try:
+                with next(get_session()) as session:
+                    pipeline_run = session.exec(
+                        select(PipelineRun).where(PipelineRun.id == pipeline_run.id)
+                    ).first()
+                    if pipeline_run:
+                        pipeline_run.status = "failed"
+                        pipeline_run.completed_at = datetime.now(timezone.utc)
+                        pipeline_run.errors = str(e)
+                        session.add(pipeline_run)
+                        session.commit()
+            except Exception as update_error:
+                logger.error(f"CELERY: Failed to update pipeline run status: {update_error}")
+        
         return {"status": "error", "error": str(e)}
 
 

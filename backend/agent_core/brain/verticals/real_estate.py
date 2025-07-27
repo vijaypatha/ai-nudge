@@ -64,6 +64,10 @@ def score_real_estate_event(client: Client, event: MarketEvent, resource_embeddi
         elif client_locations and resource_city and any(loc in resource_city for loc in client_locations):
             total_score += weights.get("seller_location_city", 40)
             reasons.append("📍 In Their City")
+        # FIX: Add fallback scoring for sellers - any sold listing gets some points
+        else:
+            total_score += 30  # Base score for any sold listing
+            reasons.append("📊 Market Activity")
 
     # B) Investor Scoring Logic
     elif client_role == "investor" and event_type in config["roles"]["investor"]["event_types"]:
@@ -81,6 +85,11 @@ def score_real_estate_event(client: Client, event: MarketEvent, resource_embeddi
         if client_locations and resource_city and any(loc in resource_city for loc in client_locations):
             total_score += weights.get("buyer_location", 25) # Reuse buyer location weight
             reasons.append("✅ Location Match")
+        
+        # FIX: Add fallback scoring for investors - any market activity gets points
+        if total_score == 0:
+            total_score += 35  # Base score for any market activity
+            reasons.append("📈 Market Opportunity")
 
     # C) Buyer Scoring Logic
     elif client_role == "buyer" and event_type in config["roles"]["buyer"]["event_types"]:
@@ -111,6 +120,11 @@ def score_real_estate_event(client: Client, event: MarketEvent, resource_embeddi
             if found_keywords:
                 total_score += weights.get("buyer_keywords", 20)
                 reasons.append(f"✅ Keyword Match: {', '.join(found_keywords)}")
+        
+        # FIX: Add fallback scoring for buyers - any new listing gets some points
+        if total_score == 0 and event_type == "new_listing":
+            total_score += 25  # Base score for any new listing
+            reasons.append("🏠 New Property Alert")
 
     return int(total_score), reasons
 

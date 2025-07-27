@@ -5,34 +5,32 @@
 
 'use client';
 
-import { Suspense } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { MessageSquare, Users } from 'lucide-react';
-import { formatInTimeZone } from 'date-fns-tz';
 
 /**
  * The content for the main dashboard/community overview.
  * It's kept clean and only shows a prompt.
  */
 function DashboardPageContent() {
-  const formatDashboardTime = (timestamp: string) => {
-    try {
-        const date = new Date(timestamp);
-        return formatInTimeZone(date, Intl.DateTimeFormat().resolvedOptions().timeZone, "h:mm a");
-    } catch (e) {
-        console.error("Dashboard time formatting failed:", e);
-        return timestamp;
-    }
-  };
+
+
 
   return (
     // The parent layout provides the flex container, so we just need to fill the space.
     <div className="flex-1 flex min-w-0">
       
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col items-center justify-center h-full text-brand-text-muted p-4">
-        <MessageSquare className="w-16 h-16 mb-4" />
-        <h1 className="text-xl font-medium text-center">Select a conversation</h1>
-        <p className="text-center">Choose a client from the list in the sidebar to start messaging.</p>
+      <main className="flex-1 flex flex-col h-full text-brand-text-muted p-4">
+        
+
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <MessageSquare className="w-16 h-16 mb-4 mx-auto opacity-50" />
+            <h2 className="text-lg font-medium mb-2">Select a conversation to get started</h2>
+            <p className="text-sm text-brand-text-muted">Choose a client from the sidebar to begin messaging and see AI recommendations.</p>
+          </div>
+        </div>
       </main>
 
       {/* Right-hand sidebar prompt */}

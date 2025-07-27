@@ -29,7 +29,7 @@ export default function NudgesPage() {
     const [isClientsLoading, setIsClientsLoading] = useState(true);
 
     const tabOptions: TabOption[] = [
-        { id: 'ai_suggestions', label: 'AI Suggestions' },
+        { id: 'ai_suggestions', label: 'My AI Nudges' },
         { id: 'instant_nudge', label: 'Instant Nudge' },
         { id: 'scheduled', label: 'Scheduled' },
     ];

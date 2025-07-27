@@ -64,6 +64,8 @@ class User(SQLModel, table=True):
     twilio_phone_number: Optional[str] = Field(default=None, index=True)
     timezone: Optional[str] = Field(default=None, index=True)
 
+
+
     # --- Relationships ---
     campaigns: List["CampaignBriefing"] = Relationship(back_populates="user")
     faqs: List["Faq"] = Relationship(back_populates="user")
@@ -98,3 +100,4 @@ class UserUpdate(SQLModel):
     faq_auto_responder_enabled: Optional[bool] = None
     twilio_phone_number: Optional[str] = None
     timezone: Optional[str] = None
+

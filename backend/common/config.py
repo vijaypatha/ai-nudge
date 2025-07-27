@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     MICROSOFT_CLIENT_SECRET: Optional[str] = None
     MICROSOFT_REDIRECT_URI: Optional[str] = None
 
+
+
 @lru_cache()
 def get_settings():
     """Returns a cached instance of the Settings for performance."""

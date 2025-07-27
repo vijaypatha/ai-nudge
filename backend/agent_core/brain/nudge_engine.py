@@ -21,7 +21,7 @@ from agent_core import llm_client
 # The engine now imports its entire configuration from the verticals package
 from .verticals import VERTICAL_CONFIGS
 
-MATCH_THRESHOLD = 40
+MATCH_THRESHOLD = 25  # Lowered from 40 to make matching more permissive
 
 def _get_client_score_for_event(client: Client, event: MarketEvent, resource_embedding: Optional[List[float]], vertical_config: Dict) -> tuple[int, list[str]]:
     """
@@ -140,7 +140,21 @@ async def _create_campaign_from_event(event: MarketEvent, user: User, resource: 
     db_session.add(new_briefing)
     logging.info(f"NUDGE_ENGINE: Successfully created CampaignBriefing {new_briefing.id} for event {event.id}.")
 
-async def process_market_event(event: MarketEvent, user: User, db_session: Session):
+async def process_market_event(event: MarketEvent, user: User, db_session: Session = None):
+    # Set the user_id for the event
+    event.user_id = user.id
+    
+    # Create session if not provided
+    if db_session is None:
+        from data.database import engine
+        from sqlmodel import Session
+        db_session = Session(engine)
+    
+    # Save the event to the database first
+    db_session.add(event)
+    db_session.commit()
+    db_session.refresh(event)
+    
     vertical_config = VERTICAL_CONFIGS.get(user.vertical)
     if not event.payload or not vertical_config:
         return

@@ -22,31 +22,38 @@ const roles = [
     { key: 'therapist', icon: Handshake, title: 'Therapist / Coach', description: 'For those providing ongoing service.', workStyle: 'providing_ongoing_service', enabled: true },
     { key: 'retailer', icon: ShoppingCart, title: 'Retail / E-commerce', description: 'For those fulfilling specific needs.', workStyle: 'fulfilling_specific_needs', enabled: false },
 ];
-const progressSteps = ['Style', 'Contacts', 'Activate'];
+// Remove this line - we'll handle steps dynamically in ProgressBar component
 const stepVariants: Variants = {
   hidden: { opacity: 0, y: 30, scale: 0.98 },
   visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.4, ease: "easeOut" } },
   exit: { opacity: 0, y: -30, scale: 0.98, transition: { duration: 0.2, ease: "easeIn" } },
 };
-const ProgressBar: FC<{ currentStep: number }> = ({ currentStep }) => (
-    <div className="flex justify-between items-center w-full max-w-sm mx-auto mb-8">
-        {progressSteps.map((name, index) => {
-            const stepIndex = index + 1;
-            const isCompleted = currentStep > stepIndex;
-            const isActive = currentStep === stepIndex;
-            return (
-                <div key={name} className="flex-1 flex items-center gap-2 last:flex-none">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300 ${isCompleted ? 'bg-gradient-to-r from-cyan-400 to-blue-500 text-white' : isActive ? 'border-2 border-cyan-400 text-cyan-400' : 'bg-white/10 text-gray-400'}`}>
-                        {isCompleted ? <Check size={16} /> : stepIndex}
+const ProgressBar: FC<{ currentStep: number; userType?: string }> = ({ currentStep, userType }) => {
+    // For realtors: Style, Contacts, MLS Connect, Activate (4 steps)
+    // For others: Style, Contacts, Activate (3 steps)
+    const isRealtor = userType === 'realtor';
+    const steps = isRealtor ? ['Style', 'Contacts', 'MLS Connect', 'Activate'] : ['Style', 'Contacts', 'Activate'];
+    
+    return (
+        <div className="flex justify-between items-center w-full max-w-sm mx-auto mb-8">
+            {steps.map((name, index) => {
+                const stepIndex = index + 1;
+                const isCompleted = currentStep > stepIndex;
+                const isActive = currentStep === stepIndex;
+                return (
+                    <div key={name} className="flex-1 flex items-center gap-2 last:flex-none">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300 ${isCompleted ? 'bg-gradient-to-r from-cyan-400 to-blue-500 text-white' : isActive ? 'border-2 border-cyan-400 text-cyan-400' : 'bg-white/10 text-gray-400'}`}>
+                            {isCompleted ? <Check size={16} /> : stepIndex}
+                        </div>
+                        <span className={`transition-colors duration-300 ${isActive || isCompleted ? 'text-white' : 'text-gray-500'}`}>{name}</span>
+                        {stepIndex < steps.length && <div className="flex-1 h-0.5 bg-white/10 mx-2" />}
                     </div>
-                    <span className={`transition-colors duration-300 ${isActive || isCompleted ? 'text-white' : 'text-gray-500'}`}>{name}</span>
-                    {stepIndex < progressSteps.length && <div className="flex-1 h-0.5 bg-white/10 mx-2" />}
-                </div>
-            );
-        })}
-    </div>
-);
-const Step1RoleSelection: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({ setStep }) => {
+                );
+            })}
+        </div>
+    );
+};
+const Step1RoleSelection: FC<{ setStep: Dispatch<SetStateAction<number>>; onRoleSelect: (role: string) => void }> = ({ setStep, onRoleSelect }) => {
     const { api, refreshUser } = useAppContext();
     const [selectedRoleKey, setSelectedRoleKey] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -65,6 +72,7 @@ const Step1RoleSelection: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({
                 onboarding_state: { work_style_set: true } 
             });
             await refreshUser();
+            onRoleSelect(role.key);
             setStep(2);
         } catch (err: any) {
             setError(err.message || 'Failed to save your role. Please try again.');
@@ -215,7 +223,108 @@ const Step2ContactImport: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({
         </>
     );
 };
-const Step3ActivateNumber: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({ setStep }) => {
+const Step3MLSConnect: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({ setStep }) => {
+    const { api, user } = useAppContext();
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [isConnected, setIsConnected] = useState(false);
+
+    // Only show this step for realtors
+    if (user?.user_type !== 'realtor') {
+        // Skip this step for non-realtors
+        setStep(4);
+        return null;
+    }
+
+    const handleMLSConnect = async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            // Test MLS connection with Personal Access Token
+            const response = await api.get('/api/mls/test-connection');
+            if (response.success) {
+                // Mark MLS as connected
+                await api.put('/api/users/me', { 
+                    onboarding_state: { mls_connected: true } 
+                });
+                setStep(4);
+            } else {
+                throw new Error("MLS connection failed.");
+            }
+        } catch (err: any) {
+            setError(err.message || "Failed to connect to MLS.");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleSkip = async () => {
+        setIsLoading(true);
+        try {
+            await api.put('/api/users/me', { 
+                onboarding_state: { mls_connected: true } 
+            });
+            setStep(4);
+        } catch (err: any) {
+            setError(err.message || 'Failed to skip MLS connection.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="bg-glass-card p-8 rounded-2xl">
+            <h1 className="text-3xl font-bold text-center text-white mb-2">Connect Your MLS</h1>
+            <p className="text-center text-gray-400 mb-8">Test your MLS connection to get real-time market data and opportunities.</p>
+            
+            <div className="bg-white/5 p-6 rounded-xl border border-white/10 mb-6">
+                <h3 className="text-lg font-bold text-white mb-4">Washington County Board of Realtors</h3>
+                <p className="text-gray-300 mb-4">Test your FlexMLS RESO API connection to access real-time property listings, market changes, and new opportunities.</p>
+                
+                <div className="space-y-3 mb-6">
+                    <div className="flex items-center gap-3">
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                        <span className="text-sm text-gray-300">Real-time property listings via Personal Access Token</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                        <span className="text-sm text-gray-300">Price change notifications</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                        <span className="text-sm text-gray-300">New listing alerts</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                        <span className="text-sm text-gray-300">Market activity insights</span>
+                    </div>
+                </div>
+            </div>
+
+            <div className="space-y-4">
+                <button 
+                    onClick={handleMLSConnect} 
+                    disabled={isLoading} 
+                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-400 to-blue-500 text-white font-bold py-4 rounded-lg text-lg hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-button"
+                >
+                    {isLoading ? 'Testing Connection...' : 'Test MLS Connection'}
+                </button>
+                
+                <button 
+                    onClick={handleSkip} 
+                    disabled={isLoading} 
+                    className="w-full flex items-center justify-center gap-2 bg-white/10 text-white font-bold py-4 rounded-lg text-lg hover:bg-white/20 transition-all disabled:opacity-50"
+                >
+                    Skip for Now
+                </button>
+            </div>
+            
+            {error && <p className="text-red-400 text-center mt-4">{error}</p>}
+        </div>
+    );
+};
+
+const Step4ActivateNumber: FC<{ setStep: Dispatch<SetStateAction<number>> }> = ({ setStep }) => {
     const { api, refreshUser } = useAppContext();
     const [searchType, setSearchType] = useState<'areaCode' | 'zip'>('areaCode');
     const [searchValue, setSearchValue] = useState('');
@@ -376,6 +485,7 @@ export default function OnboardingPage() {
 
 function OnboardingComponent() {
   const [step, setStep] = useState(1);
+  const [selectedRole, setSelectedRole] = useState<string | null>(null);
   const { user, loading } = useAppContext();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -394,15 +504,34 @@ function OnboardingComponent() {
         return;
     }
 
-    const { onboarding_state } = user;
-    if (onboarding_state.contacts_imported) {
-      setStep(3);
-    } else if (onboarding_state.work_style_set) {
-      setStep(2);
-    } else {
-      setStep(1);
+    // Initialize selectedRole from user's current user_type
+    if (user.user_type && !selectedRole) {
+      setSelectedRole(user.user_type);
     }
-  }, [user, loading]);
+
+    const { onboarding_state } = user;
+    if (user.user_type === 'realtor') {
+      // For realtors: Style -> Contacts -> MLS Connect -> Activate
+      if (onboarding_state.contacts_imported && onboarding_state.mls_connected) {
+        setStep(4);
+      } else if (onboarding_state.contacts_imported) {
+        setStep(3);
+      } else if (onboarding_state.work_style_set) {
+        setStep(2);
+      } else {
+        setStep(1);
+      }
+    } else {
+      // For non-realtors: Style -> Contacts -> Activate (skip MLS step)
+      if (onboarding_state.contacts_imported) {
+        setStep(3);
+      } else if (onboarding_state.work_style_set) {
+        setStep(2);
+      } else {
+        setStep(1);
+      }
+    }
+  }, [user, loading, selectedRole]);
 
   useEffect(() => {
     if (searchParams.get('import_success') === 'true') {
@@ -413,11 +542,12 @@ function OnboardingComponent() {
 
   const renderStep = () => {
     switch (step) {
-      case 1: return <Step1RoleSelection setStep={setStep} />;
+      case 1: return <Step1RoleSelection setStep={setStep} onRoleSelect={setSelectedRole} />;
       case 2: return <Step2ContactImport setStep={setStep} />;
-      case 3: return <Step3ActivateNumber setStep={setStep} />;
-      case 4: return <Step4Celebration />;
-      default: return <Step1RoleSelection setStep={setStep} />;
+      case 3: return user?.user_type === 'realtor' ? <Step3MLSConnect setStep={setStep} /> : <Step4ActivateNumber setStep={setStep} />;
+      case 4: return user?.user_type === 'realtor' ? <Step4ActivateNumber setStep={setStep} /> : <Step4Celebration />;
+      case 5: return <Step4Celebration />;
+      default: return <Step1RoleSelection setStep={setStep} onRoleSelect={setSelectedRole} />;
     }
   };
 
@@ -431,7 +561,7 @@ function OnboardingComponent() {
       </AnimatePresence>
       
       <div className={`w-full max-w-2xl z-10 transition-filter duration-500 ${showCelebration ? 'blur-md' : 'blur-none'}`}>
-        {step < 4 && <ProgressBar currentStep={step} />}
+        {step < (selectedRole === 'realtor' ? 5 : 4) && <ProgressBar currentStep={step} userType={selectedRole || undefined} />}
         <AnimatePresence mode="wait">
           <motion.div
             key={step}

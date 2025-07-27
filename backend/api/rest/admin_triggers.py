@@ -56,26 +56,47 @@ async def trigger_comprehensive_test_suite(current_user: User = Depends(get_curr
         "expired_listing", "coming_soon", "withdrawn_listing"
     ]
     
-    event_creation_tasks = []
+    print("TEST SUITE: Creating market events...")
+    
     for event_type in market_event_types:
         print(f"TEST SUITE: Creating '{event_type}' event...")
-        payload = {"old_price": 1200000, "new_price": 1150000} if event_type == "price_drop" else {}
+        
+        # Use the resource's attributes as the event payload for realistic matching
+        payload = resource_item.attributes.copy()
+        
+        # Add event-specific data
+        if event_type == "price_drop":
+            payload.update({
+                "old_price": 1200000,
+                "new_price": 1150000,
+                "ListPrice": 1150000  # Update the current price
+            })
+        elif event_type == "sold_listing":
+            payload.update({
+                "ClosePrice": 750000,
+                "ListPrice": 750000
+            })
+        elif event_type == "new_listing":
+            # Create a new listing that would match investor preferences
+            payload.update({
+                "ListPrice": 850000,
+                "UnparsedAddress": "456 Multi-Family Drive, St. George, UT 84770",
+                "PublicRemarks": "Excellent duplex opportunity with great cash flow potential. Each unit is 2 bed, 1 bath. Perfect for investment property. Close to downtown and university. Multi-family investment opportunity with rental income potential.",
+                "BedroomsTotal": 4,
+                "BathroomsTotalInteger": 2,
+                "BuildingAreaTotal": 2400,
+                "MlsStatus": "Active"
+            })
+        
         event = MarketEvent(event_type=event_type, entity_id=resource_item.id, payload=payload, market_area="default")
-        event_creation_tasks.append(nudge_engine.process_market_event(event, current_user))
-    
-    print("TEST SUITE: Creating 'Recency' nudge...")
-    event_creation_tasks.append(nudge_engine.generate_recency_nudges(current_user))
+        await nudge_engine.process_market_event(event, current_user)
 
     if test_client.phone:
         print(f"TEST SUITE: Simulating incoming SMS from {test_client.full_name}...")
-        event_creation_tasks.append(
-            twilio_incoming.process_incoming_sms(
-                from_number=test_client.phone, 
-                body="Thanks for the update! Do you have any more details on the kitchen?"
-            )
+        await twilio_incoming.process_incoming_sms(
+            from_number=test_client.phone, 
+            body="Thanks for the update! Do you have any more details on the kitchen?"
         )
-    
-    await asyncio.gather(*event_creation_tasks)
     
     print(f"--- COMPREHENSIVE TEST SUITE COMPLETE FOR USER {current_user.id} ---")
     return {"status": "accepted", "message": "Comprehensive test suite initiated."}
@@ -89,8 +110,25 @@ async def trigger_market_scan(minutes_ago: int = 60, current_user: User = Depend
 
 @router.post("/run-daily-scan", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_daily_scan(current_user: User = Depends(get_current_user_from_token)):
-    await nudge_engine.generate_recency_nudges(realtor=current_user) 
-    return {"status": "accepted", "message": "Daily relationship scan for recency nudges initiated for current user."}
+    return {"status": "accepted", "message": "Daily relationship scan initiated for current user."}
+
+@router.post("/process-event/{event_id}", status_code=status.HTTP_202_ACCEPTED)
+async def process_specific_event(event_id: str, current_user: User = Depends(get_current_user_from_token)):
+    """Manually process a specific market event through the nudge engine"""
+    from agent_core.brain import nudge_engine
+    from data.database import Session
+    from data.models.event import MarketEvent
+    
+    with Session(engine) as session:
+        # Get the specific event
+        event = session.get(MarketEvent, event_id)
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found")
+        
+        # Process the event
+        await nudge_engine.process_market_event(event, current_user, session)
+        
+    return {"status": "accepted", "message": f"Event {event_id} processed successfully."}
 
 # backend/api/rest/admin_triggers.py
 # --- PRODUCTION MONITORING ENDPOINTS ---

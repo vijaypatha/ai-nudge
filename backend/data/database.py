@@ -11,7 +11,7 @@ from .models.client import Client
 from .models.resource import Resource, ContentResource
 from .models.message import Message, ScheduledMessage
 from .models.campaign import CampaignBriefing
-from .models.event import MarketEvent
+from .models.event import MarketEvent, PipelineRun
 # --- MODIFIED: Changed 'FAQ' to 'Faq' to match the actual class name in faq.py ---
 from .models.faq import Faq
 
