@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from .message import ScheduledMessage, Message
     from .user import User
     from .campaign import CampaignBriefing
+    from .feedback import NegativePreference
 
 class Client(SQLModel, table=True):
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
@@ -38,6 +39,8 @@ class Client(SQLModel, table=True):
     scheduled_messages: List["ScheduledMessage"] = Relationship(back_populates="client")
     messages: List["Message"] = Relationship(back_populates="client")
     campaign_briefings: List["CampaignBriefing"] = Relationship(back_populates="client")
+    negative_preferences: List["NegativePreference"] = Relationship(back_populates="client")
+
 
 
 class ClientCreate(SQLModel):

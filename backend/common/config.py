@@ -5,12 +5,16 @@ from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import Optional, List
 import os
+from pydantic import ConfigDict
 
 class Settings(BaseSettings):
     """
     Manages application settings loaded from the environment.
     Provides type validation for all settings.
     """
+    # Configure to load .env file
+    model_config = ConfigDict(env_file=".env", env_file_encoding="utf-8")
+    
     LLM_PROVIDER: str = "openai"
 
     # OpenAI

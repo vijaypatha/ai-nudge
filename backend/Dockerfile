@@ -45,4 +45,4 @@ USER app
 EXPOSE 8000
 
 # Use a shell command to run migrations and start the app
-CMD ["sh", "-c", "while ! pg_isready -h db -p 5432 -U postgres; do sleep 1; done && alembic upgrade head && python -c \"import asyncio; from data.seed import seed_database; asyncio.run(seed_database())\" && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

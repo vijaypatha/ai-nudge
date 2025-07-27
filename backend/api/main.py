@@ -1,8 +1,7 @@
 # -----------
 # File Path: backend/api/main.py
 # Purpose: This is the main entry point for the FastAPI application.
-# It now uses a central API router for cleaner, more scalable route management.
-# ---
+# --- MODIFIED: Added semantic_service initialization on startup ---
 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,13 +9,14 @@ from contextlib import asynccontextmanager
 from sqlalchemy.orm import Session
 from data.database import get_session
 
+# --- MODIFIED: Replaced audience_builder with the new semantic_service ---
 try:
     from api.rest.api_endpoints import api_router
     from api.webhooks.router import webhooks_router
     from common.config import get_settings
     from celery_tasks import main_opportunity_pipeline_task
     from data.seed import seed_database
-    from agent_core import audience_builder
+    from agent_core import semantic_service # <-- MODIFIED
     from agent_core.agents import profiler as profiler_agent
 except ImportError:
     from .rest.api_endpoints import api_router
@@ -24,7 +24,7 @@ except ImportError:
     from ..common.config import get_settings
     from ..celery_tasks import main_opportunity_pipeline_task
     from ..data.seed import seed_database
-    from ..agent_core import audience_builder
+    from ..agent_core import semantic_service # <-- MODIFIED
     from ..agent_core.agents import profiler as profiler_agent
 
 
@@ -36,11 +36,15 @@ from data.database import create_db_and_tables
 async def lifespan(app: FastAPI):
     """
     Context manager for application startup/shutdown logic.
-    Database initialization is now handled by a separate Render Job.
+    Initializes the semantic service vector index on startup.
     """
     print("--- Application Startup ---")
-    # create_db_and_tables() # This is now handled by the Render Job
-    # await seed_database()    # This is also handled by the Render Job
+    
+    # --- NEW: Initialize the semantic service vector index ---
+    # This loads all client embeddings into memory for fast searching.
+    await semantic_service.initialize_vector_index()
+    print("--- Semantic service vector index initialized. ---")
+
     print("--- Application startup complete. ---")
     
     yield
@@ -68,8 +72,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- MODIFIED: Include the single central router with the /api prefix ---
-# This one line replaces the 10+ lines that were here before.
 app.include_router(api_router, prefix="/api")
 app.include_router(webhooks_router, prefix="/webhooks")
 

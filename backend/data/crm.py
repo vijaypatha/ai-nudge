@@ -1,15 +1,18 @@
 # FILE: backend/data/crm.py
-# --- COMPLETE & UNABBREVIATED ---
+# --- MODIFIED FOR COMPOSITE CLIENT EMBEDDINGS ---
 
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
 import uuid
+import json # NEW: Imported for handling preferences
 from sqlmodel import Session, select, delete
 from sqlalchemy.orm import selectinload
 from .database import engine
 import logging
 
-from agent_core import llm_client
+# from agent_core import llm_client # No longer used directly for embeddings
+from agent_core import semantic_service # NEW: Import the centralized semantic service
+from .models.feedback import NegativePreference # NEW: Import for feedback model
 
 from agent_core.deduplication.deduplication_engine import find_strong_duplicate
 
@@ -83,66 +86,53 @@ def format_phone_number(phone: str) -> str:
     # For any other format, return as-is (could be international)
     return phone
 
+# --- REFACTORED FOR COMPOSITE EMBEDDING ---
+# Note: This function is now async.
 async def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tuple[Client, bool]:
     """
-    Creates a new client or updates an existing one based on deduplication logic.
-    Returns a tuple of (client, is_new) where is_new indicates if this is a new client.
+    Creates a new client or updates an existing one, then calls the semantic_service
+    to generate the initial composite embedding for the client.
     """
     with Session(engine) as session:
-        # Format phone number if provided
         if client_data.phone:
             client_data.phone = format_phone_number(client_data.phone)
         
-        # Check for existing duplicate
         existing_client = find_strong_duplicate(session, user_id, client_data)
         
+        target_client, is_new = (None, False)
+
         if existing_client:
-            # Update existing client with new data
             update_dict = client_data.model_dump(exclude_unset=True)
             for key, value in update_dict.items():
                 if hasattr(existing_client, key):
                     setattr(existing_client, key, value)
-            
-            session.add(existing_client)
-            session.commit()
-            session.refresh(existing_client)
-            logging.info(f"CRM: Updated existing client {existing_client.id} for user {user_id}")
-            return existing_client, False
+            target_client, is_new = existing_client, False
         else:
-            # Create new client
-            new_client = Client(
-                id=uuid.uuid4(),
-                user_id=user_id,
-                **client_data.model_dump()
-            )
-            session.add(new_client)
-            session.commit()
-            session.refresh(new_client)
-            logging.info(f"CRM: Created new client {new_client.id} for user {user_id}")
-            
-            # Check if immediate processing should be skipped
-            # This can be controlled by user preferences or environment variables
+            new_client = Client(id=uuid.uuid4(), user_id=user_id, **client_data.model_dump())
+            target_client, is_new = new_client, True
+
+        session.add(target_client)
+        session.commit()
+        session.refresh(target_client)
+        
+        logging.info(f"CRM: {'Created new' if is_new else 'Updated existing'} client {target_client.id}. Now generating initial embedding.")
+        
+        # MODIFIED: Call the centralized semantic service
+        await semantic_service.update_client_embedding(target_client, session)
+        session.commit()
+        session.refresh(target_client)
+
+        if is_new:
             skip_immediate_processing = os.getenv("SKIP_IMMEDIATE_CONTACT_PROCESSING", "false").lower() == "true"
-            
-            if skip_immediate_processing:
-                logging.info(f"CRM: Skipping immediate processing for new client {new_client.full_name} (disabled by configuration)")
-            else:
-                # Process new client against existing events ASYNCHRONOUSLY
-                # This prevents blocking the API response
+            if not skip_immediate_processing:
                 try:
                     from celery_tasks import process_new_contact_async
-                    process_new_contact_async.delay(str(new_client.id), str(user_id))
-                    logging.info(f"CRM: Queued async processing for new client {new_client.full_name}")
+                    process_new_contact_async.delay(str(target_client.id), str(user_id))
+                    logging.info(f"CRM: Queued async processing for new client {target_client.full_name}")
                 except Exception as e:
-                    logging.error(f"CRM: Error queuing async processing for new client {new_client.id}: {e}")
-                    # Fallback to synchronous processing if async fails
-                    try:
-                        campaigns_created = await process_new_contact_for_existing_events(new_client, user_id)
-                        logging.info(f"CRM: Created {campaigns_created} immediate campaigns for new client {new_client.full_name}")
-                    except Exception as e:
-                        logging.error(f"CRM: Error processing immediate campaigns for new client {new_client.id}: {e}")
+                    logging.error(f"CRM: Error queuing async processing for new client {target_client.id}: {e}")
             
-            return new_client, True
+        return target_client, is_new
 
 def get_client_by_id(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Client]:
     """Retrieves a single client by their unique ID, ensuring it belongs to the user."""
@@ -153,7 +143,6 @@ def get_client_by_id(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Clien
 def get_clients_by_ids(client_ids: List[UUID], user_id: UUID) -> List[Client]:
     """
     Retrieves a list of clients by their unique IDs, ensuring they belong to the user.
-    --- NEW ---
     """
     if not client_ids:
         return []
@@ -176,41 +165,39 @@ def get_all_clients(user_id: uuid.UUID) -> List[Client]:
         statement = select(Client).where(Client.user_id == user_id)
         return session.exec(statement).all()
     
+# --- REFACTORED FOR COMPOSITE EMBEDDING ---
 async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUID) -> tuple[Optional[Client], bool]:
     """
-    Generically updates a client record and regenerates the embedding if notes change.
-    Returns the updated client and a boolean indicating if notes were updated.
+    Generically updates a client record and calls semantic_service to regenerate
+    the embedding if any relevant data changes.
     """
-    notes_updated = False
+    embedding_updated = False
+    fields_that_trigger_embedding = {'notes', 'user_tags', 'preferences'}
+
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client:
             return None, False
 
         update_dict = update_data.model_dump(exclude_unset=True)
-        if 'notes' in update_dict:
-            notes_updated = True
+        if any(field in update_dict for field in fields_that_trigger_embedding):
+            embedding_updated = True
 
         for key, value in update_dict.items():
-            # Format phone number if it's being updated
             if key == 'phone' and value:
                 value = format_phone_number(value)
             setattr(client, key, value)
         
-        if notes_updated:
-            notes_content = update_dict.get('notes')
-            if notes_content and notes_content.strip():
-                logging.info(f"CRM: Regenerating notes embedding for client {client.id} via generic update...")
-                embedding = await llm_client.generate_embedding(notes_content)
-                client.notes_embedding = embedding
-            else:
-                client.notes_embedding = None
-
         session.add(client)
+
+        if embedding_updated:
+            logging.info(f"CRM: Calling semantic_service to regenerate embedding for client {client.id}.")
+            # MODIFIED: Call the centralized semantic service
+            await semantic_service.update_client_embedding(client, session)
+
         session.commit()
         session.refresh(client)
-                
-        return client, notes_updated
+        return client, embedding_updated
 
 async def delete_client(client_id: UUID, user_id: UUID) -> bool:
     """
@@ -254,139 +241,134 @@ def update_last_interaction(client_id: uuid.UUID, user_id: uuid.UUID, session: O
                 new_session.refresh(client)
             return client
 
-def update_client_preferences(client_id: uuid.UUID, preferences: Dict[str, Any], user_id: uuid.UUID) -> Optional[Client]:
-    """Overwrites the entire 'preferences' JSON object for a specific client."""
+# --- REFACTORED FOR COMPOSITE EMBEDDING ---
+async def update_client_preferences(client_id: uuid.UUID, preferences: Dict[str, Any], user_id: uuid.UUID) -> Optional[Client]:
+    """Overwrites the 'preferences' and calls semantic_service to regenerate the embedding."""
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if client:
             client.preferences = preferences
             session.add(client)
+            # MODIFIED: Call the centralized semantic service
+            await semantic_service.update_client_embedding(client, session)
             session.commit()
             session.refresh(client)
             return client
         return None
 
-def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uuid.UUID) -> Optional[Client]:
-    """Overwrites the entire 'user_tags' list for a specific client."""
+# --- REFACTORED FOR COMPOSITE EMBEDDING ---
+async def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uuid.UUID) -> Optional[Client]:
+    """Overwrites 'user_tags' and calls semantic_service to regenerate the embedding."""
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if client:
             client.user_tags = tags
             session.add(client)
+            # MODIFIED: Call the centralized semantic service
+            await semantic_service.update_client_embedding(client, session)
             session.commit()
             session.refresh(client)
             return client
         return None
 
+# --- REFACTORED FOR COMPOSITE EMBEDDING ---
 async def update_client_notes(client_id: UUID, notes: str, user_id: UUID) -> Optional[Client]:
-    """
-    Overwrites the 'notes' field and generates a new semantic embedding.
-    NOW ASYNCHRONOUS to support embedding calls.
-    """
+    """Overwrites 'notes' and calls semantic_service to regenerate the embedding."""
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if client:
             client.notes = notes
-            
-            if notes and notes.strip():
-                logging.info(f"CRM: Generating new notes embedding for client {client.id}...")
-                embedding = await llm_client.generate_embedding(notes)
-                client.notes_embedding = embedding
-            else:
-                client.notes_embedding = None
-            
             session.add(client)
+            # MODIFIED: Call the centralized semantic service
+            await semantic_service.update_client_embedding(client, session)
             session.commit()
             session.refresh(client)
-            logging.info(f"CRM: Manually updated notes and embedding for client {client.id}")
             return client
         return None
 
-async def update_client_intel(
-    client_id: UUID, 
-    user_id: UUID,
-    tags_to_add: Optional[List[str]] = None, 
-    notes_to_add: Optional[str] = None
-) -> Optional[Client]:
-    """
-    Appends notes/tags, extracts structured preferences from the notes, 
-    regenerates the AI embedding, and triggers a proactive re-scan.
-    """
+# --- REFACTORED FOR COMPOSITE EMBEDDING ---
+async def update_client_intel(client_id: UUID, user_id: UUID, tags_to_add: Optional[List[str]] = None, notes_to_add: Optional[str] = None) -> Optional[Client]:
+    """Appends notes/tags, extracts preferences, and calls semantic_service to regenerate the embedding."""
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client:
-            logging.error(f"CRM: update_client_intel failed. Client {client_id} not found for user {user_id}.")
             return None
         
-        notes_were_updated = False
+        profile_was_updated = False
         if tags_to_add:
             client.user_tags = sorted(list(set(client.user_tags or []).union(set(tags_to_add))))
+            profile_was_updated = True
 
         if notes_to_add:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             new_note_entry = f"Note from AI ({timestamp}):\n{notes_to_add}"
-            if client.notes:
-                client.notes = f"{client.notes}\n\n---\n\n{new_note_entry}"
-            else:
-                client.notes = new_note_entry
-            notes_were_updated = True
-
-        if notes_were_updated and client.notes:
+            client.notes = f"{client.notes}\n\n---\n\n{new_note_entry}" if client.notes else new_note_entry
+            
             all_text_to_analyze = f"Notes: {client.notes}\nTags: {', '.join(client.user_tags)}"
             extracted_prefs = await profiler_agent.extract_preferences_from_text(all_text_to_analyze)
-            
             if extracted_prefs:
-                if client.preferences is None:
-                    client.preferences = {}
+                if client.preferences is None: client.preferences = {}
                 client.preferences.update(extracted_prefs)
-                logging.info(f"CRM: Automatically updated structured preferences for client {client.id}: {extracted_prefs}")
+            profile_was_updated = True
 
-        if notes_were_updated and client.notes and client.notes.strip():
-            logging.info(f"CRM: Regenerating notes embedding for client {client.id} after intel update...")
-            client.notes_embedding = await llm_client.generate_embedding(client.notes)
-        
-        session.add(client)
-        session.commit()
-        session.refresh(client)
-
-        if notes_were_updated:
+        if profile_was_updated:
+            session.add(client)
+            # MODIFIED: Call the centralized semantic service
+            await semantic_service.update_client_embedding(client, session)
             try:
                 from celery_tasks import rescore_client_against_recent_events_task
-                logging.info(f"CRM: Triggering proactive re-scan for client {client.id} due to profile update.")
-                rescore_client_against_recent_events_task.delay(client_id=str(client.id), extracted_prefs=extracted_prefs if 'extracted_prefs' in locals() else None)
+                rescore_client_against_recent_events_task.delay(client_id=str(client.id))
             except Exception as e:
-                logging.error(f"CRM: Failed to trigger re-scan task for client {client.id}: {e}", exc_info=True)
+                logging.error(f"CRM: Failed to trigger re-scan task for client {client.id}: {e}")
         
+        session.commit()
+        session.refresh(client)
         return client
 
-
-def add_client_tags(client_id: uuid.UUID, tags_to_add: List[str], user_id: uuid.UUID) -> Optional[Client]:
+# --- REFACTORED FOR COMPOSITE EMBEDDING ---
+async def add_client_tags(client_id: uuid.UUID, tags_to_add: List[str], user_id: uuid.UUID) -> Optional[Client]:
     """This function now calls the main intel updater for consistency."""
-    # This should be an async call now, but we'll leave it sync for now to avoid breaking changes.
-    # A proper fix would be to make this async and await it.
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(update_client_intel(client_id=client_id, user_id=user_id, tags_to_add=tags_to_add))
+    return await update_client_intel(client_id=client_id, user_id=user_id, tags_to_add=tags_to_add)
 
-
+# --- REFACTORED FOR COMPOSITE EMBEDDING ---
 async def regenerate_embedding_for_client(client: Client, session: Session):
+    """Calls semantic_service to generate an embedding for a client."""
+    # MODIFIED: Call the centralized semantic service
+    await semantic_service.update_client_embedding(client, session)
+
+
+def add_negative_preference(client_id: UUID, campaign_id: UUID, resource_embedding: List[float], user_id: UUID, session: Session) -> None:
     """
-    Generates and saves an embedding for a client based on their current notes.
-    This is a helper designed for seeding or backfilling operations.
+    Saves a negative preference to the database for a specific client.
+    This is triggered when a user dismisses a nudge.
     """
-    if client.notes and client.notes.strip():
-        try:
-            logging.info(f"CRM (SEED): Generating embedding for client {client.id} - {client.full_name}")
-            embedding = await llm_client.generate_embedding(client.notes)
-            client.notes_embedding = embedding
-            session.add(client)
-        except Exception as e:
-            logging.warning(f"CRM (SEED): Failed to generate embedding for client {client.id} - {client.full_name}: {e}")
-            client.notes_embedding = None
-            session.add(client)
-    else:
-        logging.info(f"CRM (SEED): Skipping embedding for client {client.id} - no notes.")
-        client.notes_embedding = None
-        session.add(client)
+    # First, verify the client belongs to the user for security
+    client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
+    if not client:
+        logging.warning(f"CRM (FEEDBACK): User {user_id} attempted to add negative preference for unauthorized client {client_id}.")
+        return
+
+    from .models.feedback import NegativePreference # Local import
+    
+    new_preference = NegativePreference(
+        client_id=client_id,
+        source_campaign_id=campaign_id,
+        dismissed_embedding=resource_embedding
+    )
+    session.add(new_preference)
+    logging.info(f"CRM (FEEDBACK): Added negative preference for client {client_id} from campaign {campaign_id}.")
+
+
+def get_negative_preferences(client_id: UUID, session: Session) -> List[List[float]]:
+    """
+    Retrieves all dismissed embeddings for a given client.
+    """
+    from .models.feedback import NegativePreference # Local import
+
+    statement = select(NegativePreference.dismissed_embedding).where(NegativePreference.client_id == client_id)
+    results = session.exec(statement).all()
+    return results
+
 
 # --- Resource Functions ---
 
@@ -511,25 +493,6 @@ def get_active_events_in_range(lookback_days: int, session: Session) -> List[Mar
         )
     )
     return session.exec(statement).all()
-
-def does_nudge_exist_for_client_and_resource(client_id: UUID, resource_id: UUID, session: Session) -> bool:
-    """
-    Checks if a campaign briefing already exists for a specific client and resource.
-    This is used for duplicate prevention.
-    """
-    statement = select(CampaignBriefing).where(CampaignBriefing.triggering_resource_id == resource_id)
-    campaigns = session.exec(statement).all()
-
-    if not campaigns:
-        return False
-
-    str_client_id = str(client_id)
-    for campaign in campaigns:
-        for audience_member in campaign.matched_audience:
-            if audience_member.get('client_id') == str_client_id:
-                return True
-    
-    return False
 
 def update_campaign_briefing(campaign_id: uuid.UUID, update_data: CampaignUpdate, user_id: uuid.UUID) -> Optional[CampaignBriefing]:
     """Updates a campaign briefing with new data, ensuring it belongs to the user."""
@@ -797,10 +760,8 @@ def save_scheduled_message(message: ScheduledMessage):
 def create_scheduled_message(message_data: ScheduledMessageCreate, user_id: UUID) -> ScheduledMessage:
     """
     Creates and saves a new scheduled message record in the database.
-    --- NEW ---
     """
     with Session(engine) as session:
-        # The ScheduledMessageCreate model is validated against the ScheduledMessage table model
         new_message = ScheduledMessage.model_validate(message_data, update={"user_id": user_id})
         session.add(new_message)
         session.commit()
@@ -842,7 +803,6 @@ def cancel_scheduled_message(message_id: uuid.UUID, user_id: uuid.UUID) -> Optio
     with Session(engine) as session:
         message = session.exec(select(ScheduledMessage).where(ScheduledMessage.id == message_id, ScheduledMessage.user_id == user_id)).first()
         if not message or message.status != MessageStatus.PENDING:
-            # Can only cancel pending messages
             return None
 
         message.status = MessageStatus.CANCELLED
@@ -928,7 +888,6 @@ def get_all_users() -> List[User]:
 
 def _get_all_clients_for_system_indexing() -> List[Client]:
     """
-
     Retrieves ALL clients from the database, across all users.
     USE WITH CAUTION.
     """
@@ -941,7 +900,6 @@ def _get_all_clients_for_system_indexing() -> List[Client]:
 def enrich_clients_for_community_view(clients: List[Client]) -> List[Dict[str, Any]]:
     """
     Takes a list of clients and enriches them with calculated health metrics.
-    --- NEW HELPER FUNCTION ---
     """
     community_list = []
     for client in clients:
@@ -991,7 +949,6 @@ def enrich_clients_for_community_view(clients: List[Client]) -> List[Dict[str, A
 def get_community_overview(user_id: uuid.UUID) -> List[Dict[str, Any]]:
     """
     Retrieves all clients for a user and calculates health metrics for each.
-    --- REFACTORED to use the new helper function ---
     """
     logging.info(f"CRM: Calculating community overview for user_id: {user_id}")
     
@@ -1004,9 +961,6 @@ def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
     """
     Clears any active recommendation slates and removes the most recent
     AI draft from the conversation history for a specific client.
-
-    Called whenever the conversation advances (e.g., a message is sent or
-    edited) so that stale suggestions disappear from the UI.
     """
     try:
         with Session(engine) as session:
@@ -1016,10 +970,7 @@ def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
             ).first()
 
             if not client_exists:
-                logging.warning(
-                    f"CRM AUTH: User {user_id} attempted to clear recommendations "
-                    f"for client {client_id} without permission."
-                )
+                logging.warning(f"CRM AUTH: User {user_id} attempted to clear recommendations for client {client_id} without permission.")
                 return False
 
             active_slates = session.exec(
@@ -1035,10 +986,7 @@ def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
                 session.add(slate)
 
             if active_slates:
-                logging.info(
-                    f"CRM: Marked {len(active_slates)} recommendation slates as "
-                    f"completed for client {client_id}"
-                )
+                logging.info(f"CRM: Marked {len(active_slates)} recommendation slates as completed for client {client_id}")
 
             messages = session.exec(
                 select(Message)
@@ -1051,20 +999,14 @@ def clear_active_recommendations(client_id: UUID, user_id: UUID) -> bool:
                 if msg.ai_draft:
                     msg.ai_draft = None
                     session.add(msg)
-                    logging.info(
-                        f"CRM: Cleared stale AI draft from message {msg.id} "
-                        f"for client {client_id}"
-                    )
+                    logging.info(f"CRM: Cleared stale AI draft from message {msg.id} for client {client_id}")
                     break
 
             session.commit()
             return True
 
     except Exception as e:
-        logging.error(
-            f"CRM: Error clearing recommendations/drafts for client {client_id}: {e}",
-            exc_info=True,
-        )
+        logging.error(f"CRM: Error clearing recommendations/drafts for client {client_id}: {e}", exc_info=True)
         return False
 
 
@@ -1136,7 +1078,6 @@ def get_resource_by_entity_id(entity_id: str, session: Session) -> Optional[Reso
     Finds a resource by its external entity ID from the data provider.
     This is crucial for preventing duplicate resource creation.
     """
-    # Convert UUID to string if needed for SQLite compatibility
     entity_id_str = str(entity_id) if entity_id else None
     if not entity_id_str:
         return None
@@ -1151,10 +1092,6 @@ def does_nudge_exist_for_client_and_resource(client_id: uuid.UUID, resource_id: 
     for a given client and triggering resource.
     This is crucial for preventing duplicate nudge notifications.
     """
-    # This query is a bit more complex as it needs to check the JSON field.
-    # Note: This approach is functional but may not be the most performant on very large datasets.
-    # A more optimized solution might involve a dedicated join table between clients and campaigns.
-    
     statement = select(CampaignBriefing).where(
         CampaignBriefing.triggering_resource_id == resource_id,
         CampaignBriefing.campaign_type == event_type
@@ -1181,7 +1118,6 @@ async def process_new_contact_for_existing_events(client: Client, user_id: UUID)
     
     logging.info(f"PROCESSING NEW CONTACT: Immediately scoring {client.full_name} against existing events")
     
-    # Get the user
     user = get_user_by_id(user_id)
     if not user:
         logging.error(f"PROCESSING NEW CONTACT: User {user_id} not found")
@@ -1192,35 +1128,28 @@ async def process_new_contact_for_existing_events(client: Client, user_id: UUID)
         logging.error(f"PROCESSING NEW CONTACT: No vertical config found for user {user_id}")
         return 0
     
-    # Get all existing market events for this user
     with Session(engine) as session:
         events = session.exec(select(MarketEvent).where(MarketEvent.user_id == user_id)).all()
         logging.info(f"PROCESSING NEW CONTACT: Found {len(events)} existing events to score against")
         
-        # OPTIMIZATION: Limit the number of events processed to prevent performance issues
-        MAX_EVENTS_TO_PROCESS = 50  # Process only the most recent 50 events
+        MAX_EVENTS_TO_PROCESS = 50
         if len(events) > MAX_EVENTS_TO_PROCESS:
-            # Sort by creation date and take the most recent events
             events = sorted(events, key=lambda e: e.created_at, reverse=True)[:MAX_EVENTS_TO_PROCESS]
             logging.info(f"PROCESSING NEW CONTACT: Limited to {MAX_EVENTS_TO_PROCESS} most recent events for performance")
         
         campaigns_created = 0
         
         for event in events:
-            # Get the resource for this event
             resource = get_resource_by_entity_id(event.entity_id, session)
             if not resource:
                 logging.warning(f"PROCESSING NEW CONTACT: No resource found for event {event.id}")
                 continue
             
-            # Check if nudge already exists for this client and resource
             if does_nudge_exist_for_client_and_resource(client.id, resource.id, session, event.event_type):
                 logging.info(f"PROCESSING NEW CONTACT: Nudge already exists for client {client.id} and resource {resource.id}")
                 continue
             
-            # Score ONLY this new client against this event
             try:
-                # Get resource embedding if needed
                 resource_embedding = None
                 if resource.resource_type == "property":
                     remarks = resource.attributes.get('PublicRemarks')
@@ -1228,13 +1157,11 @@ async def process_new_contact_for_existing_events(client: Client, user_id: UUID)
                         from agent_core import llm_client
                         resource_embedding = await llm_client.generate_embedding(remarks)
                 
-                # Score the single client
                 score, reasons = _get_client_score_for_event(client, event, resource_embedding, vertical_config)
                 
-                if score >= 25:  # Use same threshold as nudge_engine
+                if score >= 25:
                     logging.info(f"PROCESSING NEW CONTACT: Client {client.full_name} matched event {event.id} with score {score}. Reasons: {reasons}")
                     
-                    # Create matched audience with just this client
                     matched_audience = [MatchedClient(
                         client_id=client.id, 
                         client_name=client.full_name, 
@@ -1242,7 +1169,6 @@ async def process_new_contact_for_existing_events(client: Client, user_id: UUID)
                         match_reasons=reasons
                     )]
                     
-                    # Create campaign for this single client
                     await _create_campaign_from_event(event, user, resource, matched_audience, db_session=session)
                     campaigns_created += 1
                     logging.info(f"PROCESSING NEW CONTACT: Created campaign for event {event.id}")
