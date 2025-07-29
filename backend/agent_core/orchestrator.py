@@ -1,5 +1,5 @@
 # File Path: backend/agent_core/orchestrator.py
-# --- MODIFIED: Fixes broadcast method call and adds AI tag processing ---
+# --- MODIFIED: Fixes AI tag extraction from recommendation slate ---
 
 import logging
 import asyncio
@@ -83,7 +83,6 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
                 # --- NOTIFY FRONTEND OF NEW INTEL ---
                 try:
                     intel_update_notification = { "type": "INTEL_UPDATED", "clientId": str(client_id) }
-                    # [FIX] Corrected method name and argument
                     await websocket_manager.broadcast_json_to_client(
                         client_id=str(client_id),
                         data=intel_update_notification
@@ -111,17 +110,34 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
                 user, client_id, incoming_message, conversation_history
             )
 
-            # [NEW] Check for extracted tags and add them to the client record
-            if recommendation_data and recommendation_data.get("tags"):
-                tags_to_add = recommendation_data.get("tags")
-                if isinstance(tags_to_add, list) and len(tags_to_add) > 0:
-                    logging.info(f"ORCHESTRATOR: Extracted tags from message: {tags_to_add}. Updating client intel.")
-                    await crm_service.update_client_intel(client_id=client_id, user_id=user.id, tags_to_add=tags_to_add)
+            # --- [FIX START] ---
+            # Correctly parse the recommendation data to find tags and notes.
+            if recommendation_data and recommendation_data.get("recommendations"):
+                intel_rec = next((r for r in recommendation_data["recommendations"] if r.get("type") == "UPDATE_CLIENT_INTEL"), None)
+                
+                if intel_rec and intel_rec.get("payload"):
+                    payload = intel_rec["payload"]
+                    tags_to_add = payload.get("tags_to_add")
+                    notes_to_add = payload.get("notes_to_add")
+                    
+                    # Only call update_client_intel if there's something to update
+                    if (tags_to_add and isinstance(tags_to_add, list) and tags_to_add) or \
+                       (notes_to_add and isinstance(notes_to_add, str) and notes_to_add.strip()):
+                        
+                        logging.info(f"ORCHESTRATOR: Extracted intel from message. Tags: {tags_to_add}, Notes: {notes_to_add}")
+                        await crm_service.update_client_intel(
+                            client_id=client_id, 
+                            user_id=user.id, 
+                            tags_to_add=tags_to_add,
+                            notes_to_add=notes_to_add
+                        )
+            # --- [FIX END] ---
 
             # Process recommendations for the UI
             if recommendation_data:
                 draft_rec = next((r for r in recommendation_data.get("recommendations", []) if r.get("type") == "SUGGEST_DRAFT"), None)
                 draft_text = draft_rec["payload"]["text"] if draft_rec and draft_rec.get("payload") else "Could not generate draft."
+                
                 immediate_slate = CampaignBriefing(
                     user_id=user.id, client_id=client_id, parent_message_id=incoming_message.id, is_plan=False,
                     campaign_type="inbound_response_recommendation", headline="AI Suggestions",
@@ -163,7 +179,6 @@ async def handle_incoming_message(client_id: uuid.UUID, incoming_message: Messag
             if recommendation_data or playbook:
                 try:
                     intel_update_notification = { "type": "INTEL_UPDATED", "clientId": str(client_id) }
-                    # [FIX] Corrected method name and argument
                     await websocket_manager.broadcast_json_to_client(
                         client_id=str(client_id),
                         data=intel_update_notification
