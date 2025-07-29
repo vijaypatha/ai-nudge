@@ -1,11 +1,11 @@
 // frontend/app/(main)/nudges/page.tsx
-// --- CORRECTED VERSION ---
+// --- FINAL VERSION: Uses WebSockets for real-time updates ---
 
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useAppContext, CampaignBriefing, Client, ScheduledMessage, User } from '@/context/AppContext';
+import { useAppContext, Client, ScheduledMessage, User } from '@/context/AppContext';
 import { Tabs, TabOption } from '@/components/ui/Tabs';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -13,8 +13,17 @@ import { OpportunityNudgesView, DisplayConfig } from '@/components/nudges/Opport
 import { ScheduledNudgesView } from '@/components/nudges/ScheduledNudgesView';
 import { InstantNudgeView } from '@/components/nudges/InstantNudgeView';
 
+// Define the extended CampaignBriefing type to include timestamps for our logic.
+interface CampaignBriefing extends Omit<import('@/context/AppContext').CampaignBriefing, 'created_at' | 'updated_at'> {
+    id: string;
+    created_at: string;
+    updated_at: string;
+}
+
 export default function NudgesPage() {
-    const { user, api, loading, fetchDashboardData: refetchOpportunities } = useAppContext();
+    // Destructure the 'socket' instance from the AppContext.
+    // This assumes your AppContext provides a connected websocket for the user.
+    const { user, api, loading, socket } = useAppContext();
 
     const [nudges, setNudges] = useState<CampaignBriefing[]>([]);
     const [displayConfig, setDisplayConfig] = useState<DisplayConfig>({});
@@ -35,17 +44,18 @@ export default function NudgesPage() {
     ];
 
     const fetchNudgesAndConfig = useCallback(() => {
-        setIsNudgesLoading(true);
-        // This now includes both traditional opportunities AND content recommendations
-        // as part of the unified AI suggestions system
+        // No need to set loading to true here for refetches,
+        // as it would cause a flicker. The initial load is handled below.
         api.get('/api/campaigns?status=DRAFT')
             .then(data => {
                 setNudges(data.nudges || []);
                 setDisplayConfig(data.display_config || {});
             })
             .catch(err => console.error("Failed to fetch nudges and config:", err))
-            .finally(() => setIsNudgesLoading(false));
-    }, [api]);
+            .finally(() => {
+                if (isNudgesLoading) setIsNudgesLoading(false);
+            });
+    }, [api, isNudgesLoading]);
 
     const fetchClients = useCallback(() => {
         setIsClientsLoading(true);
@@ -60,8 +70,6 @@ export default function NudgesPage() {
         api.get('/api/scheduled-messages/')
             .then(data => {
                 const pendingMessages = data.filter((msg: ScheduledMessage) => msg.status === 'pending');
-                // --- FIX IS HERE ---
-                // Sort by 'scheduled_at_utc' instead of the old 'scheduled_at' property.
                 pendingMessages.sort((a: ScheduledMessage, b: ScheduledMessage) => new Date(a.scheduled_at_utc).getTime() - new Date(b.scheduled_at_utc).getTime());
                 setScheduledMessages(pendingMessages);
             })
@@ -69,11 +77,40 @@ export default function NudgesPage() {
             .finally(() => setIsScheduledLoading(false));
     }, [api]);
 
+    // Initial data fetch on component mount
     useEffect(() => {
         fetchNudgesAndConfig();
         fetchClients();
     }, [fetchNudgesAndConfig, fetchClients]);
+    
+    // --- REAL-TIME UPDATE LOGIC ---
+    // Listen for messages on the user's websocket connection.
+    useEffect(() => {
+        if (!socket) return;
 
+        const handleNudgeUpdate = (event: MessageEvent) => {
+            try {
+                const data = JSON.parse(event.data);
+                // Check for the specific event broadcasted by our Celery task
+                if (data.event === 'nudges_updated') {
+                    console.log("WebSocket: Received 'nudges_updated' event. Refetching data.");
+                    fetchNudgesAndConfig();
+                }
+            } catch (error) {
+                console.error("WebSocket: Failed to parse message data", error);
+            }
+        };
+
+        socket.addEventListener('message', handleNudgeUpdate);
+
+        // Cleanup function to prevent memory leaks.
+        // This removes the event listener when the component unmounts.
+        return () => {
+            socket.removeEventListener('message', handleNudgeUpdate);
+        };
+    }, [socket, fetchNudgesAndConfig]); // Rerun if socket or fetch function changes
+
+    // Fetch scheduled messages only when that tab is active
     useEffect(() => {
         if (activeTab === 'scheduled') {
             refetchScheduled();

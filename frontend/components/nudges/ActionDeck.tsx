@@ -1,14 +1,11 @@
 // frontend/components/nudges/ActionDeck.tsx
-// --- ENHANCED VERSION V2 ---
-// This version is refactored to read from a standardized `key_intel.content_preview`
-// object, eliminating guesswork and ensuring reliable content previews.
 
 'use client';
 
 import { useState, useEffect, useMemo, FC, ReactNode } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CampaignBriefing, Client, MatchedClient } from '@/context/AppContext';
+import { CampaignBriefing as CampaignBriefingType, Client, MatchedClient } from '@/context/AppContext';
 import { ManageAudienceModal } from '@/components/modals/ManageAudienceModal';
 import { DisplayConfig } from './OpportunityNudgesView';
 import {
@@ -17,6 +14,11 @@ import {
     BedDouble, Bath, ArrowLeftCircle, ArrowRightCircle, Play, ExternalLink,
     MessageSquare, Brain, Mic, Volume2, Newspaper, Building
 } from 'lucide-react';
+
+interface CampaignBriefing extends CampaignBriefingType {
+    created_at: string;
+    updated_at: string;
+}
 
 const ICONS: Record<string, ReactNode> = {
     Home: <Home size={20} />,
@@ -41,29 +43,31 @@ const ScoreCircle: FC<{ score: number }> = ({ score }) => {
 };
 
 const MatchReasonTag: FC<{ reason: string }> = ({ reason }) => {
-    const icon = reason.startsWith('🔥') ? '🔥' : reason.startsWith('✅') ? '✅' : '✨';
+    const isNewInfo = reason.startsWith('✅');
+    const isHotLead = reason.startsWith('🔥');
+    
+    const icon = isNewInfo ? '✅' : isHotLead ? '🔥' : '✨';
     const text = reason.replace(/^[🔥✅✨]\s*/, '');
-    return (<div className="flex items-center gap-1.5 text-xs font-medium bg-white/5 text-primary-action py-1 px-2.5 rounded-full"><span>{icon}</span><span className="text-brand-text-muted">{text}</span></div>);
+    const bgColor = isNewInfo ? 'bg-primary-action/20' : 'bg-white/5';
+    const textColor = isNewInfo ? 'text-primary-action' : 'text-brand-text-muted';
+
+    return (
+        <div className={`flex items-center gap-1.5 text-xs font-medium ${bgColor} py-1 px-2.5 rounded-full`}>
+            <span>{icon}</span>
+            <span className={textColor}>{text}</span>
+        </div>
+    );
 };
 
-// --- REFACTORED ContentPreview Component ---
 const ContentPreview: FC<{ intel: any }> = ({ intel }) => {
-    // Read directly from the new standardized object for reliability.
     const previewData = intel?.content_preview;
-
-    // If no preview data, don't render the component.
     if (!previewData || (!previewData.url && !previewData.image_url && !previewData.title)) {
         return null;
     }
-
     const { content_type, url, image_url, title, description, details } = previewData;
-
     const isYouTube = content_type === 'youtube';
     const isVideo = content_type === 'video';
-    const isAudio = content_type === 'audio';
-    const isArticle = content_type === 'article';
     const isProperty = content_type === 'property';
-
     const renderDetail = (label: string, value: any, icon: ReactNode) => {
         if (!value) return null;
         return (
@@ -183,6 +187,13 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
     const timingRationale = intel['timing_rationale'] || 'Optimal timing for client engagement.';
     const triggerSource = intel['trigger_source'] || 'AI Analysis';
 
+    const wasRescored = useMemo(() => {
+        if (!briefing.created_at || !briefing.updated_at) return false;
+        const created = new Date(briefing.created_at).getTime();
+        const updated = new Date(briefing.updated_at).getTime();
+        return (updated - created) > 60000; 
+    }, [briefing.created_at, briefing.updated_at]);
+
     const handleDraftChange = (newDraft: string) => { setDraft(newDraft); onBriefingUpdate({ ...briefing, edited_draft: newDraft }); };
     
     const handleSaveAudience = async (newAudience: Client[]) => {
@@ -195,7 +206,15 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
             <ManageAudienceModal isOpen={isAudienceModalOpen} onClose={() => setIsAudienceModalOpen(false)} onSave={handleSaveAudience} initialSelectedClientIds={new Set(matchedAudience.map(c => c.client_id))} />
             <div className="absolute w-full h-full bg-brand-primary border border-white/10 rounded-xl overflow-hidden flex flex-col shadow-2xl">
                 <div className="flex-shrink-0 p-4 bg-black/30 border-b border-white/10 flex items-center justify-between">
-                    <div className="flex items-center gap-3"><span className={config.color}>{icon}</span><h3 className="font-bold text-lg text-brand-text-main">{briefing.headline}</h3></div>
+                    <div className="flex items-center gap-3">
+                        <span className={config.color}>{icon}</span>
+                        <h3 className="font-bold text-lg text-brand-text-main">{briefing.headline}</h3>
+                        {wasRescored && (
+                            <span className="flex items-center gap-1.5 bg-primary-action/20 text-primary-action text-xs font-bold px-2 py-1 rounded-full animate-in fade-in-0 zoom-in-95">
+                                <Sparkles size={12}/> Re-scored
+                            </span>
+                        )}
+                    </div>
                     <div className="text-xs text-brand-text-muted bg-white/10 px-2 py-1 rounded-full">{triggerSource}</div>
                 </div>
                 

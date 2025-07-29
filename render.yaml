@@ -3,99 +3,162 @@
 # It is used to deploy the application to Render.com.
 # The services are defined in the services section, and the databases are defined in the databases section.
 # Render (Prod): No ENVIRONMENT set → defaults to "production" → dev-login endpoint NOT available
+# Local Development Configuration
 services:
-  - type: job
-    name: db-migration
-    plan: free
-    env: docker
-    rootDir: backend
-    startCommand: "alembic upgrade head"
-    envVars:
-      - fromGroup: ainudge-env-group
+  # ---------- DATABASE ----------
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: realestate_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ai_nudge_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
-  # Main Backend API Service
-  - type: web
-    name: ai-nudge-backend
-    env: docker
-    plan: free
-    rootDir: backend
-    envVars:
-      - key: PYTHONPATH
-        value: .
-      - key: RUNNING_IN_CELERY
-        value: "true"
-      - key: DATABASE_URL
-        fromDatabase:
-          name: ai-nudge-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: ai-nudge-redis
-          property: connectionString
-      - key: JWT_SECRET_KEY
-        generateValue: true
-      - fromGroup: ainudge-env-group
+  # ---------- REDIS ----------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - ai_nudge_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
-  # Celery Worker Service
-  - type: worker
-    name: ai-nudge-celery-worker
-    env: docker
-    plan: free
-    rootDir: backend
-    startCommand: "celery -A celery_worker.celery_app worker --loglevel=info" # 👈 START COMMAND ADDED
-    envVars:
-      - key: PYTHONPATH
-        value: .
-      - key: RUNNING_IN_CELERY
-        value: "true"
-      - key: DATABASE_URL
-        fromDatabase:
-          name: ai-nudge-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: ai-nudge-redis
-          property: connectionString
-      - key: JWT_SECRET_KEY
-        generateValue: true
-      - fromGroup: ainudge-env-group
+  # ---------- BACKEND (FastAPI) ----------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # ❗️CORRECTED: 'command' is now at the correct indentation level
+    command: > 
+      sh -c "alembic upgrade head && python -c 'import asyncio; from data.seed import seed_database; asyncio.run(seed_database())' && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    environment:
+      ENVIRONMENT: development
+      WEBSOCKET_ALLOWED_ORIGINS: '["http://localhost:3000"]'
+      PYTHONPATH: /app
+      RUNNING_IN_CELERY: "true"
+      DATABASE_URL: postgresql://postgres:password123@db:5432/realestate_db
+      REDIS_URL: redis://redis:6379
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+    networks:
+      - ai_nudge_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
-  # Celery Beat Scheduler Service
-  - type: worker
-    name: ai-nudge-celery-beat
-    env: docker
-    plan: free
-    rootDir: backend
-    startCommand: "celery -A celery_worker.celery_app beat --loglevel=info" # 👈 START COMMAND ADDED
-    envVars:
-      - key: PYTHONPATH
-        value: .
-      - key: RUNNING_IN_CELERY
-        value: "true"
-      - key: DATABASE_URL
-        fromDatabase:
-          name: ai-nudge-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: ai-nudge-redis
-          property: connectionString
-      - key: JWT_SECRET_KEY
-        generateValue: true
-      - fromGroup: ainudge-env-group
+  # ---------- CELERY WORKER ----------
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A celery_worker.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      ENVIRONMENT: development
+      PYTHONPATH: /app
+      RUNNING_IN_CELERY: "true"
+      DATABASE_URL: postgresql://postgres:password123@db:5432/realestate_db
+      REDIS_URL: redis://redis:6379
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+    networks:
+      - ai_nudge_net
+    depends_on:
+      backend:
+        condition: service_started
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
-  # Redis Service
-  - type: redis
-    name: ai-nudge-redis
-    plan: free
-    ipAllowList: []
+  # ---------- CELERY BEAT SCHEDULER ----------
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A celery_worker.celery_app beat --loglevel=info --schedule=/app/celerybeat-schedule.db
+    environment:
+      ENVIRONMENT: development
+      PYTHONPATH: /app
+      RUNNING_IN_CELERY: "true"
+      DATABASE_URL: postgresql://postgres:password123@db:5432/realestate_db
+      REDIS_URL: redis://redis:6379
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+      - celery_beat_data:/app/celery_beat_data
+    networks:
+      - ai_nudge_net
+    depends_on:
+      backend:
+        condition: service_started
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
-databases:
-  # PostgreSQL Database
-  - name: ai-nudge-db
-    databaseName: ai_nudge_db
-    user: ai_nudge_user
-    plan: free
+  # ---------- FRONTEND (Next.js) ----------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: npm run dev
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8001
+      NODE_ENV: development
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+      - frontend_next:/app/.next
+    networks:
+      - ai_nudge_net
+    depends_on:
+      - backend
+
+# ---------- NETWORKS ----------
+networks:
+  ai_nudge_net:
+    driver: bridge
+    name: ai_nudge_network
+
+# ---------- VOLUMES ----------
+volumes:
+  postgres_data:
+    name: ai_nudge_postgres_data
+  frontend_node_modules:
+    name: ai_nudge_frontend_node_modules
+  frontend_next:
+    name: ai_nudge_frontend_next
+  celery_beat_data:
+    name: ai_nudge_celery_beat_data

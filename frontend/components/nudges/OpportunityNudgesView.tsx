@@ -1,13 +1,10 @@
 // frontend/components/nudges/OpportunityNudgesView.tsx
-// --- AGNOSTIC VERSION ---
-// This component is now "dumb" and receives display configuration as a prop,
-// making it reusable for any vertical (real estate, therapy, etc.).
 
 'use client';
 
 import { useState, useMemo, FC, ReactNode } from 'react';
 import { motion } from 'framer-motion';
-import { CampaignBriefing } from '@/context/AppContext';
+import { CampaignBriefing as CampaignBriefingType } from '@/context/AppContext';
 import { ActionDeck } from './ActionDeck';
 import { BrainCircuit, Sparkles, Home, TrendingUp, RotateCcw, TimerOff, CalendarPlus, Archive, User as UserIcon, BookOpen } from 'lucide-react';
 
@@ -28,15 +25,20 @@ const ICONS: Record<string, ReactNode> = {
     CalendarPlus: <CalendarPlus size={16} />,
     Archive: <Archive size={16} />,
     UserIcon: <UserIcon size={16} />,
-    BookOpen: <BookOpen size={16} />, // --- ADD THIS LINE ---
+    BookOpen: <BookOpen size={16} />,
     Default: <Sparkles size={16} />,
 };
+
+interface CampaignBriefing extends CampaignBriefingType {
+    created_at: string;
+    updated_at: string;
+}
 
 interface ClientOpportunitiesCardProps {
     clientName: string;
     opportunities: CampaignBriefing[];
     onClick: () => void;
-    displayConfig: DisplayConfig; // Pass config down to the card
+    displayConfig: DisplayConfig;
 }
 
 const ClientOpportunitiesCard: FC<ClientOpportunitiesCardProps> = ({ clientName, opportunities, onClick, displayConfig }) => {
@@ -45,6 +47,15 @@ const ClientOpportunitiesCard: FC<ClientOpportunitiesCardProps> = ({ clientName,
             acc[nudge.campaign_type] = (acc[nudge.campaign_type] || 0) + 1;
             return acc;
         }, {} as Record<string, number>);
+    }, [opportunities]);
+
+    const hasRescoredNudges = useMemo(() => {
+        return opportunities.some(nudge => {
+            if (!nudge.created_at || !nudge.updated_at) return false;
+            const created = new Date(nudge.created_at).getTime();
+            const updated = new Date(nudge.updated_at).getTime();
+            return (updated - created) > 60000; // Updated >1min after creation
+        });
     }, [opportunities]);
 
     return (
@@ -56,7 +67,14 @@ const ClientOpportunitiesCard: FC<ClientOpportunitiesCardProps> = ({ clientName,
             className="w-full text-left p-4 bg-brand-dark/50 border border-white/5 rounded-lg flex flex-col gap-3 transition-all duration-200 hover:bg-brand-dark hover:border-white/10"
         >
             <div className="flex justify-between items-start">
-                <h3 className="font-bold text-lg text-brand-white">{clientName}</h3>
+                 <div className="flex items-center gap-3">
+                     <h3 className="font-bold text-lg text-brand-white">{clientName}</h3>
+                     {hasRescoredNudges && (
+                        <span className="flex items-center gap-1 bg-primary-action/20 text-primary-action text-xs font-bold px-2 py-0.5 rounded-full animate-in fade-in-0">
+                            <Sparkles size={12}/> Updated
+                        </span>
+                     )}
+                </div>
                 <div className="flex-shrink-0 bg-primary-action text-white text-xs font-bold px-2.5 py-1 rounded-full">{opportunities.length} Total</div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -80,7 +98,7 @@ interface OpportunityNudgesViewProps {
     isLoading: boolean;
     onAction: (briefing: CampaignBriefing, action: 'dismiss' | 'send') => Promise<void>;
     onBriefingUpdate: (updatedBriefing: CampaignBriefing) => void;
-    displayConfig: DisplayConfig; // Expect the config as a prop
+    displayConfig: DisplayConfig;
 }
 
 export const OpportunityNudgesView: FC<OpportunityNudgesViewProps> = ({ nudges, isLoading, onAction, onBriefingUpdate, displayConfig }) => {

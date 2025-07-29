@@ -1,5 +1,5 @@
 // frontend/context/AppContext.tsx
-// --- UPDATED: Corrected the MatchedClient type definition.
+// --- MODIFIED: Added user-level WebSocket connection management ---
 
 'use client';
 
@@ -44,7 +44,6 @@ export interface Client {
 }
 export interface Property { id: string; address: string; price: number; status: string; image_urls: string[]; }
 
-// --- MODIFIED: match_reason is now an array of strings ---
 export interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reasons: string[]; }
 
 export interface CampaignBriefing { 
@@ -69,12 +68,10 @@ export interface Message {
   direction: 'inbound' | 'outbound';
   status: string;
   created_at: string;
-  originally_scheduled_at?: string;  // Store original scheduled time for scheduled messages
+  originally_scheduled_at?: string;
   ai_drafts?: CampaignBriefing[];
-  // --- REVISED FIELDS ---
   source: 'manual' | 'scheduled' | 'faq_auto_response' | 'instant_nudge';
   sender_type: 'user' | 'system' | 'ai';
-  // --- END REVISED FIELDS ---
 }
 export interface Conversation { 
   id: string; 
@@ -95,12 +92,12 @@ export interface ScheduledMessage {
   user_id: string;
   client_id: string;
   content: string;
-  scheduled_at_utc: string; // Corrected field name
-  timezone: string; // Added field
+  scheduled_at_utc: string;
+  timezone: string;
   status: 'pending' | 'sent' | 'failed' | 'cancelled';
-  celery_task_id: string | null; // Added field
+  celery_task_id: string | null;
   playbook_touchpoint_id?: string;
-  is_recurring: boolean; // Added field
+  is_recurring: boolean;
 }
 
 interface AppContextType {
@@ -112,6 +109,7 @@ interface AppContextType {
   properties: Property[];
   conversations: Conversation[];
   nudges: CampaignBriefing[];
+  socket: WebSocket | null; // Add socket to the context type
   logout: () => void;
   api: {
     get: (endpoint: string) => Promise<any>;
@@ -139,6 +137,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [properties, setProperties] = useState<Property[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [nudges, setNudges] = useState<CampaignBriefing[]>([]);
+  const [socket, setSocket] = useState<WebSocket | null>(null); // State to hold the WebSocket instance
   const tokenRef = useRef<string | null>(null);
   const router = useRouter();
 
@@ -151,8 +150,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setProperties([]);
     setConversations([]);
     setNudges([]);
+    if (socket) {
+        socket.close();
+    }
+    setSocket(null);
     router.replace('/auth/login');
-  }, [router]);
+  }, [router, socket]);
   
   const api = useMemo(() => {
     const request = async (endpoint: string, method: string, body?: any, retries = 3) => {
@@ -181,10 +184,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
               detail: `API Error: ${response.statusText}` 
             }));
             
-            // Retry on 5xx errors (server errors)
             if (response.status >= 500 && attempt < retries) {
               console.warn(`API attempt ${attempt} failed with ${response.status}, retrying...`);
-              await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // Exponential backoff
+              await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
               continue;
             }
             
@@ -200,7 +202,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
             throw error;
           }
           
-          // Don't retry on client errors (4xx)
           if (error instanceof Error && error.message.includes('4')) {
             throw error;
           }
@@ -264,7 +265,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const sortedConversations = conversationsData.sort((a: any, b: any) => 
         new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
       );
-      // Use a deep comparison to prevent re-renders if the data hasn't actually changed.
       setConversations(prevConversations => {
         if (JSON.stringify(prevConversations) === JSON.stringify(sortedConversations)) {
             return prevConversations;
@@ -306,15 +306,53 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const forceRefreshAllData = useCallback(async () => {
     if (!isAuthenticated) return;
     console.log("Force refreshing all data...");
-    // Clear all cached data
     setClients([]);
     setProperties([]);
     setConversations([]);
     setNudges([]);
-    
-    // Refetch all data
     await fetchDashboardData();
   }, [isAuthenticated, fetchDashboardData]);
+
+  // --- WebSocket Connection Logic ---
+  useEffect(() => {
+    // Don't connect if not authenticated or no token exists
+    if (!isAuthenticated || !tokenRef.current) {
+      // If there's an old socket, close it
+      if (socket) {
+        socket.close();
+        setSocket(null);
+      }
+      return;
+    }
+
+    // Replace http/https with ws/wss for the WebSocket URL
+    const wsUrl = (process.env.NEXT_PUBLIC_API_URL || 'ws://localhost:8001')
+        .replace(/^http/, 'ws');
+    
+    // Create the new WebSocket connection to the user-specific endpoint
+    const ws = new WebSocket(`${wsUrl}/ws/user?token=${tokenRef.current}`);
+
+    ws.onopen = () => {
+        console.log("WebSocket connection established for user notifications.");
+        setSocket(ws);
+    };
+
+    ws.onclose = () => {
+        console.log("WebSocket connection closed.");
+        setSocket(null); // Clear the socket from state on close
+    };
+
+    ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+    };
+    
+    // Cleanup function: this runs when the component unmounts or dependencies change
+    return () => {
+        if (ws.readyState === 1) { // 1 means OPEN
+            ws.close();
+        }
+    };
+  }, [isAuthenticated]); // Rerun this effect only when authentication state changes
 
   useEffect(() => {
     const checkUserSession = async () => {
@@ -328,7 +366,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     checkUserSession();
   }, [login]);
 
-  // Add useEffect to fetch dashboard data when user is authenticated
   useEffect(() => {
     if (isAuthenticated && user) {
       fetchDashboardData();
@@ -357,6 +394,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     properties,
     conversations,
     nudges,
+    socket, // Provide the socket instance to the rest of the app
     logout,
     api,
     login,
@@ -368,7 +406,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     refreshUser,
     forceRefreshAllData,
   }), [
-    loading, isAuthenticated, user, clients, properties, conversations, nudges, 
+    loading, isAuthenticated, user, clients, properties, conversations, nudges, socket,
     logout, api, login, fetchDashboardData, refreshConversations, 
     updateClientInList, refetchScheduledMessagesForClient, refreshUser, forceRefreshAllData
   ]);
