@@ -10,6 +10,7 @@ from sqlmodel import Session, select, delete
 from sqlalchemy.orm import selectinload
 from .database import engine
 import logging
+from sqlalchemy.orm.attributes import flag_modified 
 
 from agent_core import semantic_service
 from .models.feedback import NegativePreference
@@ -300,32 +301,66 @@ async def update_client_notes(client_id: UUID, notes: str, user_id: UUID) -> Opt
         return None
 
 async def update_client_intel(client_id: UUID, user_id: UUID, tags_to_add: Optional[List[str]] = None, notes_to_add: Optional[str] = None) -> Optional[Client]:
-    """Appends notes/tags, extracts preferences, and calls semantic_service to regenerate the embedding."""
+    """
+    Appends notes/tags, extracts preferences, and calls semantic_service to regenerate the embedding.
+    --- MODIFIED: Uses flag_modified to ensure JSON preference changes are persisted to the database. ---
+    """
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client:
+            logging.warning(f"CRM: update_client_intel called for non-existent client {client_id}")
             return None
         
+        user = session.get(User, user_id)
+        if not user:
+            logging.error(f"CRM: Could not find user {user_id} during intel update for client {client_id}")
+            return None # Or handle as appropriate
+            
+        user_vertical = user.vertical or "general"
         profile_was_updated = False
+
         if tags_to_add:
-            client.user_tags = sorted(list(set(client.user_tags or []).union(set(tags_to_add))))
+            # Using ai_tags as per our discussion about automating AI-suggested tags
+            client.ai_tags = sorted(list(set(client.ai_tags or []).union(set(tags_to_add))))
+            flag_modified(client, "ai_tags") # Also flag the tags list as modified
             profile_was_updated = True
+            logging.info(f"CRM: Updated AI tags for client {client.id}")
 
         if notes_to_add:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             new_note_entry = f"Note from AI ({timestamp}):\n{notes_to_add}"
             client.notes = f"{client.notes}\n\n---\n\n{new_note_entry}" if client.notes else new_note_entry
             
-            all_text_to_analyze = f"Notes: {client.notes}\nTags: {', '.join(client.user_tags)}"
-            extracted_prefs = await profiler_agent.extract_preferences_from_text(all_text_to_analyze)
+            # Use the full client context for the best possible preference extraction
+            all_text_to_analyze = f"Notes: {client.notes}\nTags: {', '.join(client.user_tags or [])} {', '.join(client.ai_tags or [])}"
+            
+            extracted_prefs = await profiler_agent.extract_preferences_from_text(all_text_to_analyze, user_vertical)
+            
             if extracted_prefs:
-                if client.preferences is None: client.preferences = {}
+                logging.info(f"CRM: Profiler extracted preferences: {extracted_prefs}")
+                
+                # Initialize preferences if they are None
+                if client.preferences is None:
+                    client.preferences = {}
+                
+                # Update the dictionary in place
                 client.preferences.update(extracted_prefs)
+                
+                # --- THIS IS THE FIX ---
+                # Explicitly mark the 'preferences' field as modified.
+                flag_modified(client, "preferences")
+                logging.info(f"CRM: Marked 'preferences' as modified for client {client.id}. New state: {client.preferences}")
+
             profile_was_updated = True
 
         if profile_was_updated:
+            # The session will now track all changes to client.notes, client.ai_tags, and client.preferences
             session.add(client)
+            
+            # Regenerate the semantic embedding since the client's data has changed
             await semantic_service.update_client_embedding(client, session)
+            
+            # Queue a re-score task since preferences may have changed
             try:
                 from celery_tasks import rescore_client_against_recent_events_task
                 rescore_client_against_recent_events_task.delay(client_id=str(client.id), user_id=str(user_id))
@@ -333,8 +368,11 @@ async def update_client_intel(client_id: UUID, user_id: UUID, tags_to_add: Optio
             except Exception as e:
                 logging.error(f"CRM: Failed to trigger re-score task for client {client.id}: {e}")
         
+        # A single commit at the end of the transaction handles all changes.
         session.commit()
         session.refresh(client)
+        
+        logging.info(f"CRM: Intel update complete and committed for client {client.id}. Final preferences: {client.preferences}")
         return client
 
 async def add_client_tags(client_id: uuid.UUID, tags_to_add: List[str], user_id: uuid.UUID) -> Optional[Client]:

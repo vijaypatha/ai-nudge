@@ -173,10 +173,27 @@ async def get_conversation_history_by_client_id(
             immediate_rec_slate = next((s for s in all_active_slates if not s.is_plan), None)
             active_plan_slate = next((s for s in all_active_slates if s.is_plan), None)
 
+        # --- NEW: Generate simple display_config based on user's vertical ---
+        display_config = {
+            "client_intel": {
+                "title": "Client Intel",
+                "icon": "Info"
+            },
+            "relationship_campaign": {
+                "title": "Relationship Campaign",
+                "icon": "BrainCircuit"
+            },
+            "properties": {
+                "title": "Properties" if current_user.vertical == "real_estate" else "Content Resources",
+                "icon": "Home" if current_user.vertical == "real_estate" else "BookOpen"
+            }
+        }
+
         return ConversationDetailResponse(
             messages=history if history else [],
             immediate_recommendations=immediate_rec_slate,
-            active_plan=active_plan_slate
+            active_plan=active_plan_slate,
+            display_config=display_config
         )
     except Exception as e:
         logging.error(f"Error fetching messages for client {client_id}: {e}", exc_info=True)
@@ -408,6 +425,22 @@ async def test_recommendation_generation(
             conversation_history
         )
         
+        # --- NEW: Generate simple display_config based on user's vertical ---
+        display_config = {
+            "client_intel": {
+                "title": "Client Intel",
+                "icon": "Info"
+            },
+            "relationship_campaign": {
+                "title": "Relationship Campaign",
+                "icon": "BrainCircuit"
+            },
+            "properties": {
+                "title": "Properties" if current_user.vertical == "real_estate" else "Content Resources",
+                "icon": "Home" if current_user.vertical == "real_estate" else "BookOpen"
+            }
+        }
+        
         return {
             "test_message": test_message.content,
             "client_id": str(test_message.client_id),
@@ -415,7 +448,8 @@ async def test_recommendation_generation(
             "has_update_client_intel": any(
                 rec.get("type") == "UPDATE_CLIENT_INTEL" 
                 for rec in recommendation_data.get("recommendations", [])
-            )
+            ),
+            "display_config": display_config
         }
         
     except Exception as e:

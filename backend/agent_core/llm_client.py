@@ -59,13 +59,15 @@ async def get_chat_completion(
     
     try:
         if provider.lower() == "openai":
-            return await get_openai_chat(
+            from integrations.openai import get_chat_completion
+            return await get_chat_completion(
                 messages=messages_payload, 
                 temperature=temperature, 
                 max_tokens=max_tokens, 
                 json_response=json_response
             )
         elif provider.lower() == "gemini":
+            from integrations.gemini import get_chat_completion as get_gemini_chat
             return await get_gemini_chat(
                 messages=messages_payload, 
                 temperature=temperature, 

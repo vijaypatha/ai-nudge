@@ -30,7 +30,7 @@ class Client(SQLModel, table=True):
     ai_tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     user_tags: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     
-    preferences: Dict[str, Any] = Field(sa_column=Column(JSON))
+    preferences: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     last_interaction: Optional[str] = Field(default=None)
     timezone: Optional[str] = Field(default=None)
     
