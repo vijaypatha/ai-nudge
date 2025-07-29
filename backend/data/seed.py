@@ -40,8 +40,8 @@ async def seed_database():
         # Clear tables that depend on users or other primary tables first.
         # The order here is critical to avoid integrity errors.
         session.query(ScheduledMessage).delete()
-        session.query(Message).delete()
         session.query(CampaignBriefing).delete()
+        session.query(Message).delete()
         session.query(Faq).delete()
         session.query(Client).delete()
         # Clear events before resources and users

@@ -1,102 +1,149 @@
 # backend/workflow/pipeline.py
-# This file contains the core logic for the production data pipeline.
+# --- FINAL VERSION: Adds de-duplication for the incoming API batch ---
 
 import logging
 import asyncio
-from sqlmodel import Session
+from datetime import datetime
+from sqlmodel import Session, select
+from sqlalchemy.exc import IntegrityError
 from uuid import uuid4
 
 from data import crm as crm_service
 from agent_core.brain import nudge_engine
 from integrations.mls.factory import get_mls_client
-from data.models.user import UserType
-from data.models.event import MarketEvent
+from data.models.user import User
+from data.models.event import MarketEvent, GlobalMlsEvent
 from data.database import engine
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-async def run_main_opportunity_pipeline():
+
+async def process_global_events_for_user(user: User, global_events: list[GlobalMlsEvent]):
     """
-    The main production pipeline. It finds all active users, checks for new
-    market events from their integrated data source (like an MLS), and
-    processes those events to generate Nudges.
+    Processes a batch of global events for a single user, creating user-specific
+    MarketEvents and generating nudges. This is a reusable function.
     """
-    logger.info("PIPELINE: Starting main opportunity pipeline run...")
-    
-    # 1. Get all users who can have market events (all verticals)
-    all_users = crm_service.get_all_users()
-    active_users = [user for user in all_users if user.onboarding_complete]
-    
-    if not active_users:
-        logger.info("PIPELINE: No active users found. Ending pipeline run.")
+    logger.info(f"PIPELINE: Processing {len(global_events)} global events for user {user.id} ({user.full_name})...")
+    try:
+        with Session(engine) as db_session:
+            for detached_event in global_events:
+                # Re-attach the event object to the current session to prevent DetachedInstanceError
+                global_event = db_session.merge(detached_event)
+                
+                market_event_record = MarketEvent(
+                    id=uuid4(),
+                    user_id=user.id,
+                    event_type="new_listing", # Assuming all are new for now
+                    entity_id=global_event.listing_key,
+                    entity_type="property",
+                    payload=global_event.raw_payload,
+                    market_area="default",
+                    status="pending"
+                )
+                db_session.add(market_event_record)
+                
+                await nudge_engine.process_market_event(
+                    event=market_event_record, user=user, db_session=db_session
+                )
+            
+            db_session.commit()
+            logger.info(f"PIPELINE: Successfully processed events for user {user.id}.")
+
+    except Exception as e:
+        logger.error(f"PIPELINE: Failed to process events for user {user.id}. Error: {e}", exc_info=True)
+
+
+async def run_main_opportunity_pipeline(minutes_ago: int | None = None):
+    """
+    The main production pipeline, implementing the Global Event Pool strategy.
+    """
+    logger.info("PIPELINE: Starting main pipeline run (Global Pool Strategy)...")
+
+    try:
+        first_user = crm_service.get_first_onboarded_user()
+        if not first_user:
+            logger.info("PIPELINE: No active users found to initialize MLS client. Ending run.")
+            return
+        
+        data_source_client = get_mls_client(first_user)
+        if not data_source_client:
+            logger.warning("PIPELINE: Could not initialize MLS client. No events will be fetched.")
+            return
+
+        lookback = minutes_ago or 65
+        logger.info(f"PIPELINE: Fetching market events from MLS API (lookback: {lookback} minutes)...")
+        raw_events = data_source_client.get_events(minutes_ago=lookback)
+        logger.info(f"PIPELINE: Fetched {len(raw_events)} raw events from API.")
+
+    except Exception as e:
+        logger.error(f"PIPELINE: Failed to fetch market events from MLS API. Error: {e}", exc_info=True)
         return
 
-    logger.info(f"PIPELINE: Found {len(active_users)} active user(s) to process.")
+    if not raw_events:
+        logger.info("PIPELINE: No new market events found from API. Ending run.")
+        return
 
-    # 2. Process events for each user
-    for user in active_users:
-        logger.info(f"PIPELINE: Processing events for user {user.id} ({user.full_name})...")
-        try:
-            # 3. Initialize the correct data source client based on user's vertical
-            data_source_client = None
-            
-            if user.vertical == "real_estate":
-                from integrations.mls.factory import get_mls_client
-                data_source_client = get_mls_client(user)
-                if not data_source_client:
-                    logger.warning(f"PIPELINE: Could not get MLS client for user {user.id}. Skipping.")
-                    continue
-            elif user.vertical == "therapy":
-                # For therapy, we might have different data sources
-                # For now, skip therapy users as they don't have market events
-                logger.info(f"PIPELINE: User {user.id} is in therapy vertical. No market events to process.")
-                continue
-            else:
-                logger.warning(f"PIPELINE: Unknown vertical '{user.vertical}' for user {user.id}. Skipping.")
-                continue
+    # --- THIS IS THE FINAL FIX ---
+    # De-duplicate the incoming batch from the API before any processing.
+    unique_raw_events = []
+    seen_keys = set()
+    for event in raw_events:
+        if event.entity_id not in seen_keys:
+            unique_raw_events.append(event)
+            seen_keys.add(event.entity_id)
+    
+    if len(raw_events) != len(unique_raw_events):
+        logger.warning(f"PIPELINE: De-duplicated incoming batch from {len(raw_events)} to {len(unique_raw_events)} events.")
+    # --- END OF FIX ---
 
-            # 4. Fetch recent market events from the live API
-            # This looks for any changes in the last 7 days (10080 minutes).
-            # MLS properties typically stay active for days/weeks, not minutes.
-            # The get_events method is part of the MlsApiInterface
-            market_events = data_source_client.get_events(minutes_ago=10080)
-            
-            if not market_events:
-                logger.info(f"PIPELINE: No new market events found for user {user.id}.")
-                continue
+    newly_added_events = []
+    source_id = "flexmls_reso_default"
+    
+    with Session(engine) as session:
+        raw_event_keys = {event.entity_id for event in unique_raw_events}
+        
+        statement = select(GlobalMlsEvent.listing_key).where(
+            GlobalMlsEvent.source_id == source_id,
+            GlobalMlsEvent.listing_key.in_(raw_event_keys)
+        )
+        existing_keys = set(session.exec(statement).all())
+        logger.info(f"PIPELINE: Found {len(existing_keys)} events that already exist in the database.")
 
-            logger.info(f"PIPELINE: Found {len(market_events)} new market event(s) for user {user.id}.")
-            
-            # 5. Process each event through the Nudge Engine within a single session
-            with Session(engine) as db_session:
-                for event in market_events:
-                    logger.info(f"PIPELINE: Processing event {event.event_type} (Entity: {event.entity_id}) for user {user.id}.")
-                    
-                    # Convert Event to MarketEvent for the nudge engine
-                    market_event = MarketEvent(
-                        id=uuid4(),
-                        user_id=user.id,
-                        event_type=event.event_type,
-                        entity_id=event.entity_id,
-                        entity_type="property",
-                        payload=event.raw_data,  # Convert raw_data to payload
-                        market_area="default",
-                        status="processed"  # Add status field
-                    )
-                    
-                    # Add the market event to the database session
-                    db_session.add(market_event)
-                    logger.info(f"PIPELINE: Added market event {market_event.id} to database session for user {user.id}")
-                    
-                    # The nudge engine expects an async call, so we await it
-                    await nudge_engine.process_market_event(event=market_event, user=user, db_session=db_session)
-                
-                db_session.commit() # Commit all changes for this user at once
+        events_to_add = []
+        for event in unique_raw_events:
+            if event.entity_id not in existing_keys:
+                new_global_event = GlobalMlsEvent(
+                    source_id=source_id,
+                    listing_key=event.entity_id,
+                    raw_payload=event.raw_data,
+                    event_timestamp=event.raw_data.get("ModificationTimestamp", datetime.utcnow())
+                )
+                events_to_add.append(new_global_event)
+        
+        if events_to_add:
+            session.add_all(events_to_add)
+            session.commit()
+            for event in events_to_add:
+                session.refresh(event)
+            newly_added_events = events_to_add
 
-        except Exception as e:
-            logger.error(f"PIPELINE: Failed to process events for user {user.id}. Error: {e}", exc_info=True)
-            # Continue to the next user even if one fails
-            continue
+    if not newly_added_events:
+        logger.info("PIPELINE: No new unique events to process. Ending run.")
+        return
+
+    logger.info(f"PIPELINE: Saved {len(newly_added_events)} new unique events to the global pool.")
+
+    all_users = crm_service.get_all_users()
+    realtor_users = [u for u in all_users if u.onboarding_complete and u.vertical == "real_estate"]
+
+    if not realtor_users:
+        logger.info("PIPELINE: No active users to process new events for. Ending run.")
+        return
+
+    logger.info(f"PIPELINE: Found {len(realtor_users)} active users to process {len(newly_added_events)} events for.")
+    
+    for user in realtor_users:
+        await process_global_events_for_user(user, newly_added_events)
 
     logger.info("PIPELINE: Main opportunity pipeline run finished.")

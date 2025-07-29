@@ -4,15 +4,15 @@
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
 import uuid
-import json # NEW: Imported for handling preferences
+from uuid import UUID
+import json 
 from sqlmodel import Session, select, delete
 from sqlalchemy.orm import selectinload
 from .database import engine
 import logging
 
-# from agent_core import llm_client # No longer used directly for embeddings
-from agent_core import semantic_service # NEW: Import the centralized semantic service
-from .models.feedback import NegativePreference # NEW: Import for feedback model
+from agent_core import semantic_service
+from .models.feedback import NegativePreference
 
 from agent_core.deduplication.deduplication_engine import find_strong_duplicate
 
@@ -22,13 +22,14 @@ from .models.user import User, UserUpdate
 from .models.resource import Resource, ResourceCreate, ContentResource, ContentResourceCreate, ContentResourceUpdate
 from .models.campaign import CampaignBriefing, CampaignUpdate, CampaignStatus
 from .models.message import ScheduledMessage, Message, MessageStatus, MessageDirection, ScheduledMessageCreate
+import uuid
 from agent_core.agents import profiler as profiler_agent
 
-from uuid import UUID
+
 import asyncio
 import os
 
-# --- User Functions (Unchanged) ---
+# --- User Functions ---
 
 def get_user_by_id(user_id: uuid.UUID) -> Optional[User]:
     """Retrieves a single user by their unique ID."""
@@ -57,6 +58,20 @@ def update_user(user_id: uuid.UUID, update_data: UserUpdate) -> Optional[User]:
         session.refresh(user)
         return user
 
+# --- NEW FUNCTION TO FIX PIPELINE CRASH ---
+def get_first_onboarded_user() -> Optional[User]:
+    """
+    Retrieves the first user who has completed onboarding.
+    Used by the system pipeline to get credentials for a global API client.
+    """
+    with Session(engine) as session:
+        statement = (
+            select(User)
+            .where(User.onboarding_complete == True)
+            .limit(1)
+        )
+        return session.exec(statement).first()
+# -----------------------------------------
 
 # --- Client Functions ---
 
@@ -68,26 +83,19 @@ def format_phone_number(phone: str) -> str:
     if not phone:
         return phone
     
-    # Remove all non-digit characters
     cleaned = ''.join(filter(str.isdigit, phone))
     
-    # If it's a 10-digit US number, add +1 prefix
     if len(cleaned) == 10:
         return f"+1{cleaned}"
     
-    # If it's already in international format (11 digits starting with 1), add + prefix
     if len(cleaned) == 11 and cleaned.startswith('1'):
         return f"+{cleaned}"
     
-    # If it already has + prefix, return as-is
     if phone.startswith('+'):
         return phone
     
-    # For any other format, return as-is (could be international)
     return phone
 
-# --- REFACTORED FOR COMPOSITE EMBEDDING ---
-# Note: This function is now async.
 async def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tuple[Client, bool]:
     """
     Creates a new client or updates an existing one, then calls the semantic_service
@@ -117,7 +125,6 @@ async def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate)
         
         logging.info(f"CRM: {'Created new' if is_new else 'Updated existing'} client {target_client.id}. Now generating initial embedding.")
         
-        # MODIFIED: Call the centralized semantic service
         await semantic_service.update_client_embedding(target_client, session)
         session.commit()
         session.refresh(target_client)
@@ -165,7 +172,6 @@ def get_all_clients(user_id: uuid.UUID) -> List[Client]:
         statement = select(Client).where(Client.user_id == user_id)
         return session.exec(statement).all()
     
-# --- REFACTORED FOR COMPOSITE EMBEDDING ---
 async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUID) -> tuple[Optional[Client], bool]:
     """
     Generically updates a client record and calls semantic_service to regenerate
@@ -192,8 +198,15 @@ async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUI
 
         if embedding_updated:
             logging.info(f"CRM: Calling semantic_service to regenerate embedding for client {client.id}.")
-            # MODIFIED: Call the centralized semantic service
             await semantic_service.update_client_embedding(client, session)
+            # --- ADD TRIGGER HERE ---
+            try:
+                from celery_tasks import rescore_client_against_recent_events_task
+                rescore_client_against_recent_events_task.delay(client_id=str(client.id), user_id=str(user_id))
+                logging.info(f"CRM: Queued re-score task for client {client.id}")
+            except Exception as e:
+                logging.error(f"CRM: Failed to trigger re-score task for client {client.id}: {e}")
+            # --- END TRIGGER ---
 
         session.commit()
         session.refresh(client)
@@ -209,10 +222,8 @@ async def delete_client(client_id: UUID, user_id: UUID) -> bool:
         if not client:
             return False
 
-        # Delete associated scheduled messages
         session.exec(delete(ScheduledMessage).where(ScheduledMessage.client_id == client_id))
         
-        # Delete the client
         session.delete(client)
         session.commit()
         
@@ -241,7 +252,6 @@ def update_last_interaction(client_id: uuid.UUID, user_id: uuid.UUID, session: O
                 new_session.refresh(client)
             return client
 
-# --- REFACTORED FOR COMPOSITE EMBEDDING ---
 async def update_client_preferences(client_id: uuid.UUID, preferences: Dict[str, Any], user_id: uuid.UUID) -> Optional[Client]:
     """Overwrites the 'preferences' and calls semantic_service to regenerate the embedding."""
     with Session(engine) as session:
@@ -249,14 +259,12 @@ async def update_client_preferences(client_id: uuid.UUID, preferences: Dict[str,
         if client:
             client.preferences = preferences
             session.add(client)
-            # MODIFIED: Call the centralized semantic service
             await semantic_service.update_client_embedding(client, session)
             session.commit()
             session.refresh(client)
             return client
         return None
 
-# --- REFACTORED FOR COMPOSITE EMBEDDING ---
 async def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uuid.UUID) -> Optional[Client]:
     """Overwrites 'user_tags' and calls semantic_service to regenerate the embedding."""
     with Session(engine) as session:
@@ -264,14 +272,20 @@ async def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uui
         if client:
             client.user_tags = tags
             session.add(client)
-            # MODIFIED: Call the centralized semantic service
             await semantic_service.update_client_embedding(client, session)
+            # --- ADD TRIGGER HERE ---
+            try:
+                from celery_tasks import rescore_client_against_recent_events_task
+                rescore_client_against_recent_events_task.delay(client_id=str(client.id), user_id=str(user_id))
+                logging.info(f"CRM: Queued re-score task for client {client.id} after tag update.")
+            except Exception as e:
+                logging.error(f"CRM: Failed to trigger re-score task for client {client.id}: {e}")
+            # --- END TRIGGER ---
             session.commit()
             session.refresh(client)
             return client
         return None
 
-# --- REFACTORED FOR COMPOSITE EMBEDDING ---
 async def update_client_notes(client_id: UUID, notes: str, user_id: UUID) -> Optional[Client]:
     """Overwrites 'notes' and calls semantic_service to regenerate the embedding."""
     with Session(engine) as session:
@@ -279,14 +293,12 @@ async def update_client_notes(client_id: UUID, notes: str, user_id: UUID) -> Opt
         if client:
             client.notes = notes
             session.add(client)
-            # MODIFIED: Call the centralized semantic service
             await semantic_service.update_client_embedding(client, session)
             session.commit()
             session.refresh(client)
             return client
         return None
 
-# --- REFACTORED FOR COMPOSITE EMBEDDING ---
 async def update_client_intel(client_id: UUID, user_id: UUID, tags_to_add: Optional[List[str]] = None, notes_to_add: Optional[str] = None) -> Optional[Client]:
     """Appends notes/tags, extracts preferences, and calls semantic_service to regenerate the embedding."""
     with Session(engine) as session:
@@ -313,27 +325,24 @@ async def update_client_intel(client_id: UUID, user_id: UUID, tags_to_add: Optio
 
         if profile_was_updated:
             session.add(client)
-            # MODIFIED: Call the centralized semantic service
             await semantic_service.update_client_embedding(client, session)
             try:
                 from celery_tasks import rescore_client_against_recent_events_task
-                rescore_client_against_recent_events_task.delay(client_id=str(client.id))
+                rescore_client_against_recent_events_task.delay(client_id=str(client.id), user_id=str(user_id))
+                logging.info(f"CRM: Queued re-score task for client {client.id} after intel update.")
             except Exception as e:
-                logging.error(f"CRM: Failed to trigger re-scan task for client {client.id}: {e}")
+                logging.error(f"CRM: Failed to trigger re-score task for client {client.id}: {e}")
         
         session.commit()
         session.refresh(client)
         return client
 
-# --- REFACTORED FOR COMPOSITE EMBEDDING ---
 async def add_client_tags(client_id: uuid.UUID, tags_to_add: List[str], user_id: uuid.UUID) -> Optional[Client]:
     """This function now calls the main intel updater for consistency."""
     return await update_client_intel(client_id=client_id, user_id=user_id, tags_to_add=tags_to_add)
 
-# --- REFACTORED FOR COMPOSITE EMBEDDING ---
 async def regenerate_embedding_for_client(client: Client, session: Session):
     """Calls semantic_service to generate an embedding for a client."""
-    # MODIFIED: Call the centralized semantic service
     await semantic_service.update_client_embedding(client, session)
 
 
@@ -342,13 +351,12 @@ def add_negative_preference(client_id: UUID, campaign_id: UUID, resource_embeddi
     Saves a negative preference to the database for a specific client.
     This is triggered when a user dismisses a nudge.
     """
-    # First, verify the client belongs to the user for security
     client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
     if not client:
         logging.warning(f"CRM (FEEDBACK): User {user_id} attempted to add negative preference for unauthorized client {client_id}.")
         return
 
-    from .models.feedback import NegativePreference # Local import
+    from .models.feedback import NegativePreference
     
     new_preference = NegativePreference(
         client_id=client_id,
@@ -363,7 +371,7 @@ def get_negative_preferences(client_id: UUID, session: Session) -> List[List[flo
     """
     Retrieves all dismissed embeddings for a given client.
     """
-    from .models.feedback import NegativePreference # Local import
+    from .models.feedback import NegativePreference
 
     statement = select(NegativePreference.dismissed_embedding).where(NegativePreference.client_id == client_id)
     results = session.exec(statement).all()

@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 from data.models.event import MarketEvent
 from data.models.campaign import CampaignBriefing, MatchedClient, CampaignStatus
 from data.models.user import User
@@ -242,3 +242,126 @@ async def process_market_event(event: MarketEvent, user: User, db_session: Sessi
         await _create_campaign_from_event(event, user, resource, matched_audience, db_session=db_session)
     else:
         logging.info(f"NUDGE_ENGINE: No clients matched for event {event.id}. No campaign created.")
+
+# Handles re-evaluating a single client against existing events.
+async def rescore_client_against_events(client_id: uuid.UUID, user_id: uuid.UUID, lookback_days: int = 30):
+    """
+    Re-evaluates a single client against recent, active events and updates their
+    nudges (CampaignBriefings). This is triggered when a client's profile changes.
+    """
+    logging.info(f"NUDGE_ENGINE (RE-SCORE): Starting re-score for client {client_id}.")
+    from data.database import engine
+    
+    with Session(engine) as session:
+        client = crm_service.get_client_by_id(client_id, user_id)
+        user = crm_service.get_user_by_id(user_id)
+        if not client or not user:
+            logging.error(f"NUDGE_ENGINE (RE-SCORE): Client {client_id} or User {user_id} not found.")
+            return
+
+        vertical_config = VERTICAL_CONFIGS.get(user.vertical)
+        if not vertical_config:
+            logging.error(f"NUDGE_ENGINE (RE-SCORE): No vertical config for user {user.id}.")
+            return
+
+        # 1. Get active events to score against
+        active_events = crm_service.get_active_events_in_range(lookback_days=lookback_days, session=session)
+        logging.info(f"NUDGE_ENGINE (RE-SCORE): Found {len(active_events)} active events to re-score against.")
+
+        # 2. Iterate through events and re-score
+        for event in active_events:
+            resource = crm_service.get_resource_by_entity_id(event.entity_id, session)
+            if not resource:
+                continue
+
+            # Skip if a nudge for this client/resource combo already exists and is NOT in draft.
+            # We only want to update DRAFT nudges.
+            existing_nudge = session.exec(
+                select(CampaignBriefing).where(
+                    CampaignBriefing.triggering_resource_id == resource.id,
+                    CampaignBriefing.campaign_type == event.event_type,
+                    CampaignBriefing.status != CampaignStatus.DRAFT,
+                    # This check is tricky on a JSON field, we filter by client_id later
+                )
+            ).first()
+            
+            is_actioned = False
+            if existing_nudge:
+                for member in existing_nudge.matched_audience:
+                    if member.get("client_id") == str(client.id):
+                        is_actioned = True
+                        break
+            if is_actioned:
+                logging.info(f"NUDGE_ENGINE (RE-SCORE): Nudge for client {client.id} and resource {resource.id} has already been actioned. Skipping.")
+                continue
+
+            # 3. Generate embedding for scoring
+            resource_embedding = None
+            if resource.resource_type == "property" and resource.attributes.get('PublicRemarks'):
+                resource_embedding = await llm_client.generate_embedding(resource.attributes['PublicRemarks'])
+            elif resource.resource_type == "web_content" and resource.attributes.get('summary'):
+                resource_embedding = await llm_client.generate_embedding(resource.attributes['summary'])
+
+            # 4. Get new score and apply feedback penalty
+            score, reasons = _get_client_score_for_event(client, event, resource_embedding, vertical_config)
+            
+            if resource_embedding:
+                negative_preferences = crm_service.get_negative_preferences(client_id=client.id, session=session)
+                is_penalized = any(
+                    calculate_cosine_similarity(resource_embedding, dismissed_embedding) > FEEDBACK_PENALTY_THRESHOLD
+                    for dismissed_embedding in negative_preferences
+                )
+                if is_penalized:
+                    score *= FEEDBACK_PENALTY_FACTOR
+                    reasons.append("🎯 Penalized: Similar to a previously dismissed nudge.")
+
+            # 5. Update or create the CampaignBriefing
+            draft_nudge_for_event = session.exec(
+                select(CampaignBriefing).where(
+                    CampaignBriefing.triggering_resource_id == resource.id,
+                    CampaignBriefing.campaign_type == event.event_type,
+                    CampaignBriefing.status == CampaignStatus.DRAFT
+                )
+            ).first()
+
+            if score >= MATCH_THRESHOLD:
+                logging.info(f"NUDGE_ENGINE (RE-SCORE): Client {client.id} MATCHED resource {resource.id} with new score {score}.")
+                new_match_data = MatchedClient(
+                    client_id=client.id,
+                    client_name=client.full_name,
+                    match_score=score,
+                    match_reasons=reasons
+                )
+                
+                if draft_nudge_for_event:
+                    # Update existing draft nudge
+                    audience = draft_nudge_for_event.matched_audience
+                    client_found = False
+                    for i, member in enumerate(audience):
+                        if member.get("client_id") == str(client.id):
+                            audience[i] = new_match_data.model_dump(mode='json')
+                            client_found = True
+                            break
+                    if not client_found:
+                        audience.append(new_match_data.model_dump(mode='json'))
+                    
+                    draft_nudge_for_event.matched_audience = audience
+                    session.add(draft_nudge_for_event)
+                else:
+                    # This event is now relevant, create a new nudge
+                    await _create_campaign_from_event(event, user, resource, [new_match_data], db_session=session)
+            
+            else: # Score is below threshold
+                logging.info(f"NUDGE_ENGINE (RE-SCORE): Client {client.id} NO LONGER matches resource {resource.id} with new score {score}.")
+                if draft_nudge_for_event:
+                    # Remove client from existing draft nudge if they no longer qualify
+                    updated_audience = [
+                        member for member in draft_nudge_for_event.matched_audience 
+                        if member.get("client_id") != str(client.id)
+                    ]
+                    if len(updated_audience) < len(draft_nudge_for_event.matched_audience):
+                         draft_nudge_for_event.matched_audience = updated_audience
+                         session.add(draft_nudge_for_event)
+
+        session.commit()
+        logging.info(f"NUDGE_ENGINE (RE-SCORE): Finished re-scoring for client {client_id}.")

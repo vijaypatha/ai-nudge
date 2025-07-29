@@ -15,6 +15,7 @@ from data.models.client import Client, ClientCreate, ClientUpdate, ClientTagUpda
 from data.models.message import ScheduledMessage
 from data import crm as crm_service
 from agent_core import audience_builder
+from celery_tasks import initial_data_fetch_for_user_task
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
 
@@ -57,6 +58,8 @@ async def add_manual_client(
             update_data = UserUpdate(onboarding_state=updated_state)
             crm_service.update_user(user_id=current_user.id, update_data=update_data)
             logging.info(f"Successfully updated onboarding state for user {current_user.id}.")
+            logging.info(f"Triggering initial data fetch for user {current_user.id}.")
+            initial_data_fetch_for_user_task.delay(user_id=str(current_user.id))
     except Exception as e:
         logging.error(f"Could not update onboarding_state for user {current_user.id} after manual add: {e}")
     
@@ -178,7 +181,7 @@ async def add_tags_to_client(
     if not client:
         raise HTTPException(status_code=404, detail="Client not found.")
 
-    updated_client = crm_service.add_client_tags(
+    updated_client = await crm_service.add_client_tags(
         client_id=client_id, 
         tags_to_add=payload.tags,
         user_id=current_user.id
@@ -191,7 +194,7 @@ async def add_tags_to_client(
 
 @router.put("/{client_id}/tags", response_model=Client)
 async def update_client_tags_endpoint(client_id: UUID, tag_data: ClientTagUpdate, current_user: User = Depends(get_current_user_from_token)):
-    updated_client = crm_service.update_client_tags(client_id, tag_data.user_tags, user_id=current_user.id)
+    updated_client = await crm_service.update_client_tags(client_id, tag_data.user_tags, user_id=current_user.id)
     if not updated_client:
         raise HTTPException(status_code=404, detail="Client not found.")
     return updated_client

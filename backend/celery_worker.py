@@ -43,5 +43,6 @@ celery_app.conf.beat_schedule = {
     'main-opportunity-pipeline-every-2-hours': {
         'task': 'celery_tasks.main_opportunity_pipeline_task',
         'schedule': crontab(minute=0, hour='*/2'), # Run every 2 hours
+        #'schedule': crontab(minute='*/10'), # TEMP: Run every 2 minutes for testing
     }
 }

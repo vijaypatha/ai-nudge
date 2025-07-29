@@ -1,6 +1,5 @@
 # File Path: backend/api/rest/auth.py
-# DEFINITIVE FIX: Updates the new `google_sync_complete` flag upon a
-# successful import. This is the complete file.
+# --- FINAL VERSION: Triggers initial data fetch for new users ---
 
 import os
 import datetime
@@ -15,9 +14,11 @@ from sqlmodel import Session, select
 from data import crm as crm_service
 from integrations import twilio_otp as twilio
 from api.security import settings, get_current_user_from_token
-from data.models.user import User, UserUpdate, UserType # Import UserUpdate
+from data.models.user import User, UserUpdate, UserType
 from data.models.client import ClientCreate
 from integrations.oauth.google import GoogleContacts
+# --- ADDED: Import our new Celery task ---
+from celery_tasks import initial_data_fetch_for_user_task
 
 
 # --- Logger ---
@@ -124,6 +125,7 @@ async def google_callback(
     and updates the user's onboarding progress.
     """
     google_contacts = GoogleContacts()
+    is_first_import = not current_user.onboarding_state.get('contacts_imported', False)
 
     try:
         credentials = google_contacts.exchange_code_for_credentials(request.code)
@@ -153,15 +155,20 @@ async def google_callback(
             logger.error(f"Failed to process contact {contact_data.full_name} for user {current_user.id}: {e}")
 
     try:
-        logger.info(f"Updating onboarding state for user {current_user.id} after contact import.")
-        updated_state = current_user.onboarding_state.copy()
-        updated_state['contacts_imported'] = True
-        # --- THIS IS THE ONLY ADDED LINE ---
-        updated_state['google_sync_complete'] = True
-        
-        update_data = UserUpdate(onboarding_state=updated_state)
-        crm_service.update_user(user_id=current_user.id, update_data=update_data)
-        logger.info(f"Successfully updated onboarding state for user {current_user.id}.")
+        if is_first_import and (imported_count > 0 or merged_count > 0):
+            logger.info(f"Updating onboarding state for user {current_user.id} after contact import.")
+            updated_state = current_user.onboarding_state.copy()
+            updated_state['contacts_imported'] = True
+            updated_state['google_sync_complete'] = True
+            
+            update_data = UserUpdate(onboarding_state=updated_state)
+            crm_service.update_user(user_id=current_user.id, update_data=update_data)
+            logger.info(f"Successfully updated onboarding state for user {current_user.id}.")
+
+            # --- ADDED: Trigger the initial data fetch task ---
+            logger.info(f"Triggering initial data fetch for user {current_user.id}.")
+            initial_data_fetch_for_user_task.delay(user_id=str(current_user.id))
+
     except Exception as e:
         logger.error(f"Could not update onboarding_state for user {current_user.id}: {e}")
 
@@ -169,8 +176,6 @@ async def google_callback(
 
 
 # --- Developer-Only Login Endpoint ---
-
-# Use settings instead of os.getenv()
 if settings.ENVIRONMENT == "development":
     @router.post("/dev-login")
     async def developer_login(payload: DevLoginPayload):

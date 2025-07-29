@@ -1,6 +1,8 @@
-# backend/api/endpoints/websockets.py
+# backend/api/rest/websockets.py
+# --- MODIFIED: Added a user-level websocket endpoint ---
 
 import logging
+import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
 from api.websocket_manager import manager
 from data.models.user import User
@@ -9,51 +11,59 @@ from sqlmodel import Session
 from data.database import engine
 from common.config import get_settings
 
-# CRITICAL: Use centralized settings, NOT hardcoded values
 settings = get_settings()
-
 router = APIRouter()
 
-@router.websocket("/ws/{client_id}")
-async def websocket_endpoint(
-    websocket: WebSocket,
-    client_id: str,
-    token: str = Query(...),
-):
-    """
-    WebSocket endpoint with proper centralized authentication.
-    """
-    user: User | None = None
-    
+async def get_user_from_token(token: str) -> User | None:
+    """Helper function to authenticate a user from a JWT token."""
     try:
-        # Use the SAME secret key as your REST API
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
         user_id: str | None = payload.get("sub")
-        
         if user_id:
             with Session(engine) as session:
-                user = session.get(User, user_id)
-                
-        if not user:
-            raise ValueError("User not found")
-            
-    except (JWTError, ValueError, Exception) as e:
-        logging.warning(f"WS REJECT: Authentication failed for client_id {client_id}. Token validation error: {e}")
-        await websocket.close(code=1008)  # Policy violation
+                return session.get(User, user_id)
+    except (JWTError, Exception):
+        return None
+    return None
+
+@router.websocket("/ws/user")
+async def user_websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
+    """
+    Establishes a persistent WebSocket connection for a user to receive
+    account-level notifications, such as nudge updates.
+    """
+    user = await get_user_from_token(token)
+    if not user:
+        await websocket.close(code=1008)
         return
 
-    # Success - establish connection
-    logging.info(f"WS SUCCESS: User {user.id} authenticated for client {client_id}")
-    
-    await manager.connect(websocket, client_id)
+    await manager.connect_user(websocket, str(user.id))
+    try:
+        while True:
+            # Keep the connection alive
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect_user(websocket, str(user.id))
+
+@router.websocket("/ws/{client_id}")
+async def client_websocket_endpoint(websocket: WebSocket, client_id: str, token: str = Query(...)):
+    """
+    Establishes a WebSocket connection for a specific client conversation view.
+    It now ALSO registers the user for general notifications.
+    """
+    user = await get_user_from_token(token)
+    if not user:
+        await websocket.close(code=1008)
+        return
+
+    # Connect to both client and user channels
+    await manager.connect_client(websocket, client_id)
+    await manager.connect_user(websocket, str(user.id))
     
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(websocket, client_id)
-        logging.info(f"WS DISCONNECT: User {user.id} disconnected from client {client_id}")
-    except Exception as e:
-        logging.error(f"WS ERROR: Unexpected error for client_id {client_id}: {e}")
-        if manager.active_connections.get(client_id) and websocket in manager.active_connections[client_id]:
-            manager.disconnect(websocket, client_id)
+        # Disconnect from both channels on close
+        manager.disconnect_client(websocket, client_id)
+        manager.disconnect_user(websocket, str(user.id))

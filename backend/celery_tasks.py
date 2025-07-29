@@ -1,14 +1,16 @@
 # backend/celery_tasks.py
-# --- PRODUCTION-GRADE HARDENED VERSION ---
+# --- UPDATED: Adds the initial data fetch task for new users ---
 
 import logging
 import asyncio
 import uuid
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from uuid import UUID
 from sqlmodel import Session, select
+from api.websocket_manager import manager
+
 
 # --- ADDED: Load dummy environment variables for direct execution ---
 if os.getenv("RUNNING_IN_CELERY") is None:
@@ -37,15 +39,16 @@ if os.getenv("RUNNING_IN_CELERY") is None:
 
 # --- FIX: Import the single, centralized Celery app instance ---
 from celery_worker import celery_app
-from data.database import engine
+from data.database import engine, get_session
 from data.models.message import (Message, MessageStatus, MessageDirection, 
                                  MessageSource, MessageSenderType, ScheduledMessage)
-from workflow.pipeline import run_main_opportunity_pipeline
-
 from data.models.user import User
 from data.models.client import Client
+from data.models.event import PipelineRun, GlobalMlsEvent
 from data import crm as crm_service
 from integrations import twilio_outgoing
+from workflow.pipeline import run_main_opportunity_pipeline, process_global_events_for_user
+from agent_core.brain import nudge_engine
 
 # Configure logging for production
 logging.basicConfig(
@@ -54,7 +57,49 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- REMOVED: Celery app configuration is now centralized in celery_worker.py ---
+
+# --- NEW TASK FOR INSTANT ONBOARDING ---
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=300)
+def initial_data_fetch_for_user_task(self, user_id: str):
+    """
+    Performs a one-time, large data backfill for a new user by reading
+    from the local GlobalMlsEvent pool. Does NOT call the external MLS API.
+    """
+    logger.info(f"CELERY: Starting initial data fetch for new user {user_id}.")
+    try:
+        with Session(engine) as session:
+            user = session.get(User, UUID(user_id))
+            if not user:
+                logger.error(f"CELERY: User {user_id} not found for initial data fetch.")
+                return {"status": "error", "reason": "user_not_found"}
+
+            # Define the lookback window (e.g., 30 days)
+            thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+            
+            # Query our LOCAL global events pool
+            global_events = session.exec(
+                select(GlobalMlsEvent)
+                .where(GlobalMlsEvent.event_timestamp >= thirty_days_ago)
+                .order_by(GlobalMlsEvent.event_timestamp.desc())
+            ).all()
+
+            if not global_events:
+                logger.warning(f"CELERY: No global events found in the last 30 days to backfill for user {user_id}.")
+                return {"status": "success", "reason": "no_events_to_process"}
+
+            logger.info(f"CELERY: Found {len(global_events)} global events to backfill for user {user_id}.")
+
+            # Run the same reusable processing logic as the main pipeline
+            asyncio.run(process_global_events_for_user(user, global_events))
+            
+            logger.info(f"CELERY: Successfully completed initial data fetch for user {user_id}.")
+            return {"status": "success"}
+
+    except Exception as e:
+        logger.error(f"CELERY: Initial data fetch failed for user {user_id}. Retrying... Error: {e}", exc_info=True)
+        raise self.retry(exc=e)
+# -----------------------------------------
+
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def process_new_contact_async(self, client_id: str, user_id: str) -> dict:
@@ -314,17 +359,13 @@ def health_check_task() -> dict:
         return {"status": "unhealthy", "error": str(e)}
 
 # Legacy tasks for compatibility
-@celery_app.task(name="celery_tasks.main_opportunity_pipeline_task", time_limit=600, soft_time_limit=480)
-def main_opportunity_pipeline_task():
+@celery_app.task(name="celery_tasks.main_opportunity_pipeline_task", time_limit=1800, soft_time_limit=1500)
+def main_opportunity_pipeline_task(minutes_ago: int | None = None):
     """
-    Celery entry point to trigger the main opportunity pipeline, which fetches
-    live data from external sources (like FlexMLS) and processes it to find nudges.
+    Celery entry point to trigger the main opportunity pipeline.
+    Accepts an optional 'minutes_ago' for manual backfills.
     """
     logger.info("CELERY: Triggering main opportunity pipeline...")
-    
-    # Create pipeline run record
-    from data.models.event import PipelineRun
-    from data.database import get_session
     
     pipeline_run = None
     start_time = datetime.now(timezone.utc)
@@ -342,25 +383,23 @@ def main_opportunity_pipeline_task():
             session.refresh(pipeline_run)
             logger.info(f"CELERY: Created pipeline run record with ID {pipeline_run.id}")
         
-        # Run the asynchronous pipeline function
-        result = asyncio.run(run_main_opportunity_pipeline())
+        # Run the asynchronous pipeline function, passing the argument through
+        result = asyncio.run(run_main_opportunity_pipeline(minutes_ago=minutes_ago))
         
         # Update pipeline run with success
         end_time = datetime.now(timezone.utc)
         duration = (end_time - start_time).total_seconds()
         
         with next(get_session()) as session:
-            pipeline_run = session.exec(
-                select(PipelineRun).where(PipelineRun.id == pipeline_run.id)
-            ).first()
-            if pipeline_run:
-                pipeline_run.status = "completed"
-                pipeline_run.completed_at = end_time
-                pipeline_run.duration_seconds = duration
+            db_pipeline_run = session.get(PipelineRun, pipeline_run.id) 
+            if db_pipeline_run:
+                db_pipeline_run.status = "completed"
+                db_pipeline_run.completed_at = end_time
+                db_pipeline_run.duration_seconds = duration
                 # TODO: Extract actual metrics from pipeline result
-                pipeline_run.events_processed = 1  # Placeholder
-                pipeline_run.campaigns_created = 1  # Placeholder
-                session.add(pipeline_run)
+                db_pipeline_run.events_processed = 1  # Placeholder
+                db_pipeline_run.campaigns_created = 1  # Placeholder
+                session.add(db_pipeline_run)
                 session.commit()
         
         logger.info("CELERY: Main opportunity pipeline completed successfully.")
@@ -373,14 +412,12 @@ def main_opportunity_pipeline_task():
         if pipeline_run:
             try:
                 with next(get_session()) as session:
-                    pipeline_run = session.exec(
-                        select(PipelineRun).where(PipelineRun.id == pipeline_run.id)
-                    ).first()
-                    if pipeline_run:
-                        pipeline_run.status = "failed"
-                        pipeline_run.completed_at = datetime.now(timezone.utc)
-                        pipeline_run.errors = str(e)
-                        session.add(pipeline_run)
+                    db_pipeline_run = session.get(PipelineRun, pipeline_run.id)
+                    if db_pipeline_run:
+                        db_pipeline_run.status = "failed"
+                        db_pipeline_run.completed_at = datetime.now(timezone.utc)
+                        db_pipeline_run.errors = str(e)
+                        session.add(db_pipeline_run)
                         session.commit()
             except Exception as update_error:
                 logger.error(f"CELERY: Failed to update pipeline run status: {update_error}")
@@ -393,6 +430,38 @@ def check_for_recency_nudges_task():
     """Legacy task - kept for compatibility"""
     logger.info("CELERY: Legacy recency task called - no action taken")
     return {"status": "legacy_task"}
+
+# --- NEW TASK FOR SEMANTIC RE-SCORING ---
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def rescore_client_against_recent_events_task(self, client_id: str, user_id: str):
+    """
+    Asynchronously re-scores a client and then broadcasts a 'nudges_updated'
+    event to the user via WebSockets.
+    """
+    logger.info(f"CELERY: Starting client re-score task for client_id: {client_id}")
+    try:
+        client_uuid = uuid.UUID(client_id)
+        user_uuid = uuid.UUID(user_id)
+        
+        async def rescore_and_notify():
+            # Run the re-scoring logic
+            await nudge_engine.rescore_client_against_events(client_id=client_uuid, user_id=user_uuid)
+            
+            # On success, broadcast the update to the user
+            await manager.broadcast_to_user(
+                user_id=user_id,
+                data={"event": "nudges_updated", "message": "Your nudges have been re-scored."}
+            )
+
+        # Run the async wrapper function
+        asyncio.run(rescore_and_notify())
+        
+        logger.info(f"CELERY: Client re-score and notification task completed for user_id: {user_id}")
+        return {"status": "success"}
+            
+    except Exception as e:
+        logger.error(f"CELERY: Client re-score task failed for client {client_id}. Retrying... Error: {e}", exc_info=True)
+        raise self.retry(exc=e)
 
 if __name__ == "__main__":
     logger.info("Triggering main opportunity pipeline manually...")
