@@ -5,6 +5,7 @@ import logging
 from typing import List, Dict, Any
 from uuid import UUID
 from sqlmodel import Session, select
+from difflib import SequenceMatcher
 
 from data.models.resource import ContentResource, Resource
 from data.models.client import Client
@@ -12,11 +13,21 @@ from data.database import engine
 from agent_core.llm_client import get_chat_completion
 from agent_core.llm_client import generate_embedding
 
-def get_content_recommendations_for_user(user_id: UUID) -> List[Dict[str, Any]]:
+def calculate_fuzzy_similarity(str1: str, str2: str) -> float:
+    """
+    Calculate fuzzy similarity between two strings using SequenceMatcher.
+    Returns a value between 0 and 1, where 1 is an exact match.
+    """
+    return SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
+
+def get_content_recommendations_for_user(user_id: UUID, use_fuzzy: bool = True, fuzzy_threshold: float = 0.8) -> List[Dict[str, Any]]:
     """
     Get content recommendations for a user as part of the AI suggestions system.
     This integrates content resources into the Perceive layer that feeds into AI reasoning.
+    Now supports fuzzy matching and enhanced logging.
     """
+    logging.info(f"CONTENT_RECOMMENDATIONS: Starting recommendations for user {user_id}")
+    
     try:
         with Session(engine) as session:
             # Get all active content resources for the user
@@ -36,7 +47,10 @@ def get_content_recommendations_for_user(user_id: UUID) -> List[Dict[str, Any]]:
             
             all_resources = content_resources + web_resources
             
+            logging.info(f"CONTENT_RECOMMENDATIONS: Found {len(content_resources)} content resources and {len(web_resources)} web resources")
+            
             if not all_resources:
+                logging.info(f"CONTENT_RECOMMENDATIONS: No active resources found for user {user_id}")
                 return []
             
             # Get all clients for the user
@@ -45,13 +59,17 @@ def get_content_recommendations_for_user(user_id: UUID) -> List[Dict[str, Any]]:
                 .where(Client.user_id == user_id)
             ).all()
             
+            logging.info(f"CONTENT_RECOMMENDATIONS: Processing {len(clients)} clients")
+            
             recommendations = []
+            total_matches = 0
             
             for resource in all_resources:
                 # Find matching clients based on resource categories and client tags
-                matched_clients = find_matching_clients_generic(resource, clients)
+                matched_clients = find_matching_clients_generic(resource, clients, use_fuzzy, fuzzy_threshold)
                 
                 if matched_clients:
+                    total_matches += len(matched_clients)
                     # Generate personalized message for each matched client
                     for client in matched_clients:
                         message = generate_resource_message_sync_generic(resource, client)
@@ -91,52 +109,153 @@ def get_content_recommendations_for_user(user_id: UUID) -> List[Dict[str, Any]]:
                         }
                         recommendations.append(recommendation)
             
+            logging.info(f"CONTENT_RECOMMENDATIONS: Generated {len(recommendations)} recommendations with {total_matches} total matches for user {user_id}")
             return recommendations
             
     except Exception as e:
-        logging.error(f"Error getting content recommendations for user {user_id}: {e}", exc_info=True)
+        logging.error(f"CONTENT_RECOMMENDATIONS: Error getting content recommendations for user {user_id}: {e}", exc_info=True)
         return []
 
-def find_matching_clients(resource: ContentResource, clients: List[Client]) -> List[Client]:
+def find_matching_clients(resource: ContentResource, clients: List[Client], use_fuzzy: bool = True, fuzzy_threshold: float = 0.8) -> List[Client]:
     """
     Find clients that match the content resource based on categories and tags.
+    Now supports case-insensitive matching and optional fuzzy matching.
     """
     matched_clients = []
     
-    for client in clients:
-        # Check if client tags match resource categories
-        client_tags = set(client.user_tags or [])
-        client_ai_tags = set(client.ai_tags or [])
-        resource_categories = set(resource.categories or [])
-        
-        # Check for any overlap between client tags and resource categories
-        if client_tags.intersection(resource_categories) or client_ai_tags.intersection(resource_categories):
-            matched_clients.append(client)
+    # Convert resource categories to lowercase for case-insensitive matching
+    resource_categories = set(cat.lower() for cat in (resource.categories or []))
     
+    logging.info(f"CONTENT_MATCHING: Processing resource '{resource.title}' with categories: {resource_categories}")
+    
+    for client in clients:
+        # Convert client tags to lowercase for case-insensitive matching
+        client_user_tags = set(tag.lower() for tag in (client.user_tags or []))
+        client_ai_tags = set(tag.lower() for tag in (client.ai_tags or []))
+        
+        match_found = False
+        match_type = "none"
+        match_details = []
+        
+        # Check for exact matches first
+        user_tag_matches = client_user_tags.intersection(resource_categories)
+        ai_tag_matches = client_ai_tags.intersection(resource_categories)
+        
+        if user_tag_matches or ai_tag_matches:
+            match_found = True
+            match_type = "exact"
+            if user_tag_matches:
+                match_details.extend([f"user_tag:{tag}" for tag in user_tag_matches])
+            if ai_tag_matches:
+                match_details.extend([f"ai_tag:{tag}" for tag in ai_tag_matches])
+        
+        # If fuzzy matching is enabled and no exact match found, try fuzzy matching
+        elif use_fuzzy:
+            best_fuzzy_score = 0.0
+            best_fuzzy_match = None
+            
+            # Check user tags against resource categories
+            for client_tag in client_user_tags:
+                for resource_category in resource_categories:
+                    fuzzy_score = calculate_fuzzy_similarity(client_tag, resource_category)
+                    if fuzzy_score > best_fuzzy_score and fuzzy_score >= fuzzy_threshold:
+                        best_fuzzy_score = fuzzy_score
+                        best_fuzzy_match = f"user_tag:{client_tag}->{resource_category}"
+            
+            # Check AI tags against resource categories
+            for client_tag in client_ai_tags:
+                for resource_category in resource_categories:
+                    fuzzy_score = calculate_fuzzy_similarity(client_tag, resource_category)
+                    if fuzzy_score > best_fuzzy_score and fuzzy_score >= fuzzy_threshold:
+                        best_fuzzy_score = fuzzy_score
+                        best_fuzzy_match = f"ai_tag:{client_tag}->{resource_category}"
+            
+            if best_fuzzy_match:
+                match_found = True
+                match_type = "fuzzy"
+                match_details = [best_fuzzy_match]
+        
+        if match_found:
+            matched_clients.append(client)
+            logging.info(f"CONTENT_MATCHING: Match found for client '{client.full_name}' (ID: {client.id}) - Type: {match_type}, Details: {match_details}")
+        else:
+            logging.debug(f"CONTENT_MATCHING: No match for client '{client.full_name}' (ID: {client.id}) - User tags: {client_user_tags}, AI tags: {client_ai_tags}")
+    
+    logging.info(f"CONTENT_MATCHING: Found {len(matched_clients)} matches for resource '{resource.title}'")
     return matched_clients
 
-def find_matching_clients_generic(resource, clients: List[Client]) -> List[Client]:
+def find_matching_clients_generic(resource, clients: List[Client], use_fuzzy: bool = True, fuzzy_threshold: float = 0.8) -> List[Client]:
     """
     Find clients that match the content resource based on categories and tags.
     Works with both ContentResource and Resource objects.
+    Now supports case-insensitive matching and optional fuzzy matching.
     """
     matched_clients = []
     
-    for client in clients:
-        # Check if client tags match resource categories
-        client_tags = set(client.user_tags or [])
-        client_ai_tags = set(client.ai_tags or [])
-        
-        # Extract categories based on resource type
-        if isinstance(resource, ContentResource):
-            resource_categories = set(resource.categories or [])
-        else:  # Resource with web_content type
-            resource_categories = set(resource.attributes.get('categories', []) or [])
-        
-        # Check for any overlap between client tags and resource categories
-        if client_tags.intersection(resource_categories) or client_ai_tags.intersection(resource_categories):
-            matched_clients.append(client)
+    # Extract categories based on resource type and convert to lowercase
+    if isinstance(resource, ContentResource):
+        resource_categories = set(cat.lower() for cat in (resource.categories or []))
+        resource_title = resource.title
+    else:  # Resource with web_content type
+        resource_categories = set(cat.lower() for cat in (resource.attributes.get('categories', []) or []))
+        resource_title = resource.attributes.get('title', 'Unknown')
     
+    logging.info(f"CONTENT_MATCHING_GENERIC: Processing resource '{resource_title}' with categories: {resource_categories}")
+    
+    for client in clients:
+        # Convert client tags to lowercase for case-insensitive matching
+        client_user_tags = set(tag.lower() for tag in (client.user_tags or []))
+        client_ai_tags = set(tag.lower() for tag in (client.ai_tags or []))
+        
+        match_found = False
+        match_type = "none"
+        match_details = []
+        
+        # Check for exact matches first
+        user_tag_matches = client_user_tags.intersection(resource_categories)
+        ai_tag_matches = client_ai_tags.intersection(resource_categories)
+        
+        if user_tag_matches or ai_tag_matches:
+            match_found = True
+            match_type = "exact"
+            if user_tag_matches:
+                match_details.extend([f"user_tag:{tag}" for tag in user_tag_matches])
+            if ai_tag_matches:
+                match_details.extend([f"ai_tag:{tag}" for tag in ai_tag_matches])
+        
+        # If fuzzy matching is enabled and no exact match found, try fuzzy matching
+        elif use_fuzzy:
+            best_fuzzy_score = 0.0
+            best_fuzzy_match = None
+            
+            # Check user tags against resource categories
+            for client_tag in client_user_tags:
+                for resource_category in resource_categories:
+                    fuzzy_score = calculate_fuzzy_similarity(client_tag, resource_category)
+                    if fuzzy_score > best_fuzzy_score and fuzzy_score >= fuzzy_threshold:
+                        best_fuzzy_score = fuzzy_score
+                        best_fuzzy_match = f"user_tag:{client_tag}->{resource_category}"
+            
+            # Check AI tags against resource categories
+            for client_tag in client_ai_tags:
+                for resource_category in resource_categories:
+                    fuzzy_score = calculate_fuzzy_similarity(client_tag, resource_category)
+                    if fuzzy_score > best_fuzzy_score and fuzzy_score >= fuzzy_threshold:
+                        best_fuzzy_score = fuzzy_score
+                        best_fuzzy_match = f"ai_tag:{client_tag}->{resource_category}"
+            
+            if best_fuzzy_match:
+                match_found = True
+                match_type = "fuzzy"
+                match_details = [best_fuzzy_match]
+        
+        if match_found:
+            matched_clients.append(client)
+            logging.info(f"CONTENT_MATCHING_GENERIC: Match found for client '{client.full_name}' (ID: {client.id}) - Type: {match_type}, Details: {match_details}")
+        else:
+            logging.debug(f"CONTENT_MATCHING_GENERIC: No match for client '{client.full_name}' (ID: {client.id}) - User tags: {client_user_tags}, AI tags: {client_ai_tags}")
+    
+    logging.info(f"CONTENT_MATCHING_GENERIC: Found {len(matched_clients)} matches for resource '{resource_title}'")
     return matched_clients
 
 async def find_matching_clients_semantic(resource: ContentResource, clients: List[Client], similarity_threshold: float = 0.7) -> List[Client]:

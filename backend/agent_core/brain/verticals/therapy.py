@@ -44,6 +44,7 @@ def score_therapy_event(client: Client, event: MarketEvent, resource_embedding: 
     associated with the client? These tags can be manually set by the therapist
     or automatically extracted by the AI from conversations, making the match highly relevant.
     This approach is HIPAA-safe as it does not analyze sensitive clinical notes.
+    Now supports case-insensitive matching for better user experience.
     """
     # This scorer only cares about 'content_suggestion' events.
     if event.event_type != "content_suggestion":
@@ -56,6 +57,7 @@ def score_therapy_event(client: Client, event: MarketEvent, resource_embedding: 
         return 0, []
 
     # Combine user-set tags and AI-extracted intel for a comprehensive match.
+    # Convert all tags to lowercase for case-insensitive matching
     client_tags = [tag.lower() for tag in (client.user_tags or []) + (client.ai_tags or [])]
     logging.info(f"THERAPY_SCORER: Client {client.id} ({client.full_name}) tags: {client_tags}")
     logging.info(f"THERAPY_SCORER: Content topic: {content_topic}")

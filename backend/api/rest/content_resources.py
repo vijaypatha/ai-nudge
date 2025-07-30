@@ -126,27 +126,33 @@ async def delete_content_resource(
 async def get_content_suggestions_for_client(
     client_id: UUID,
     current_user: User = Depends(get_current_user_from_token),
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    use_fuzzy: bool = True,
+    fuzzy_threshold: float = 0.8
 ):
     """
     Get content resource suggestions for a specific client based on their tags and interests.
+    Now supports fuzzy matching and case-insensitive matching.
     """
-    logging.info(f"API: Getting content suggestions for client '{client_id}' and user '{current_user.id}'")
+    logging.info(f"API_CONTENT_SUGGESTIONS: Getting content suggestions for client '{client_id}' and user '{current_user.id}' (fuzzy={use_fuzzy}, threshold={fuzzy_threshold})")
     
     # Get the client
     client = crm_service.get_client_by_id(client_id, current_user.id)
     if not client:
+        logging.warning(f"API_CONTENT_SUGGESTIONS: Client '{client_id}' not found for user '{current_user.id}'")
         raise HTTPException(status_code=404, detail="Client not found")
     
-    # Get client tags (both user-set and AI-extracted)
+    # Get client tags (both user-set and AI-extracted) - already case-insensitive
     client_tags = []
     if client.user_tags:
         client_tags.extend([tag.lower() for tag in client.user_tags])
     if client.ai_tags:
         client_tags.extend([tag.lower() for tag in client.ai_tags])
     
+    logging.info(f"API_CONTENT_SUGGESTIONS: Client '{client.full_name}' has {len(client_tags)} tags: {client_tags}")
+    
     if not client_tags:
-        logging.info(f"API: No tags found for client '{client_id}', returning empty suggestions")
+        logging.info(f"API_CONTENT_SUGGESTIONS: No tags found for client '{client_id}', returning empty suggestions")
         return []
     
     # Get active content resources for the user
@@ -156,24 +162,52 @@ async def get_content_suggestions_for_client(
     )
     all_resources = session.exec(statement).all()
     
-    # Match resources based on categories and client tags
+    logging.info(f"API_CONTENT_SUGGESTIONS: Found {len(all_resources)} active resources for user '{current_user.id}'")
+    
+    # Enhanced matching with fuzzy support
     suggested_resources = []
+    from difflib import SequenceMatcher
+    
+    def calculate_fuzzy_similarity(str1: str, str2: str) -> float:
+        """Calculate fuzzy similarity between two strings."""
+        return SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
+    
     for resource in all_resources:
         resource_categories = [cat.lower() for cat in resource.categories]
+        match_found = False
+        match_type = "none"
         
-        # Check if any client tag matches any resource category
+        # Check for exact matches first
         for client_tag in client_tags:
             for resource_category in resource_categories:
-                if client_tag in resource_category or resource_category in client_tag:
-                    suggested_resources.append(resource)
+                if client_tag == resource_category:
+                    match_found = True
+                    match_type = "exact"
                     break
-            if resource in suggested_resources:
+            if match_found:
                 break
+        
+        # If no exact match and fuzzy matching is enabled, try fuzzy matching
+        if not match_found and use_fuzzy:
+            for client_tag in client_tags:
+                for resource_category in resource_categories:
+                    fuzzy_score = calculate_fuzzy_similarity(client_tag, resource_category)
+                    if fuzzy_score >= fuzzy_threshold:
+                        match_found = True
+                        match_type = "fuzzy"
+                        logging.info(f"API_CONTENT_SUGGESTIONS: Fuzzy match found for client '{client.full_name}' - '{client_tag}' -> '{resource_category}' (score: {fuzzy_score:.3f})")
+                        break
+                if match_found:
+                    break
+        
+        if match_found:
+            suggested_resources.append(resource)
+            logging.info(f"API_CONTENT_SUGGESTIONS: Match found for resource '{resource.title}' - Type: {match_type}")
     
     # Sort by usage count (most used first) and then by creation date
     suggested_resources.sort(key=lambda x: (x.usage_count, x.created_at), reverse=True)
     
-    logging.info(f"API: Found {len(suggested_resources)} content suggestions for client '{client_id}'")
+    logging.info(f"API_CONTENT_SUGGESTIONS: Found {len(suggested_resources)} content suggestions for client '{client_id}'")
     return suggested_resources
 
 @router.post("/{resource_id}/increment-usage")
@@ -208,12 +242,15 @@ async def increment_resource_usage(
 @router.get("/recommendations")
 async def get_content_recommendations(
     current_user: User = Depends(get_current_user_from_token),
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    use_fuzzy: bool = True,
+    fuzzy_threshold: float = 0.8
 ):
     """
     Get content recommendations for all clients of the user.
+    Now supports fuzzy matching and case-insensitive matching.
     """
-    logging.info(f"API: Getting content recommendations for user '{current_user.id}'")
+    logging.info(f"API_CONTENT_RECOMMENDATIONS: Getting content recommendations for user '{current_user.id}' (fuzzy={use_fuzzy}, threshold={fuzzy_threshold})")
     
     try:
         # Get all active content resources for the user
@@ -223,7 +260,10 @@ async def get_content_recommendations(
         )
         all_resources = session.exec(statement).all()
         
+        logging.info(f"API_CONTENT_RECOMMENDATIONS: Found {len(all_resources)} active resources for user '{current_user.id}'")
+        
         if not all_resources:
+            logging.info(f"API_CONTENT_RECOMMENDATIONS: No active resources found for user '{current_user.id}'")
             return {
                 "recommendations": [],
                 "display_config": {
@@ -237,13 +277,20 @@ async def get_content_recommendations(
         from data.models.client import Client
         clients = session.exec(select(Client).where(Client.user_id == current_user.id)).all()
         
+        logging.info(f"API_CONTENT_RECOMMENDATIONS: Processing {len(clients)} clients")
+        
         recommendations = []
+        from difflib import SequenceMatcher
+        
+        def calculate_fuzzy_similarity(str1: str, str2: str) -> float:
+            """Calculate fuzzy similarity between two strings."""
+            return SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
         
         for resource in all_resources:
             matched_clients = []
             
             for client in clients:
-                # Get client tags (both user-set and AI-extracted)
+                # Get client tags (both user-set and AI-extracted) - already case-insensitive
                 client_tags = []
                 if client.user_tags:
                     client_tags.extend([tag.lower() for tag in client.user_tags])
@@ -253,22 +300,45 @@ async def get_content_recommendations(
                 if not client_tags:
                     continue
                 
-                # Check if any client tag matches any resource category
+                # Enhanced matching with fuzzy support
                 matching_tags = []
                 resource_categories = [cat.lower() for cat in resource.categories]
+                match_found = False
+                match_type = "none"
                 
+                # Check for exact matches first
                 for client_tag in client_tags:
                     for resource_category in resource_categories:
-                        if client_tag in resource_category or resource_category in client_tag:
+                        if client_tag == resource_category:
                             matching_tags.append(client_tag)
+                            match_found = True
+                            match_type = "exact"
+                            break
+                    if match_found:
+                        break
+                
+                # If no exact match and fuzzy matching is enabled, try fuzzy matching
+                if not match_found and use_fuzzy:
+                    for client_tag in client_tags:
+                        for resource_category in resource_categories:
+                            fuzzy_score = calculate_fuzzy_similarity(client_tag, resource_category)
+                            if fuzzy_score >= fuzzy_threshold:
+                                matching_tags.append(client_tag)
+                                match_found = True
+                                match_type = "fuzzy"
+                                logging.info(f"API_CONTENT_RECOMMENDATIONS: Fuzzy match found for client '{client.full_name}' - '{client_tag}' -> '{resource_category}' (score: {fuzzy_score:.3f})")
+                                break
+                        if match_found:
                             break
                 
                 if matching_tags:
                     matched_clients.append({
                         "client_id": str(client.id),
                         "client_name": client.full_name,
-                        "matching_tags": matching_tags
+                        "matching_tags": matching_tags,
+                        "match_type": match_type
                     })
+                    logging.info(f"API_CONTENT_RECOMMENDATIONS: Match found for client '{client.full_name}' with resource '{resource.title}' - Type: {match_type}, Tags: {matching_tags}")
             
             if matched_clients:
                 recommendations.append({
@@ -297,14 +367,14 @@ async def get_content_recommendations(
             "document": {"icon": "FileText", "color": "text-orange-400", "title": "Document"}
         }
         
-        logging.info(f"API: Found {len(recommendations)} content recommendations for user '{current_user.id}'")
+        logging.info(f"API_CONTENT_RECOMMENDATIONS: Generated {len(recommendations)} recommendations for user '{current_user.id}'")
         return {
             "recommendations": recommendations,
             "display_config": display_config
         }
         
     except Exception as e:
-        logging.error(f"API: Error getting content recommendations for user '{current_user.id}': {str(e)}")
+        logging.error(f"API_CONTENT_RECOMMENDATIONS: Error getting content recommendations for user '{current_user.id}': {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to get content recommendations")
 
 @router.post("/{resource_id}/send-to-clients")
