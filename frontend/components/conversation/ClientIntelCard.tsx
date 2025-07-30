@@ -1,40 +1,27 @@
 // frontend/components/conversation/ClientIntelCard.tsx
-// --- REVISED: Now fully agnostic, driven by displayConfig prop. ---
+// --- FINAL FIX: Sends a correctly typed payload to the standard update endpoint ---
 
 'use client';
 
 import { useState, useEffect, ReactNode } from 'react';
-import { Info, Sparkles, Edit, Save, Loader2, DollarSign, BedDouble, Bath, MapPin, BrainCircuit, HeartHandshake } from 'lucide-react';
+import { Info, Sparkles, Edit, Save, Loader2 } from 'lucide-react';
 import { useAppContext, Client } from '@/context/AppContext';
 import { InfoCard } from '../ui/InfoCard';
 import { TimezoneSelector } from '../ui/TimezoneSelector';
 
-// --- NEW: Define a type for preference metadata, expected from displayConfig ---
-interface PreferenceMeta {
-  label: string;
-  icon: string; // Icon name as a string
-  type?: 'text' | 'number' | 'textarea';
-  format?: (value: any) => string;
+// This is defined locally to match the backend's `ClientUpdate` model
+// without assuming a shared file structure.
+interface ClientUpdatePayload {
+    notes?: string;
+    preferences?: { [key: string]: any; };
+    timezone?: string | null;
 }
-
-// --- NEW: A central place to map icon names to actual components ---
-const ICON_MAP: Record<string, ReactNode> = {
-    Info: <Info size={14} />,
-    Default: <Info size={14} />,
-    DollarSign: <DollarSign size={12} />,
-    BedDouble: <BedDouble size={12} />,
-    Bath: <Bath size={12} />,
-    MapPin: <MapPin size={12} />,
-    BrainCircuit: <BrainCircuit size={12} />,
-    HeartHandshake: <HeartHandshake size={12} />,
-};
 
 // This would be defined in a shared types file or passed from the parent
 export interface ConversationDisplayConfig {
   client_intel: {
     title: string;
     icon: string;
-    preferences?: Record<string, PreferenceMeta>;
   };
 }
 
@@ -54,9 +41,7 @@ export const ClientIntelCard = ({ client, onUpdate, onReplan, displayConfig }: C
     const [isSaving, setIsSaving] = useState(false);
     const [showReplanPrompt, setShowReplanPrompt] = useState(false);
 
-    // --- MODIFIED: Use a default empty config to prevent errors ---
-    const intelConfig = displayConfig?.client_intel || { title: 'Client Intel', icon: 'Default', preferences: {} };
-    const cardIcon = ICON_MAP[intelConfig.icon] || ICON_MAP.Default;
+    const intelConfig = displayConfig?.client_intel || { title: 'Client Intel', icon: 'Info' };
 
     useEffect(() => {
         if (client) {
@@ -71,19 +56,43 @@ export const ClientIntelCard = ({ client, onUpdate, onReplan, displayConfig }: C
     const handleSave = async () => {
         setIsSaving(true);
         try {
-            const payload: any = {};
-            if (notes !== (client.notes || '')) payload.notes_to_add = notes;
-            if (timezone !== (client.timezone || '')) payload.timezone = timezone || null;
-            
-            // Don't send preferences directly - let the profiler extract them from notes
-            // The profiler will analyze the notes and extract new preferences dynamically
+            const payload: ClientUpdatePayload = {};
+            const originalClient = client;
 
-            if (Object.keys(payload).length > 0) {
-                // Call the intel endpoint that triggers the profiler
-                const updatedClient = await api.post(`/api/clients/${client.id}/intel`, payload);
-                onUpdate(updatedClient);
-                if (payload.notes_to_add !== undefined) setShowReplanPrompt(true);
+            // 1. Check if preferences have changed
+            if (JSON.stringify(preferences) !== JSON.stringify(originalClient.preferences || {})) {
+                const sanitizedPrefs: { [key: string]: any; } = {};
+                for (const [key, value] of Object.entries(preferences)) {
+                     // Convert string inputs from form back to numbers if original was a number
+                    if (typeof originalClient.preferences?.[key] === 'number') {
+                        sanitizedPrefs[key] = Number(value) || null;
+                    } else {
+                        sanitizedPrefs[key] = value;
+                    }
+                }
+                payload.preferences = sanitizedPrefs;
             }
+            
+            // 2. Check if notes have changed
+            if (notes !== (originalClient.notes || '')) {
+                payload.notes = notes;
+            }
+
+            // 3. Check if timezone has changed
+            if (timezone !== (originalClient.timezone || '')) {
+                payload.timezone = timezone || null;
+            }
+            
+            // 4. Only send an update if something has actually changed
+            if (Object.keys(payload).length > 0) {
+                // Use the generic PUT endpoint for updating client data
+                const updatedClient = await api.put(`/api/clients/${client.id}`, payload);
+                onUpdate(updatedClient);
+                if (payload.notes !== undefined || payload.preferences !== undefined) {
+                    setShowReplanPrompt(true);
+                }
+            }
+            
             setIsEditing(false);
            
         } catch(err) {
@@ -113,48 +122,33 @@ export const ClientIntelCard = ({ client, onUpdate, onReplan, displayConfig }: C
         ));
     };
     
-    // --- MODIFIED: This function now displays any preferences that exist ---
     const renderPreferences = (prefs: Client['preferences']) => {
         if (!prefs || Object.keys(prefs).length === 0) return null;
 
-        // Helper function to format values
         const formatValue = (value: any): string => {
             if (value === null || value === undefined) return '';
             if (typeof value === 'number') {
-                // Check if it looks like currency (large numbers)
-                if (value > 1000) {
-                    return `$${value.toLocaleString()}`;
-                }
+                if (value > 1000) return `$${value.toLocaleString()}`;
                 return value.toString();
             }
-            if (Array.isArray(value)) {
-                return value.join(', ');
-            }
+            if (Array.isArray(value)) return value.join(', ');
             return String(value);
         };
 
-        // Helper function to format keys for display
         const formatKey = (key: string): string => {
-            return key
-                .replace(/_/g, ' ')
-                .replace(/\b\w/g, l => l.toUpperCase())
-                .replace(/\b(max|min)\b/g, (match) => match === 'max' ? 'Max' : 'Min');
+            return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()).replace(/\b(max|min)\b/g, match => match.charAt(0).toUpperCase() + match.slice(1));
         };
 
         return (
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 mt-1">
                 {Object.entries(prefs).map(([key, value]) => {
-                    if (!value && value !== 0) return null; // Skip empty values
-                    
-                    const displayValue = formatValue(value);
-                    const displayKey = formatKey(key);
-                    
+                    if (value === null || value === '' || (Array.isArray(value) && value.length === 0)) return null;
                     return (
                         <div key={key} className="text-sm">
                             <dt className="text-xs text-brand-text-muted flex items-center gap-1.5">
-                                <Info size={12} /> {displayKey}
+                                <Info size={12} /> {formatKey(key)}
                             </dt>
-                            <dd className="font-medium text-brand-text-main pl-[22px]">{displayValue}</dd>
+                            <dd className="font-medium text-brand-text-main pl-[22px]">{formatValue(value)}</dd>
                         </div>
                     );
                 })}
@@ -167,7 +161,7 @@ export const ClientIntelCard = ({ client, onUpdate, onReplan, displayConfig }: C
     const renderedPreferencesContent = renderPreferences(client?.preferences);
 
     return (
-        <InfoCard title={intelConfig.title} icon={cardIcon} onEdit={!isEditing ? () => setIsEditing(true) : undefined}>
+        <InfoCard title={intelConfig.title} icon={<Info size={14} />} onEdit={!isEditing ? () => setIsEditing(true) : undefined}>
             <div className="pt-2">
                 {isEditing ? (
                     <div className="space-y-4">
@@ -176,21 +170,16 @@ export const ClientIntelCard = ({ client, onUpdate, onReplan, displayConfig }: C
                             <TimezoneSelector value={timezone} onChange={e => setTimezone(e.target.value)} />
                         </div>
                         
-                        {/* --- MODIFIED: Edit form is now dynamically generated from actual preferences --- */}
                         <div className="grid grid-cols-2 gap-4">
-                            {Object.entries(client?.preferences || {}).map(([key, value]) => {
-                                const displayKey = key
-                                    .replace(/_/g, ' ')
-                                    .replace(/\b\w/g, l => l.toUpperCase())
-                                    .replace(/\b(max|min)\b/g, (match) => match === 'max' ? 'Max' : 'Min');
-                                
+                            {Object.entries(preferences).map(([key, value]) => {
+                                const displayKey = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()).replace(/\b(max|min)\b/g, match => match.charAt(0).toUpperCase() + match.slice(1));
                                 return (
                                     <div key={key}>
                                         <label className="text-xs font-semibold text-gray-400 mb-1 block">{displayKey}</label>
                                         <input 
-                                            type={typeof value === 'number' ? 'number' : 'text'}
+                                            type={typeof client?.preferences?.[key] === 'number' ? 'number' : 'text'}
                                             placeholder={`e.g., ${displayKey}`}
-                                            value={preferences[key] || ''} 
+                                            value={value || ''} 
                                             onChange={(e) => setPreferences(p => ({...p, [key]: e.target.value}))} 
                                             className="w-full bg-black/20 border border-white/10 rounded-lg p-2 text-sm"
                                         />

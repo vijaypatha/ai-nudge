@@ -1,6 +1,6 @@
 # FILE: agent_core/brain/verticals/real_estate.py
 # This file is a self-contained module for all real estate logic.
-# FIX: Broadened scoring logic for Sellers and added specific logic for Investors.
+# MODIFIED: Implemented "Knockout Criteria" for more intelligent buyer matching.
 
 import logging
 from typing import Dict, Any, List, Optional
@@ -57,16 +57,14 @@ def score_real_estate_event(client: Client, event: MarketEvent, resource_embeddi
         resource_city = str(resource_payload.get('City', '')).lower()
         client_locations = [str(loc).lower() for loc in client_prefs.get('locations', [])]
         
-        # Give high score for same neighborhood, medium for same city
         if client_locations and resource_subdivision and any(loc in resource_subdivision for loc in client_locations):
             total_score += weights.get("seller_location_neighborhood", 80)
             reasons.append("📍 In Their Neighborhood")
         elif client_locations and resource_city and any(loc in resource_city for loc in client_locations):
             total_score += weights.get("seller_location_city", 40)
             reasons.append("📍 In Their City")
-        # FIX: Add fallback scoring for sellers - any sold listing gets some points
         else:
-            total_score += 30  # Base score for any sold listing
+            total_score += 30
             reasons.append("📊 Market Activity")
 
     # B) Investor Scoring Logic
@@ -76,43 +74,70 @@ def score_real_estate_event(client: Client, event: MarketEvent, resource_embeddi
             remarks_lower = combined_remarks.lower()
             found_keywords = [kw for kw in keywords if kw.lower() in remarks_lower]
             if found_keywords:
-                total_score += weights.get("investor_keywords", 90) # High score for keyword match
+                total_score += weights.get("investor_keywords", 90)
                 reasons.append(f"✅ Investor Keyword: {', '.join(found_keywords)}")
         
-        # Also give points for location match
         resource_city = str(resource_payload.get('City', '')).lower()
         client_locations = [str(loc).lower() for loc in client_prefs.get('locations', [])]
         if client_locations and resource_city and any(loc in resource_city for loc in client_locations):
-            total_score += weights.get("buyer_location", 25) # Reuse buyer location weight
+            total_score += weights.get("buyer_location", 25)
             reasons.append("✅ Location Match")
         
-        # FIX: Add fallback scoring for investors - any market activity gets points
         if total_score == 0:
-            total_score += 35  # Base score for any market activity
+            total_score += 35
             reasons.append("📈 Market Opportunity")
 
     # C) Buyer Scoring Logic
     elif client_role == "buyer" and event_type in config["roles"]["buyer"]["event_types"]:
+        # --- PHASE 1: KNOCKOUT CRITERIA (NON-NEGOTIABLE RULES) ---
+        # If a property fails any of these, it is instantly disqualified.
+        
+        # 1. Budget Check (with 5% flexibility for negotiation room)
+        max_budget = client_prefs.get('budget_max')
+        list_price = resource_payload.get('ListPrice')
+        if list_price and max_budget and int(list_price) > (int(max_budget) * 1.05):
+            logging.info(f"NUDGE_ENGINE (KNOCKOUT): Disqualified for client {client.id} - Over budget (${list_price} > ${max_budget})")
+            return 0, ["Deal-Breaker: Over Budget"]
+
+        # 2. Minimum Bedrooms Check
+        min_beds = client_prefs.get('min_bedrooms')
+        resource_beds = resource_payload.get('BedroomsTotal')
+        if min_beds and resource_beds and int(resource_beds) < int(min_beds):
+            logging.info(f"NUDGE_ENGINE (KNOCKOUT): Disqualified for client {client.id} - Not enough beds ({resource_beds} < {min_beds})")
+            return 0, ["Deal-Breaker: Not Enough Bedrooms"]
+            
+        # 3. Minimum Bathrooms Check
+        min_baths = client_prefs.get('min_bathrooms')
+        resource_baths = resource_payload.get('BathroomsTotalInteger')
+        if min_baths and resource_baths and int(resource_baths) < int(min_baths):
+            logging.info(f"NUDGE_ENGINE (KNOCKOUT): Disqualified for client {client.id} - Not enough baths ({resource_baths} < {min_baths})")
+            return 0, ["Deal-Breaker: Not Enough Bathrooms"]
+
+        # --- PHASE 2: WEIGHTED SCORING (FOR QUALIFIED PROPERTIES) ---
+        # This part only runs if the property passes all knockout criteria.
+
         if client.notes_embedding and resource_embedding:
             similarity = calculate_cosine_similarity(client.notes_embedding, resource_embedding)
             if similarity > 0.45:
                 total_score += weights.get("buyer_semantic", 50) * similarity
                 reasons.append(f"🔥 Conceptual Match ({int(similarity*100)}%)")
-        max_budget = client_prefs.get('budget_max')
-        list_price = resource_payload.get('ListPrice')
+        
+        # Budget Match is now a "nice to have" score since the hard rule was already passed
         if list_price and max_budget and int(list_price) <= max_budget:
             total_score += weights.get("buyer_price", 30)
             reasons.append("✅ Budget Match")
+        
         resource_location = str(resource_payload.get('SubdivisionName', '')).lower()
         client_locations = [str(loc).lower() for loc in client_prefs.get('locations', [])]
         if resource_location and client_locations and any(loc in resource_location for loc in client_locations):
             total_score += weights.get("buyer_location", 25)
             reasons.append("✅ Location Match")
-        min_beds = client_prefs.get('min_bedrooms')
-        resource_beds = resource_payload.get('BedroomsTotal')
+        
+        # Features match is also now a bonus score
         if min_beds and resource_beds and int(resource_beds) >= min_beds:
             total_score += weights.get("buyer_features", 15)
             reasons.append(f"✅ Features Match ({resource_beds} Beds)")
+        
         keywords = client_prefs.get('keywords', [])
         if keywords and combined_remarks:
             remarks_lower = combined_remarks.lower()
@@ -121,9 +146,9 @@ def score_real_estate_event(client: Client, event: MarketEvent, resource_embeddi
                 total_score += weights.get("buyer_keywords", 20)
                 reasons.append(f"✅ Keyword Match: {', '.join(found_keywords)}")
         
-        # FIX: Add fallback scoring for buyers - any new listing gets some points
+        # Fallback scoring for buyers
         if total_score == 0 and event_type == "new_listing":
-            total_score += 25  # Base score for any new listing
+            total_score += 25
             reasons.append("🏠 New Property Alert")
 
     return int(total_score), reasons
