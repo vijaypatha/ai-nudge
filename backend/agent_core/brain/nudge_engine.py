@@ -75,10 +75,15 @@ def _build_content_preview(event: MarketEvent, resource: Resource) -> Dict[str, 
 
     if resource.resource_type == "property":
         attrs = resource.attributes
+        # Get all photo URLs for gallery
+        all_photos = [media.get('MediaURL') for media in attrs.get('Media', []) if media.get('MediaCategory') == 'Photo']
         preview = {
             "content_type": "property",
             "url": attrs.get("listing_url"),
             "image_url": next((media.get('MediaURL') for media in attrs.get('Media', []) if media.get('Order') == 0), None),
+            "photo_gallery": all_photos,  # Add all photo URLs
+            "photo_count": len(all_photos),  # Add photo count
+            "has_photos": len(all_photos) > 0,  # Add boolean flag
             "title": attrs.get("UnparsedAddress", "Property Listing"),
             "description": attrs.get("PublicRemarks"),
             "details": {

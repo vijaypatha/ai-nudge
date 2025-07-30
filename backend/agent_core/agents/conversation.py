@@ -249,14 +249,74 @@ async def draft_outbound_campaign_message(
         - The goal is to simply restart the conversation.
         """
     elif event_type == "listing_announcement":
+        # Extract key property details for concise messaging
+        attrs = resource.attributes if resource else {}
+        address = attrs.get("UnparsedAddress", "New Property")
+        price = attrs.get("ListPrice")
+        beds = attrs.get("BedroomsTotal")
+        baths = attrs.get("BathroomsTotalInteger")
+        sqft = attrs.get("LivingArea")
+        remarks = attrs.get("PublicRemarks", "")
+        
+        # Check if photos are available
+        media = attrs.get("Media", [])
+        photo_count = len([m for m in media if m.get("MediaCategory") == "Photo"])
+        has_photos = photo_count > 0
+        
+        # Get client context for personalization
+        client_context = ""
+        if matched_audience:
+            primary_client = matched_audience[0]
+            client_name = primary_client.client_name
+            match_reasons = primary_client.match_reasons or []
+            
+            # Build client context based on match reasons
+            if match_reasons:
+                context_parts = []
+                for reason in match_reasons:
+                    if "bedrooms" in reason.lower() or "beds" in reason.lower():
+                        context_parts.append("bedroom preferences")
+                    elif "price" in reason.lower() or "budget" in reason.lower():
+                        context_parts.append("price range")
+                    elif "location" in reason.lower() or "area" in reason.lower():
+                        context_parts.append("location preferences")
+                    elif "investment" in reason.lower():
+                        context_parts.append("investment goals")
+                    elif "family" in reason.lower():
+                        context_parts.append("family needs")
+                    else:
+                        context_parts.append("your preferences")
+                
+                if context_parts:
+                    client_context = f" based on {', '.join(set(context_parts))}"
+        
         prompt = f"""
         {base_prompt_intro}
         A 'listing_announcement' event has occurred.
-        A new property, described below, is now available. Your task is to draft a compelling announcement message.
-        Here is the listing information:
-        {json.dumps(resource.attributes, indent=2) if resource else "{}"}
-        - Highlight 1-2 key features.
-        - Include a call-to-action (e.g., "Let me know if you'd like to see it!").
+        Draft a SHORT, compelling property announcement message (under 200 characters).
+        
+        Property Details:
+        - Address: {address}
+        - Price: ${price:,} if price else "Contact for pricing"
+        - Beds: {beds} | Baths: {baths} | SqFt: {sqft:,} if sqft else "Contact for details"
+        - Photos: {photo_count} photos available
+        - Description: {remarks[:100]}...
+        
+        Client Context: {client_context}
+        
+        Requirements:
+        1. Keep it CONCISE and engaging
+        2. Highlight 1-2 key features that match the client's preferences
+        3. Include a simple call-to-action
+        4. Use friendly, professional tone
+        5. Start with "Hi [Client Name],"
+        6. Make it personal based on client context - don't use generic "new listing alert"
+        
+        Examples based on context:
+        - For bedroom preferences: "Hi [Client Name], found a {beds}bd home that matches your needs! {address} - ${price:,}. Perfect size for your family."
+        - For price range: "Hi [Client Name], this {address} property fits your budget perfectly! {beds}bd/{baths}ba, ${price:,}. Worth checking out."
+        - For location: "Hi [Client Name], new property in your preferred area! {address} - {beds}bd/{baths}ba, ${price:,}. Great location match."
+        - Generic: "Hi [Client Name], thought of you for this {address} property! {beds}bd/{baths}ba, ${price:,}. Let me know if you'd like to see it."
         """
     # This `elif` block previously caused the bug. By handling `content_suggestion` explicitly above,
     # it now correctly serves as a fallback for other event types that have a resource but no special logic.
@@ -279,7 +339,23 @@ async def draft_outbound_campaign_message(
         model="gpt-4o-mini"
     )
 
-    return llm_response.strip() if llm_response else ""
+    final_message = llm_response.strip() if llm_response else ""
+    
+    # For property listings, append photo information if available
+    if event_type == "listing_announcement" and resource and resource.attributes:
+        attrs = resource.attributes
+        media = attrs.get("Media", [])
+        photo_count = len([m for m in media if m.get("MediaCategory") == "Photo"])
+        
+        if photo_count > 0:
+            # Make photo link more contextual
+            if photo_count > 1:
+                photo_text = f"\n\n📸 View all {photo_count} photos to see more details"
+            else:
+                photo_text = f"\n\n📸 View the photo to see more details"
+            final_message += photo_text
+    
+    return final_message
 
 
 

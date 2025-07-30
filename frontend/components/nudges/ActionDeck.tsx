@@ -12,8 +12,9 @@ import {
     User as UserIcon, Sparkles, Send, X, Users, Home, TrendingUp, RotateCcw,
     TimerOff, CalendarPlus, Archive, Edit, DollarSign, Target, Check, ChevronsRight,
     BedDouble, Bath, ArrowLeftCircle, ArrowRightCircle, Play, ExternalLink,
-    MessageSquare, Brain, Mic, Volume2, Newspaper, Building
+    MessageSquare, Brain, Mic, Volume2, Newspaper, Building, ImageIcon
 } from 'lucide-react';
+import { PhotoGalleryModal } from '@/components/modals/PhotoGalleryModal';
 
 interface CampaignBriefing extends CampaignBriefingType {
     created_at: string;
@@ -64,10 +65,14 @@ const ContentPreview: FC<{ intel: any }> = ({ intel }) => {
     if (!previewData || (!previewData.url && !previewData.image_url && !previewData.title)) {
         return null;
     }
-    const { content_type, url, image_url, title, description, details } = previewData;
+    const { content_type, url, image_url, title, description, details, photo_gallery, photo_count, has_photos } = previewData;
+    
+    // Debug logging
+    console.log('ContentPreview data:', { content_type, url, image_url, title, photo_count, has_photos });
     const isYouTube = content_type === 'youtube';
     const isVideo = content_type === 'video';
     const isProperty = content_type === 'property';
+    const [showPhotoGallery, setShowPhotoGallery] = useState(false);
     const renderDetail = (label: string, value: any, icon: ReactNode) => {
         if (!value) return null;
         return (
@@ -84,7 +89,17 @@ const ContentPreview: FC<{ intel: any }> = ({ intel }) => {
             </h4>
             <div className="relative w-full h-48 rounded-lg overflow-hidden bg-white/5 border border-white/10 group">
                 {image_url ? (
-                    <Image src={image_url} alt={title || 'Content Preview'} layout="fill" objectFit="cover" className="bg-white/5" />
+                    <Image 
+                        src={image_url} 
+                        alt={title || 'Content Preview'} 
+                        layout="fill" 
+                        objectFit="cover" 
+                        className="bg-white/5"
+                        unoptimized={true}
+                        onError={() => {
+                            console.log('Image failed to load:', image_url);
+                        }}
+                    />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center bg-brand-dark">
                         <Newspaper size={48} className="text-brand-text-muted" />
@@ -111,6 +126,17 @@ const ContentPreview: FC<{ intel: any }> = ({ intel }) => {
                     </a>
                 )}
 
+                {/* Photo Gallery Link */}
+                {has_photos && photo_count > 1 && (
+                    <button 
+                        onClick={() => setShowPhotoGallery(true)}
+                        className="absolute top-2 right-12 bg-black/70 text-white p-2 rounded-full hover:bg-black/90 transition-colors" 
+                        title={`View all ${photo_count} photos`}
+                    >
+                        <ImageIcon size={16} />
+                    </button>
+                )}
+
                 <div className="absolute bottom-3 left-3 right-3">
                     {title && <h5 className="font-bold text-white text-base drop-shadow-md">{title}</h5>}
                 </div>
@@ -128,6 +154,14 @@ const ContentPreview: FC<{ intel: any }> = ({ intel }) => {
                     </div>
                 )}
             </div>
+
+            {/* Photo Gallery Modal */}
+            {showPhotoGallery && photo_gallery && (
+                <PhotoGalleryModal 
+                    photos={photo_gallery} 
+                    onClose={() => setShowPhotoGallery(false)} 
+                />
+            )}
         </div>
     );
 };
