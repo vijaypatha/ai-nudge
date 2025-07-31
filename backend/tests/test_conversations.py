@@ -1,4 +1,12 @@
 # File Path: backend/tests/test_conversations.py
+# 
+# What does this file test:
+# This file tests conversation functionality including conversation creation, message
+# handling, conversation state management, and conversation history. It validates
+# the conversation system that manages ongoing communication threads between
+# users and clients with proper message threading and state persistence.
+# 
+# When was it updated: 2025-01-27
 # Purpose: Tests for the /conversations and /messages API endpoints.
 
 import pytest

@@ -1,4 +1,13 @@
 # File: backend/tests/test_community.py
+# 
+# What does this file test:
+# This file tests community functionality including community features, user
+# interactions, and community-related API endpoints. It validates the
+# community system that enables user engagement and social features
+# within the application.
+# 
+# When was it updated: 2025-01-27
+
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch

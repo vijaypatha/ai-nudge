@@ -1,6 +1,14 @@
 # FILE: backend/tests/test_live_reso_connection.py
 # --- REFACTORED: Updated to use the generic tool factory and test get_events() ---
 #
+# What does this file test:
+# This file tests live RESO (Real Estate Standards Organization) connection
+# functionality including MLS data integration, property data retrieval,
+# and real-time MLS feed processing. It validates the live connection
+# to MLS systems for real estate vertical data synchronization.
+# 
+# When was it updated: 2025-01-27
+#
 # HOW TO RUN:
 # 1. Ensure your .env file has the correct RESO_API_TOKEN and RESO_API_BASE_URL.
 # 2. From your terminal, run:

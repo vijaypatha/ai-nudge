@@ -1,4 +1,12 @@
 # File: backend/tests/test_users.py
+# 
+# What does this file test:
+# This file tests user management functionality including user creation, updates,
+# profile management, and user-related API endpoints. It validates the user
+# system that handles user accounts, authentication, and user preferences
+# across different verticals.
+# 
+# When was it updated: 2025-01-27
 
 from fastapi.testclient import TestClient
 from data.models.user import User

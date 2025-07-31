@@ -1,3 +1,13 @@
+# File: backend/tests/test_clients.py
+# 
+# What does this file test:
+# This file tests client management functionality including client creation, updates,
+# client intelligence, tagging, and client-related API endpoints. It validates
+# the client system that handles client profiles, preferences, and relationship
+# management for different verticals.
+# 
+# When was it updated: 2025-01-27
+
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock

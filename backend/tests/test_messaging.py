@@ -1,4 +1,12 @@
 # File: backend/tests/test_messaging.py
+# 
+# What does this file test:
+# This file tests messaging functionality including message creation, deletion,
+# status updates, and scheduled message management. It validates the core
+# messaging system that handles communication between users and clients,
+# including message persistence and lifecycle management.
+# 
+# When was it updated: 2025-01-27
 
 import pytest
 import uuid

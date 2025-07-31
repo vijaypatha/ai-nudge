@@ -1,4 +1,12 @@
 # File: backend/tests/test_scheduled_messages.py
+# 
+# What does this file test:
+# This file tests scheduled message functionality including bulk message creation,
+# timezone handling, message scheduling, and Celery task integration. It validates
+# the scheduled messaging system that allows users to send messages at specific
+# times with proper timezone conversion and bulk operations.
+# 
+# When was it updated: 2025-01-27
 # --- CORRECTED VERSION ---
 
 import pytest

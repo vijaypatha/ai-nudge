@@ -1,4 +1,12 @@
 # File: backend/tests/test_content_resource_service.py
+# 
+# What does this file test:
+# This file tests the content resource service functionality including fuzzy similarity
+# matching, content recommendations for users, client matching algorithms, and content
+# resource management. It validates the AI-powered content recommendation system that
+# suggests relevant content based on client profiles and preferences.
+# 
+# When was it updated: 2025-01-27
 
 import pytest
 import uuid

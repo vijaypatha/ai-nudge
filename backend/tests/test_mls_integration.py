@@ -1,4 +1,12 @@
 # File: backend/tests/test_mls_integration.py
+# 
+# What does this file test:
+# This file tests MLS (Multiple Listing Service) integration functionality including
+# new listing event processing, campaign creation from market events, and MLS data
+# handling for real estate vertical. It validates the pipeline for processing
+# property listings and converting them into marketing campaigns.
+# 
+# When was it updated: 2025-01-27
 # --- CORRECTED: Refactored to use the generic Resource model instead of the deleted Property model.
 
 import pytest

@@ -1,4 +1,12 @@
 # File: backend/tests/test_content_resources.py
+# 
+# What does this file test:
+# This file tests the content resources API endpoints including CRUD operations,
+# category management, usage tracking, status management, and content resource
+# validation. It validates the REST API for managing and retrieving content
+# resources that can be shared with clients.
+# 
+# When was it updated: 2025-01-27
 
 import pytest
 import uuid

@@ -1,4 +1,12 @@
 # File: backend/tests/test_orchestrator.py
+# 
+# What does this file test:
+# This file tests the orchestrator service which coordinates AI agents, CRM operations,
+# message handling, and client intelligence updates. It validates conversation processing,
+# recommendation generation, tag extraction, draft suggestions, and the overall workflow
+# orchestration between different AI agents and services.
+# 
+# When was it updated: 2025-01-27
 
 import pytest
 import uuid

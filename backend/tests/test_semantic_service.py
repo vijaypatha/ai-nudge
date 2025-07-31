@@ -1,4 +1,12 @@
 # File: backend/tests/test_semantic_service.py
+# 
+# What does this file test:
+# This file tests the semantic service functionality including vector index initialization,
+# client embedding updates, semantic search, and similar client finding. It validates
+# the AI-powered semantic matching system that uses vector embeddings to find
+# similar clients and enable intelligent content recommendations.
+# 
+# When was it updated: 2025-01-27
 
 import pytest
 import uuid

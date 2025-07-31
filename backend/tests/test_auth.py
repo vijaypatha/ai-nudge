@@ -1,4 +1,12 @@
 # File: backend/tests/test_auth.py
+# 
+# What does this file test:
+# This file tests authentication functionality including login, token validation,
+# user authentication, and security features. It validates the authentication
+# system that handles user login, session management, and access control
+# for protected API endpoints.
+# 
+# When was it updated: 2025-01-27
 
 import pytest
 from fastapi.testclient import TestClient

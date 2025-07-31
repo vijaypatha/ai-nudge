@@ -1,4 +1,12 @@
 # File: backend/tests/test_campaigns.py
+# 
+# What does this file test:
+# This file tests campaign functionality including campaign creation, management,
+# campaign briefings, and campaign-related API endpoints. It validates the
+# campaign system that handles marketing campaigns, content creation, and
+# campaign lifecycle management for different verticals.
+# 
+# When was it updated: 2025-01-27
 
 import pytest
 from fastapi.testclient import TestClient
