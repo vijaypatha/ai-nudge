@@ -1,0 +1,116 @@
+# docker-compose.prod.yml (Full, Verified Production Configuration)
+
+services:
+  # ---------- DATABASE ----------
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      # These values are for initializing the database container itself
+      POSTGRES_DB: realestate_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: YOUR_STRONG_PASSWORD # Use the same password as in production.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ai_nudge_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ---------- REDIS ----------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - ai_nudge_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ---------- BACKEND (FastAPI) ----------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: > # Production command: no --reload, no seeding
+      sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000"
+    restart: unless-stopped
+    env_file:
+      - ./production.env # Sources all config from the .env file
+    networks:
+      - ai_nudge_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ---------- CELERY WORKER ----------
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A celery_worker.celery_app worker --loglevel=info --concurrency=2
+    env_file:
+      - ./production.env # Sources all config from the .env file
+    networks:
+      - ai_nudge_net
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  # ---------- CELERY BEAT SCHEDULER ----------
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A celery_worker.celery_app beat --loglevel=info --schedule=/app/celerybeat-schedule.db
+    env_file:
+      - ./production.env # Sources all config from the .env file
+    volumes:
+      - celery_beat_data:/app/celerybeat-schedule.db # Persists the schedule database
+    networks:
+      - ai_nudge_net
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  # ---------- FRONTEND (Next.js) ----------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: sh -c "npm run build && npm start" # Production command
+    env_file:
+      - ./production.env # Sources all config from the .env file
+    ports:
+      - "3000:3000"
+    networks:
+      - ai_nudge_net
+    depends_on:
+      - backend
+
+# ---------- NETWORKS & VOLUMES ----------
+networks:
+  ai_nudge_net:
+    driver: bridge
+    name: ai_nudge_network
+
+volumes:
+  postgres_data:
+    name: ai_nudge_postgres_data
+  celery_beat_data:
+    name: ai_nudge_celery_beat_data

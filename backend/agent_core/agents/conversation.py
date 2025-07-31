@@ -248,7 +248,7 @@ async def draft_outbound_campaign_message(
         - Keep it brief and casual. Avoid sounding salesy or demanding.
         - The goal is to simply restart the conversation.
         """
-    elif event_type == "listing_announcement":
+    elif event_type in ["new_listing", "listing_announcement"]:
         # Extract key property details for concise messaging
         attrs = resource.attributes if resource else {}
         address = attrs.get("UnparsedAddress", "New Property")

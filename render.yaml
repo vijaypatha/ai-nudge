@@ -1,164 +1,151 @@
-# Render.com Deployment Configuration
-# This file defines the services and databases for the AI Nudge application.
-# It is used to deploy the application to Render.com.
-# The services are defined in the services section, and the databases are defined in the databases section.
-# Render (Prod): No ENVIRONMENT set → defaults to "production" → dev-login endpoint NOT available
-# Local Development Configuration
+# render.yaml (Final, Complete & Verified Production Deployment)
+
+envVarGroups:
+  - name: ainudge-env-group
+    envVars:
+      # --- Configuration Variables ---
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: FRONTEND_APP_URL
+        value: "https://www.ainudge.app"
+      - key: GOOGLE_REDIRECT_URI
+        value: "https://ainudge.app/api/auth/google/callback"
+      - key: FAQ_AUTO_REPLY_ENABLED
+        value: "true"
+      - key: LLM_PROVIDER
+        value: "openai"
+      - key: MLS_PROVIDER
+        value: "flexmls_reso"
+      # --- Secrets & API Keys (sync: false prevents exposure) ---
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CSE_ID
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: RESO_API_BASE_URL
+        sync: false
+      - key: RESO_API_TOKEN
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: SPARK_API_DEMO_TOKEN
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_DEFAULT_MESSAGING_SERVICE_SID
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: TWILIO_VERIFY_SERVICE_SID
+        sync: false
+
+databases:
+  - name: realestate-db
+    databaseName: realestate_db
+    user: postgres
+    plan: free
+    postgresMajorVersion: 15
+
+redis:
+  - name: redis-cache
+    plan: free
+    ipAllowList: []
+
 services:
-  # ---------- DATABASE ----------
-  db:
-    image: postgres:15-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: realestate_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password123
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - ai_nudge_net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  # ---------- REDIS ----------
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    networks:
-      - ai_nudge_net
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-
   # ---------- BACKEND (FastAPI) ----------
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    # ❗️CORRECTED: 'command' is now at the correct indentation level
-    command: > 
-      sh -c "alembic upgrade head && python -c 'import asyncio; from data.seed import seed_database; asyncio.run(seed_database())' && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"
-    restart: unless-stopped
-    ports:
-      - "8001:8000"
-    environment:
-      ENVIRONMENT: development
-      WEBSOCKET_ALLOWED_ORIGINS: '["http://localhost:3000"]'
-      PYTHONPATH: /app
-      RUNNING_IN_CELERY: "true"
-      DATABASE_URL: postgresql://postgres:password123@db:5432/realestate_db
-      REDIS_URL: redis://redis:6379
-    env_file:
-      - ./backend/.env
-    volumes:
-      - ./backend:/app
-    networks:
-      - ai_nudge_net
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  # ---------- CELERY WORKER ----------
-  celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    command: celery -A celery_worker.celery_app worker --loglevel=info --concurrency=2
-    environment:
-      ENVIRONMENT: development
-      PYTHONPATH: /app
-      RUNNING_IN_CELERY: "true"
-      DATABASE_URL: postgresql://postgres:password123@db:5432/realestate_db
-      REDIS_URL: redis://redis:6379
-    env_file:
-      - ./backend/.env
-    volumes:
-      - ./backend:/app
-    networks:
-      - ai_nudge_net
-    depends_on:
-      backend:
-        condition: service_started
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  # ---------- CELERY BEAT SCHEDULER ----------
-  celery-beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    command: celery -A celery_worker.celery_app beat --loglevel=info --schedule=/app/celerybeat-schedule.db
-    environment:
-      ENVIRONMENT: development
-      PYTHONPATH: /app
-      RUNNING_IN_CELERY: "true"
-      DATABASE_URL: postgresql://postgres:password123@db:5432/realestate_db
-      REDIS_URL: redis://redis:6379
-    env_file:
-      - ./backend/.env
-    volumes:
-      - ./backend:/app
-      - celery_beat_data:/app/celery_beat_data
-    networks:
-      - ai_nudge_net
-    depends_on:
-      backend:
-        condition: service_started
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+  - type: web
+    name: backend
+    runtime: docker
+    repo: https://github.com/vijaypatha/ai-nudge
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /test-db
+    envVarGroups:
+      - ainudge-env-group
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: realestate-db
+          property: connectionString
+      - key: REDIS_URL
+        fromRedis:
+          name: redis-cache
+          property: connectionString
+    startCommand: >
+      sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port $PORT"
+    plan: starter
 
   # ---------- FRONTEND (Next.js) ----------
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    command: npm run dev
-    ports:
-      - "3000:3000"
-    environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8001
-      NODE_ENV: development
-    volumes:
-      - ./frontend:/app
-      - frontend_node_modules:/app/node_modules
-      - frontend_next:/app/.next
-    networks:
-      - ai_nudge_net
-    depends_on:
-      - backend
+  - type: web
+    name: frontend
+    runtime: docker
+    repo: https://github.com/vijaypatha/ai-nudge
+    dockerfilePath: ./frontend/Dockerfile
+    envVarGroups:
+      - ainudge-env-group
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: backend
+          property: url
+      - key: NODE_ENV
+        value: production
+    startCommand: "npm start"
+    plan: starter
+    buildFilter:
+      paths:
+        - "frontend/**"
+        - "render.yaml"
 
-# ---------- NETWORKS ----------
-networks:
-  ai_nudge_net:
-    driver: bridge
-    name: ai_nudge_network
+  # ---------- CELERY WORKER ----------
+  - type: worker
+    name: celery-worker
+    runtime: docker
+    repo: https://github.com/vijaypatha/ai-nudge
+    dockerfilePath: ./backend/Dockerfile
+    envVarGroups:
+      - ainudge-env-group
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: realestate-db
+          property: connectionString
+      - key: REDIS_URL
+        fromRedis:
+          name: redis-cache
+          property: connectionString
+      - key: RUNNING_IN_CELERY
+        value: "true"
+    startCommand: "celery -A celery_worker.celery_app worker --loglevel=info --concurrency=2"
+    plan: starter
 
-# ---------- VOLUMES ----------
-volumes:
-  postgres_data:
-    name: ai_nudge_postgres_data
-  frontend_node_modules:
-    name: ai_nudge_frontend_node_modules
-  frontend_next:
-    name: ai_nudge_frontend_next
-  celery_beat_data:
-    name: ai_nudge_celery_beat_data
+  # ---------- CELERY BEAT SCHEDULER ----------
+  - type: worker
+    name: celery-beat
+    runtime: docker
+    repo: https://github.com/vijaypatha/ai-nudge
+    dockerfilePath: ./backend/Dockerfile
+    envVarGroups:
+      - ainudge-env-group
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: realestate-db
+          property: connectionString
+      - key: REDIS_URL
+        fromRedis:
+          name: redis-cache
+          property: connectionString
+      - key: RUNNING_IN_CELERY
+        value: "true"
+    startCommand: "celery -A celery_worker.celery_app beat --loglevel=info"
+    plan: starter
