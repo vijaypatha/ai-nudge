@@ -12,7 +12,7 @@ from sqlmodel import Session
 
 from data.models.user import User
 from api.security import get_current_user_from_token
-from data.models.message import SendMessageImmediate, Message
+from data.models.message import SendMessageImmediate, Message, MessageStatus, ScheduledMessage
 from data.models.campaign import CampaignBriefing, CampaignUpdate, RecommendationSlateResponse, CampaignStatus
 from agent_core.brain.verticals import VERTICAL_CONFIGS
 from agent_core.agents import conversation as conversation_agent
@@ -21,6 +21,8 @@ from workflow import outbound as outbound_workflow
 from agent_core.brain import relationship_planner
 from workflow import campaigns as campaign_workflow
 from agent_core.content_resource_service import get_content_recommendations_for_user
+import pytz # NEW
+from datetime import datetime, timedelta # NEW
 
 # --- NEW: Import llm_client for embedding generation in the background task ---
 from agent_core import llm_client
@@ -210,18 +212,59 @@ async def approve_campaign_plan(
     campaign_id: UUID,
     current_user: User = Depends(get_current_user_from_token)
 ):
-    # (Functionality unchanged)
-    try:
-        updated_plan = await campaign_workflow.approve_and_schedule_precomputed_plan(
-            plan_id=campaign_id,
-            user_id=current_user.id
-        )
-        return updated_plan
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logging.error(f"Failed to approve campaign {campaign_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to approve campaign plan.")
+    """
+    Approves a DRAFT relationship plan. This endpoint reads the steps from the
+    CampaignBriefing and creates the actual ScheduledMessage records.
+    """
+    with Session(crm_service.engine) as session:
+        plan = crm_service.get_campaign_briefing_by_id(campaign_id, current_user.id, session)
+
+        if not plan or not plan.is_plan or plan.status != CampaignStatus.DRAFT:
+            raise HTTPException(status_code=404, detail="Draft plan not found or is not a valid plan.")
+
+        plan_steps = plan.key_intel.get("steps", [])
+        if not plan_steps:
+            raise HTTPException(status_code=400, detail="Plan contains no steps to schedule.")
+
+        user_timezone_str = current_user.timezone or "America/New_York"
+        user_tz = pytz.timezone(user_timezone_str)
+        now_in_user_tz = datetime.now(user_tz)
+
+        for step in plan_steps:
+            delay_days = step.get("delay_days", 0)
+            content = step.get("generated_draft")
+            touchpoint_id = step.get("touchpoint_id")
+
+            if not content:
+                continue
+
+            # Calculate the target date and set the time to 10:30 AM
+            target_date = now_in_user_tz + timedelta(days=delay_days)
+            local_scheduled_time = target_date.replace(hour=10, minute=30, second=0, microsecond=0)
+
+            # Convert to UTC for storage
+            utc_scheduled_time = local_scheduled_time.astimezone(pytz.utc)
+
+            message = ScheduledMessage(
+                client_id=plan.client_id,
+                user_id=current_user.id,
+                parent_plan_id=plan.id,
+                content=content,
+                scheduled_at_utc=utc_scheduled_time,
+                timezone=user_timezone_str,  # <-- FIX: Save the correct timezone
+                status=MessageStatus.PENDING,
+                playbook_touchpoint_id=touchpoint_id
+            )
+            session.add(message)
+
+        # Update the plan's status to ACTIVE
+        plan.status = CampaignStatus.ACTIVE
+        session.add(plan)
+        session.commit()
+        session.refresh(plan)
+
+        logging.info(f"API: Approved and scheduled {len(plan_steps)} messages for plan {plan.id}")
+        return plan
 
 
 @router.post("/briefings/{briefing_id}/complete", response_model=RecommendationSlateResponse)

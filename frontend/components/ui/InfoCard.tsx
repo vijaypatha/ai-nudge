@@ -19,16 +19,16 @@ interface InfoCardProps {
   children: React.ReactNode;
   className?: string;
   onEdit?: () => void;
+  isPulsing?: boolean; // New prop for pulsing effect
 }
 
-/**
- * A reusable card component with a consistent header and optional edit button.
- */
-export const InfoCard = ({ title, icon, children, className, onEdit }: InfoCardProps) => (
-  <div className={clsx("bg-white/5 border border-white/10 rounded-xl relative", className)}>
+export const InfoCard = ({ title, icon, children, className, onEdit, isPulsing }: InfoCardProps) => (
+  <div className={clsx("bg-white/5 border border-white/10 rounded-xl relative transition-all", className)}>
     <div className="flex justify-between items-center px-4 pt-4 pb-2">
       <h3 className="text-sm font-semibold text-brand-text-muted flex items-center gap-2">
-        {icon}
+        <span className={clsx(isPulsing && "animate-pulse text-cyan-400")}>
+            {icon}
+        </span>
         {title}
       </h3>
       {onEdit && (

@@ -113,9 +113,11 @@ export default function NudgesPage() {
     // Fetch scheduled messages only when that tab is active
     useEffect(() => {
         if (activeTab === 'scheduled') {
+            // Fetch both in parallel to ensure data consistency
             refetchScheduled();
+            fetchClients();
         }
-    }, [activeTab, refetchScheduled]);
+    }, [activeTab, refetchScheduled, fetchClients]);
 
     const handleAction = async (briefing: CampaignBriefing, action: 'dismiss' | 'send') => {
         try {

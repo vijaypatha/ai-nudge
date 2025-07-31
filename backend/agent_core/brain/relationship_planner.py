@@ -6,12 +6,48 @@
 import re
 import logging
 from datetime import datetime, timedelta
+import pytz
 from data import crm as crm_service
 from data.models.user import User
 from data.models.client import Client
 from data.models.message import ScheduledMessage, MessageStatus
 from workflow.relationship_playbooks import VERTICAL_LEGACY_PLAYBOOKS_REGISTRY
 from agent_core.agents import conversation as conversation_agent
+
+def _get_scheduled_datetime(
+    base_date: datetime,
+    user_timezone_str: str,
+    offset_days: int = 0
+) -> datetime:
+    """
+    Calculates a scheduled datetime for 10:30 AM in the user's local timezone,
+    then converts it to UTC for storage.
+    """
+    try:
+        user_tz = pytz.timezone(user_timezone_str)
+    except pytz.UnknownTimeZoneError:
+        logging.warning(f"PLANNER: Unknown timezone '{user_timezone_str}'. Defaulting to 'America/New_York'.")
+        user_tz = pytz.timezone("America/New_York")
+
+    # Start with the base date and apply the offset
+    target_date = base_date + timedelta(days=offset_days)
+
+    # Create a naive datetime for 10:30 AM on the target date
+    naive_dt = datetime(
+        year=target_date.year,
+        month=target_date.month,
+        day=target_date.day,
+        hour=10,
+        minute=30
+    )
+
+    # Localize the naive datetime to the user's timezone
+    local_dt = user_tz.localize(naive_dt)
+
+    # Convert the localized time to UTC for storage
+    utc_dt = local_dt.astimezone(pytz.utc)
+    logging.info(f"PLANNER: Calculated schedule. Local: {local_dt.isoformat()}, UTC: {utc_dt.isoformat()}")
+    return utc_dt
 
 # --- NEW: This function finds ALL date-based events, not just the first one. ---
 def _parse_all_personal_events_from_notes(notes: list[str]) -> list[tuple[str, datetime]]:
@@ -97,28 +133,15 @@ async def plan_relationship_campaign(client: Client, user: User):
         logging.warning(f"PLANNER: No legacy playbooks found for vertical '{user.vertical}'. Aborting.")
         return
 
-    # --- STEP 1: Identify all touchpoint IDs this planner is responsible for. ---
-    managed_touchpoint_ids = []
-    for playbook in playbooks_for_vertical:
-        for touchpoint in playbook.get("touchpoints", []):
-            if touchpoint.get("id"):
-                managed_touchpoint_ids.append(touchpoint.get("id"))
+    managed_touchpoint_ids = [tp.get("id") for pb in playbooks_for_vertical for tp in pb.get("touchpoints", []) if tp.get("id")]
 
-    # --- STEP 2: Call the new, precise deletion function. ---
-    # This ONLY deletes pending messages that were created from the IDs above,
-    # leaving all other scheduled messages (e.g., from conversations) untouched.
-    crm_service.delete_scheduled_messages_by_touchpoint_ids(
-        client_id=client.id, 
-        user_id=user.id, 
-        touchpoint_ids=managed_touchpoint_ids
-    )
+    crm_service.delete_scheduled_messages_by_touchpoint_ids(client.id, user.id, managed_touchpoint_ids)
 
-    # --- STEP 3: Proceed with the existing logic to schedule new messages. ---
     notes_for_parsing = [client.notes] if client.notes else []
     all_client_tags = (client.ai_tags or []) + (client.user_tags or [])
-
     all_parsed_events = _parse_all_personal_events_from_notes(notes_for_parsing)
     custom_frequency_days = _parse_custom_frequency(notes_for_parsing)
+    user_timezone = user.timezone or 'America/New_York'
 
     for playbook in playbooks_for_vertical:
         triggers = playbook.get("triggers", [])
@@ -127,20 +150,23 @@ async def plan_relationship_campaign(client: Client, user: User):
 
         for touchpoint in playbook.get("touchpoints", []):
             event_type = touchpoint.get("event_type")
+            now_in_user_tz = datetime.now(pytz.timezone(user_timezone))
 
             if event_type == "personal_event":
-                for event_name, scheduled_date in all_parsed_events:
-                    handled_events = touchpoint.get("handled_events", [])
-                    if event_name in handled_events:
-                        logging.info(f"PLANNER: Found matching rule '{touchpoint.get('name')}' for event '{event_name}'. Scheduling message.")
-                        if scheduled_date < datetime.now():
-                            scheduled_date = scheduled_date.replace(year=datetime.now().year + 1)
-                        await _schedule_message_from_touchpoint(client, user, touchpoint, scheduled_date, event_name)
+                for event_name, event_dt in all_parsed_events:
+                    if event_name in touchpoint.get("handled_events", []):
+                        target_date = event_dt.replace(year=now_in_user_tz.year)
+                        if target_date.date() < now_in_user_tz.date():
+                            target_date = target_date.replace(year=now_in_user_tz.year + 1)
+
+                        scheduled_utc = _get_scheduled_datetime(target_date, user_timezone)
+                        await _schedule_message_from_touchpoint(client, user, touchpoint, scheduled_utc, event_name)
 
             elif event_type == "recurring" and custom_frequency_days:
-                scheduled_date = datetime.now() + timedelta(days=custom_frequency_days)
-                await _schedule_message_from_touchpoint(client, user, touchpoint, scheduled_date, "Custom Check-in")
+                scheduled_utc = _get_scheduled_datetime(now_in_user_tz, user_timezone, offset_days=custom_frequency_days)
+                await _schedule_message_from_touchpoint(client, user, touchpoint, scheduled_utc, "Custom Check-in")
 
             elif event_type == "date_offset":
-                scheduled_date = datetime.now() + timedelta(days=touchpoint["offset_days"])
-                await _schedule_message_from_touchpoint(client, user, touchpoint, scheduled_date, touchpoint.get("name", "check-in"))
+                offset = touchpoint.get("offset_days", 0)
+                scheduled_utc = _get_scheduled_datetime(now_in_user_tz, user_timezone, offset_days=offset)
+                await _schedule_message_from_touchpoint(client, user, touchpoint, scheduled_utc, touchpoint.get("name", "check-in"))

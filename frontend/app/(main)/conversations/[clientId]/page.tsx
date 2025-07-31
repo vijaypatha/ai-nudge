@@ -46,19 +46,19 @@ interface MessageComposerHandle {
 
 export default function ConversationPage({ params }: ConversationPageProps) {
     const { clientId } = params;
-    const { user, api, token, properties, updateClientInList, refetchScheduledMessagesForClient, refreshConversations } = useAppContext();
+    const { user, api, token, properties, socket, updateClientInList, refetchScheduledMessagesForClient, refreshConversations } = useAppContext();
 
     const router = useRouter();
-    
+
     const [pageState, setPageState] = useState<'loading' | 'error' | 'loaded'>('loading');
     const [selectedClient, setSelectedClient] = useState<Client | null>(null);
     const [conversationData, setConversationData] = useState<Omit<ConversationData, 'display_config'> | null>(null);
     const [displayConfig, setDisplayConfig] = useState<ConversationDisplayConfig | null>(null);
-    const ws = useRef<WebSocket | null>(null);
     const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
     const [isSending, setIsSending] = useState(false);
     const [isPlanProcessing, setIsPlanProcessing] = useState(false);
     const [isPlanSuccess, setIsPlanSuccess] = useState(false);
+    const [isPlanUpdating, setIsPlanUpdating] = useState(false);
     
     const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
     const [composerContent, setComposerContent] = useState('');
@@ -132,44 +132,33 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         fetchClientAndConversation();
     }, [clientId, api, fetchConversationData, router]);
 
-    const handlersRef = useRef({ fetchConversationData, refreshConversations });
-
     useEffect(() => {
-        handlersRef.current = { fetchConversationData, refreshConversations };
-    }, [fetchConversationData, refreshConversations]);
-
-    useEffect(() => {
-        if (!clientId || !token) return;
-
-        const wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8001';
-        const wsUrl = `${wsBaseUrl}/api/ws/${clientId}?token=${token}`;
-
-        console.log(`WS: Attempting to connect to ${wsUrl}`);
-        ws.current = new WebSocket(wsUrl);
-
-        ws.current.onopen = () => console.log(`WS: Connection established for client ${clientId}`);
-
-        ws.current.onmessage = (event) => {
+        if (!socket) return;
+    
+        const handleSocketMessage = (event: MessageEvent) => {
             try {
                 const data = JSON.parse(event.data);
-                if ((data.type === 'NEW_MESSAGE' || data.type === 'MESSAGE_SENT') && data.clientId === clientId) {
-                    handlersRef.current.fetchConversationData(clientId);
-                    handlersRef.current.refreshConversations();
-                } else if (data.type === 'INTEL_UPDATED' && data.clientId === clientId) {
-                    handlersRef.current.fetchConversationData(clientId);
+    
+                // Listen for the specific event from the backend
+                if (data.event === 'PLAN_UPDATED' && data.clientId === clientId) {
+                    console.log(`PLAN_UPDATED event received for client ${clientId}. Refreshing data.`);
+                    setIsPlanUpdating(true); // Turn on the pulse
+                    fetchConversationData(clientId); // Re-fetch all conversation data including the plan
+    
+                    // Turn off the pulse after a few seconds
+                    setTimeout(() => setIsPlanUpdating(false), 5000);
                 }
             } catch (e) {
                 console.error('WS: Error parsing message data', e);
             }
         };
-
-        ws.current.onerror = (err) => console.error(`WS: Error for client ${clientId}:`, err);
-        ws.current.onclose = (event) => console.log(`WS: Connection closed for client ${clientId}. Code: ${event.code}`);
-
+    
+        socket.addEventListener('message', handleSocketMessage);
+    
         return () => {
-            if (ws.current) ws.current.close();
+            socket.removeEventListener('message', handleSocketMessage);
         };
-    }, [clientId, token]);
+    }, [socket, clientId, fetchConversationData]);
 
     const handleSendMessage = useCallback(async (content: string) => {
         if (!content.trim() || !selectedClient || isSending) return; // Prevent multiple sends
@@ -233,8 +222,9 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     const handleClientUpdate = useCallback((updatedClient: Client) => {
         setSelectedClient(updatedClient);
         updateClientInList(updatedClient);
-        if (selectedClient) fetchConversationData(selectedClient.id);
-    }, [updateClientInList, fetchConversationData, selectedClient]);
+        // Directly fetch data to ensure UI is always updated after a save.
+        fetchConversationData(updatedClient.id);
+    }, [updateClientInList, fetchConversationData]);
     
     const handleCoPilotActionSuccess = useCallback(() => {
         if (selectedClient) fetchConversationData(selectedClient.id);
@@ -266,6 +256,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                 onDismissPlan={(planId) => handlePlanAction('dismiss', planId)}
                 isProcessing={isPlanProcessing}
                 isSuccess={isPlanSuccess}
+                isPlanUpdating={isPlanUpdating} // Pass the state down
                 onViewScheduled={() => router.push('/nudges?tab=scheduled')}
                 displayConfig={displayConfig}
             />

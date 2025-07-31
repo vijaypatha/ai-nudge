@@ -26,11 +26,12 @@ interface RelationshipCampaignCardProps {
   onDismissPlan: (planId: string) => void;
   isProcessing: boolean;
   isSuccess: boolean;
+  isPlanUpdating?: boolean; // New prop to receive the pulse trigger
   onViewScheduled: () => void;
   displayConfig: ConversationDisplayConfig | null; // Expect the config
 }
 
-export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDismissPlan, isProcessing, isSuccess, onViewScheduled, displayConfig }: RelationshipCampaignCardProps) => {
+export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDismissPlan, isProcessing, isSuccess, isPlanUpdating, onViewScheduled, displayConfig }: RelationshipCampaignCardProps) => {
   const [editingMessage, setEditingMessage] = useState<ScheduledMessage | null>(null);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
 
@@ -92,7 +93,7 @@ export const RelationshipCampaignCard = ({ plan, messages, onApprovePlan, onDism
         />
       )}
       
-      <InfoCard title={config.title} icon={statusIcon}>
+      <InfoCard title={config.title} icon={statusIcon} isPulsing={isPlanUpdating}>
         {isSuccess && (
             <div className="p-3 -m-2 rounded-lg bg-green-600/10 text-center animate-fade-in">
                 <div className="flex items-center justify-center gap-2 font-semibold text-green-300">

@@ -15,6 +15,7 @@ from data.models.client import Client, ClientCreate, ClientUpdate, ClientTagUpda
 from data.models.message import ScheduledMessage
 from data import crm as crm_service
 from agent_core import audience_builder
+from api.websocket_manager import manager as websocket_manager
 from celery_tasks import initial_data_fetch_for_user_task
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
@@ -244,8 +245,8 @@ async def update_client_details(
     current_user: User = Depends(get_current_user_from_token)
 ):
     """
-    Updates a client's details and, if notes were changed,
-    automatically triggers the relationship planner.
+    Updates a client's details and, if notes or preferences were changed,
+    automatically triggers the relationship planner and notifies the frontend.
     """
     logging.info(f"API: Received PUT request for client {client_id} with payload: {client_data.model_dump(exclude_unset=True)}")
 
@@ -257,17 +258,23 @@ async def update_client_details(
     if not updated_client:
         raise HTTPException(status_code=404, detail="Client not found.")
 
-    # --- AUTOMATIC TRIGGER (DEFINITIVE FIX) ---
-    # The API endpoint now orchestrates the trigger, which is more reliable.
+    # If notes or preferences were updated, regenerate the relationship plan.
     if notes_were_updated:
         try:
             from agent_core.brain import relationship_planner
             logging.info(f"API: Notes updated, automatically triggering relationship planner for client {client_id}")
-            # We can run this directly as the API call can wait for the planning to finish.
             await relationship_planner.plan_relationship_campaign(client=updated_client, user=current_user)
+
+            # --- ADDED: NOTIFY FRONTEND VIA WEBSOCKET ---
+            # After the plan is created, send a real-time notification to the user.
+            await websocket_manager.broadcast_to_user(
+                user_id=str(current_user.id),
+                data={"event": "PLAN_UPDATED", "clientId": str(client_id)}
+            )
+            logging.info(f"API: Broadcasted PLAN_UPDATED event for client {client_id} to user {current_user.id}")
+
         except Exception as e:
-            # Log the error but don't fail the entire request, as the client was still updated.
-            logging.error(f"API: Failed to automatically trigger relationship planner for client {client_id}: {e}")
+            logging.error(f"API: Failed to trigger relationship planner or broadcast for client {client_id}: {e}")
 
     return updated_client
 
