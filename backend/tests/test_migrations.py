@@ -79,10 +79,10 @@ sqlalchemy.url = sqlite:///{temp_db_path}
             if os.path.exists(temp_alembic_ini.name):
                 os.unlink(temp_alembic_ini.name)
 
-    def test_current_schema_matches_migrations(self):
+    def test_current_schema_matches_migrations(self, session: Session):
         """Test that the current database schema matches what migrations would create"""
-        # Get the current database schema
-        inspector = inspect(engine)
+        # Get the current database schema using session's engine
+        inspector = inspect(session.bind)
         current_tables = inspector.get_table_names()
         
         # Define the expected tables based on our models
@@ -161,12 +161,12 @@ sqlalchemy.url = sqlite:///{temp_db_path}
             if down_revision not in revision_map:
                 pytest.fail(f"Migration {revision} references non-existent down_revision {down_revision}")
 
-    def test_production_schema_compatibility(self):
+    def test_production_schema_compatibility(self, session: Session):
         """Test that the current schema is compatible with production requirements"""
         # This test ensures that the schema supports all production features
         
-        # Test that all required fields exist
-        inspector = inspect(engine)
+        # Test that all required fields exist using session's engine
+        inspector = inspect(session.bind)
         
         # Check User table has required fields
         user_columns = [col['name'] for col in inspector.get_columns('user')]
@@ -186,9 +186,9 @@ sqlalchemy.url = sqlite:///{temp_db_path}
         for field in required_resource_fields:
             assert field in resource_columns, f"Resource table missing required field: {field}"
 
-    def test_foreign_key_integrity(self):
+    def test_foreign_key_integrity(self, session: Session):
         """Test that foreign key relationships are properly defined"""
-        inspector = inspect(engine)
+        inspector = inspect(session.bind)
         
         # Check that foreign keys exist
         foreign_keys = inspector.get_foreign_keys('client')
@@ -202,9 +202,9 @@ sqlalchemy.url = sqlite:///{temp_db_path}
         assert message_user_fk, "Message table missing foreign key to User table"
         assert message_client_fk, "Message table missing foreign key to Client table"
 
-    def test_indexes_for_performance(self):
+    def test_indexes_for_performance(self, session: Session):
         """Test that critical indexes exist for performance"""
-        inspector = inspect(engine)
+        inspector = inspect(session.bind)
         
         # Check for critical indexes
         user_indexes = inspector.get_indexes('user')
@@ -228,9 +228,9 @@ sqlalchemy.url = sqlite:///{temp_db_path}
             index_names = [idx['name'] for idx in table_indexes]
             assert any(index_name in name for name in index_names), f"Missing critical index: {index_name}"
 
-    def test_json_field_support(self):
+    def test_json_field_support(self, session: Session):
         """Test that JSON fields are properly configured"""
-        inspector = inspect(engine)
+        inspector = inspect(session.bind)
         
         # Check that JSON fields exist and are properly typed
         user_columns = inspector.get_columns('user')

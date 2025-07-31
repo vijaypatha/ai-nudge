@@ -31,7 +31,8 @@ class TestDatabaseSchema:
     def test_all_models_can_be_created(self, session: Session):
         """Test that all SQLModel tables can be created without errors"""
         # This test ensures all models are properly defined and can be created
-        inspector = inspect(engine)
+        # Use the session's engine to ensure we're looking at the right database
+        inspector = inspect(session.bind)
         tables = inspector.get_table_names()
 
         # Verify all expected tables exist
@@ -181,7 +182,8 @@ class TestDatabaseSchema:
 
     def test_indexes_exist(self, session: Session):
         """Test that important indexes exist for performance"""
-        inspector = inspect(engine)
+        # Use the session's engine to ensure we're looking at the right database
+        inspector = inspect(session.bind)
 
         # Check for important indexes
         user_indexes = inspector.get_indexes('user')
@@ -210,8 +212,8 @@ class TestDatabaseSchema:
         # This test ensures that if we ran migrations from scratch,
         # we'd get the same schema as create_all()
 
-        # Get current table definitions
-        inspector = inspect(engine)
+        # Get current table definitions using session's engine
+        inspector = inspect(session.bind)
         current_tables = inspector.get_table_names()
 
         # Verify all expected tables exist
