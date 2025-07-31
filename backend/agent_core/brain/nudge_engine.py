@@ -254,15 +254,22 @@ async def rescore_client_against_events(client_id: uuid.UUID, user_id: uuid.UUID
     """
     Re-evaluates a single client against recent, active events and updates their
     nudges (CampaignBriefings). This is triggered when a client's profile changes.
+    --- MODIFIED: Manages a single session to ensure data consistency. ---
     """
     logging.info(f"NUDGE_ENGINE (RE-SCORE): Starting re-score for client {client_id}.")
     from data.database import engine
     
     with Session(engine) as session:
-        client = crm_service.get_client_by_id(client_id, user_id)
-        user = crm_service.get_user_by_id(user_id)
+        # First, clear any old, now-irrelevant draft nudges for this client.
+        crm_service.delete_draft_campaigns_for_client(client_id, user_id, session)
+        
+        # Now fetch the client and user using the SAME session to guarantee we have the latest data.
+        client = crm_service.get_client_by_id(client_id, user_id, session=session)
+        user = crm_service.get_user_by_id(user_id, session=session)
+        
         if not client or not user:
             logging.error(f"NUDGE_ENGINE (RE-SCORE): Client {client_id} or User {user_id} not found.")
+            session.rollback() # Rollback if essential data is missing
             return
 
         vertical_config = VERTICAL_CONFIGS.get(user.vertical)
@@ -322,12 +329,12 @@ async def rescore_client_against_events(client_id: uuid.UUID, user_id: uuid.UUID
                         audience.append(new_match_data.model_dump(mode='json'))
                     
                     draft_nudge_for_event.matched_audience = audience
-                    flag_modified(draft_nudge_for_event, "matched_audience") # EXPLICITLY MARK AS MODIFIED
+                    flag_modified(draft_nudge_for_event, "matched_audience")
                     session.add(draft_nudge_for_event)
                 else:
                     await _create_campaign_from_event(event, user, resource, [new_match_data], db_session=session)
             
-            else: # Score is below threshold, perform cleanup
+            else:
                 if draft_nudge_for_event:
                     initial_audience = list(draft_nudge_for_event.matched_audience)
                     updated_audience = [
@@ -338,8 +345,9 @@ async def rescore_client_against_events(client_id: uuid.UUID, user_id: uuid.UUID
                     if len(updated_audience) < len(initial_audience):
                         logging.info(f"NUDGE_ENGINE (CLEANUP): Removing client {client.id} from nudge {draft_nudge_for_event.id}.")
                         draft_nudge_for_event.matched_audience = updated_audience
-                        flag_modified(draft_nudge_for_event, "matched_audience") # EXPLICITLY MARK AS MODIFIED
+                        flag_modified(draft_nudge_for_event, "matched_audience")
                         session.add(draft_nudge_for_event)
-
+        
+        # A single commit at the end handles all additions, updates, and deletions.
         session.commit()
         logging.info(f"NUDGE_ENGINE (RE-SCORE): Finished re-scoring for client {client_id}.")

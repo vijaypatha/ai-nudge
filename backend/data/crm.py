@@ -20,7 +20,7 @@ from agent_core.deduplication.deduplication_engine import find_strong_duplicate
 from .models.client import Client, ClientUpdate, ClientCreate
 from .models.event import MarketEvent
 from .models.user import User, UserUpdate
-from .models.resource import Resource, ResourceCreate, ContentResource, ContentResourceCreate, ContentResourceUpdate
+from .models.resource import Resource, ResourceCreate, ContentResource, ContentResourceCreate, ContentResourceUpdate, ResourceStatus
 from .models.campaign import CampaignBriefing, CampaignUpdate, CampaignStatus
 from .models.message import ScheduledMessage, Message, MessageStatus, MessageDirection, ScheduledMessageCreate
 import uuid
@@ -32,10 +32,19 @@ import os
 
 # --- User Functions ---
 
-def get_user_by_id(user_id: uuid.UUID) -> Optional[User]:
-    """Retrieves a single user by their unique ID."""
-    with Session(engine) as session:
-        return session.get(User, user_id)
+def get_user_by_id(user_id: uuid.UUID, session: Optional[Session] = None) -> Optional[User]:
+    """
+    Retrieves a single user by their unique ID.
+    Can operate within a provided session or create its own.
+    """
+    def _get(db_session: Session):
+        return db_session.get(User, user_id)
+
+    if session:
+        return _get(session)
+    else:
+        with Session(engine) as new_session:
+            return _get(new_session)
     
 def get_user_by_twilio_number(phone_number: str) -> Optional[User]:
     """Retrieves a single user by their assigned Twilio phone number."""
@@ -142,11 +151,20 @@ async def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate)
             
         return target_client, is_new
 
-def get_client_by_id(client_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Client]:
-    """Retrieves a single client by their unique ID, ensuring it belongs to the user."""
-    with Session(engine) as session:
+def get_client_by_id(client_id: uuid.UUID, user_id: uuid.UUID, session: Optional[Session] = None) -> Optional[Client]:
+    """
+    Retrieves a single client by their unique ID, ensuring it belongs to the user.
+    Can operate within a provided session or create its own.
+    """
+    def _get(db_session: Session):
         statement = select(Client).where(Client.id == client_id, Client.user_id == user_id)
-        return session.exec(statement).first()
+        return db_session.exec(statement).first()
+
+    if session:
+        return _get(session)
+    else:
+        with Session(engine) as new_session:
+            return _get(new_session)
 
 def get_clients_by_ids(client_ids: List[UUID], user_id: UUID) -> List[Client]:
     """
@@ -230,6 +248,24 @@ async def delete_client(client_id: UUID, user_id: UUID) -> bool:
         
         logging.info(f"CRM: Deleted client {client_id} and all associated data for user {user_id}")
         return True
+
+def delete_draft_campaigns_for_client(client_id: UUID, user_id: UUID, session: Session) -> int:
+    """
+    Deletes all campaign briefings for a specific client that are in 'draft' status.
+    This is used to clear out old, irrelevant nudges before a client is re-scored.
+    """
+    statement = delete(CampaignBriefing).where(
+        CampaignBriefing.client_id == client_id,
+        CampaignBriefing.user_id == user_id,
+        CampaignBriefing.status == CampaignStatus.DRAFT
+    )
+    results = session.exec(statement)
+    deleted_count = results.rowcount
+    
+    if deleted_count > 0:
+        logging.info(f"NUDGE_ENGINE (CLEANUP): Deleted {deleted_count} stale draft nudge(s) for client {client_id}.")
+        
+    return deleted_count
 
 def update_last_interaction(client_id: uuid.UUID, user_id: uuid.UUID, session: Optional[Session] = None) -> Optional[Client]:
     """
@@ -521,21 +557,25 @@ def get_active_events_in_range(lookback_days: int, session: Session) -> List[Mar
     """
     Retrieves all market events within a given lookback period that are linked
     to a resource that is still 'active'.
+    --- DECISIVE FIX: Correctly joins MarketEvent and Resource on entity_id ---
     """
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=lookback_days)
-    
-    active_resource_ids = session.exec(
-        select(Resource.id).where(Resource.status == 'active')
+
+    # Step 1: Get the entity_ids (e.g., ListingKeys) of all active resources.
+    # This is the corrected logic.
+    active_resource_entity_ids = session.exec(
+        select(Resource.entity_id).where(Resource.status == ResourceStatus.ACTIVE)
     ).all()
 
-    if not active_resource_ids:
+    if not active_resource_entity_ids:
         return []
 
+    # Step 2: Use those external entity_ids to find all corresponding market events.
     statement = (
         select(MarketEvent)
         .where(
             MarketEvent.created_at >= cutoff_date,
-            MarketEvent.entity_id.in_(active_resource_ids)
+            MarketEvent.entity_id.in_(active_resource_entity_ids)
         )
     )
     return session.exec(statement).all()

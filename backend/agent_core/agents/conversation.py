@@ -155,13 +155,7 @@ async def draft_outbound_campaign_message(
     """
     Uses a live LLM to draft a personalized outbound message for a campaign.
     This function is now vertical-agnostic by operating on a generic Resource.
-
-    **FIX DOCUMENTATION:**
-    - This function was failing to generate personalized messages for 'content_suggestion' events.
-    - The logic checked for a `key_intel` dictionary, which was no longer being passed by the calling service.
-    - The fix involves updating the condition to check for the `resource` object instead and extracting the necessary
-      content details (title, topic, url) from `resource.attributes`.
-    - This ensures the high-quality, specific prompt is used, solving the issue of generic messages.
+    --- MODIFIED: Added robust fallbacks for potentially null property attributes. ---
     """
     logging.info(f"CONVERSATION AGENT (OUTBOUND): Drafting message for event '{event_type}'...")
     style_prompt_addition = ""
@@ -169,34 +163,26 @@ async def draft_outbound_campaign_message(
         try:
             style_rules = json.dumps(realtor.ai_style_guide, indent=2)
             style_prompt_addition = f"\n\nIMPORTANT: You MUST follow these style rules to match the user's voice:\n{style_rules}"
-            logging.info(f"CONVERSATION AGENT: Applying style guide for user {realtor.id}")
         except Exception as e:
             logging.error(f"CONVERSATION AGENT: Could not apply style guide. Error: {e}")
 
     professional_title = PROFESSIONAL_TITLES.get(realtor.vertical, "professional")
     base_prompt_intro = f"You are an expert assistant for a {professional_title}.{style_prompt_addition}"
     prompt = ""
-    # Initialize final_draft to prevent potential UnboundLocalError
     final_draft = ""
 
-    # FIX: The primary condition is changed from checking `key_intel` to checking `resource`.
-    # This aligns with the data actually being passed to the function, ensuring this block is executed.
     if event_type == "content_suggestion" and resource and resource.attributes:
         attrs = resource.attributes
         client_name = matched_audience[0].client_name if matched_audience else 'there'
         match_reason = matched_audience[0].match_reasons[0] if matched_audience and matched_audience[0].match_reasons else 'based on our conversations'
-
-        # FIX: Extract content details directly from `resource.attributes` instead of the non-existent `key_intel`.
-        topic = attrs.get('topic', 'a relevant topic') # Fallback for safety
-        content_title = attrs.get('title') # The presence of a title is a good indicator of valid content
+        topic = attrs.get('topic', 'a relevant topic')
+        content_title = attrs.get('title')
         content_url = attrs.get('url')
 
-        # If there's no title, we can't generate a good message. Fallback to a safe, generic message.
         if not content_title:
              logging.warning(f"CONVERSATION AGENT: 'content_suggestion' resource for user {realtor.id} is missing a title. Aborting specific message generation.")
              return "Hi [Client Name], I came across some information I thought you might find interesting. Let me know if you'd like me to send it over."
 
-        # This is the high-quality prompt that was being skipped before the fix.
         base_message_prompt = f"""
         {base_prompt_intro}
         You are an empathetic, supportive, and professional therapist drafting a personalized SMS message to your client, {client_name}.
@@ -226,51 +212,37 @@ async def draft_outbound_campaign_message(
         if llm_response:
             final_draft = llm_response.strip()
         else:
-            # Provide a structured fallback if the LLM fails, still using specific content details.
             final_draft = f"Hi {client_name}, I came across an article about {topic} titled \"{content_title}\" that I thought might be helpful."
         
-        # Append the URL after the message is drafted, if it exists.
         if content_url:
             final_draft = f"{final_draft}\n\nHope you find it helpful: {content_url}"
 
-        # Return the final message and exit the function, as the 'content_suggestion' case is fully handled.
         return final_draft
 
-    elif event_type == "recency_nudge":
-        client_name = matched_audience[0].client_name
-        prompt = f"""
-        {base_prompt_intro}
-        A 'recency_nudge' event has occurred. This means the client, {client_name}, hasn't been contacted in a while.
-        Your task is to draft a short, friendly, and low-pressure SMS message to check in.
-        - Start with a warm greeting.
-        - Mention it's been a little while and you were thinking of them.
-        - Ask a simple, open-ended question like "How have you been?" or "How are things?".
-        - Keep it brief and casual. Avoid sounding salesy or demanding.
-        - The goal is to simply restart the conversation.
-        """
     elif event_type in ["new_listing", "listing_announcement"]:
-        # Extract key property details for concise messaging
         attrs = resource.attributes if resource else {}
-        address = attrs.get("UnparsedAddress", "New Property")
+        address = attrs.get("UnparsedAddress", "a new property")
         price = attrs.get("ListPrice")
-        beds = attrs.get("BedroomsTotal")
-        baths = attrs.get("BathroomsTotalInteger")
+        beds = attrs.get("BedroomsTotal", "N/A")
+        baths = attrs.get("BathroomsTotalInteger", "N/A")
         sqft = attrs.get("LivingArea")
-        remarks = attrs.get("PublicRemarks", "")
         
-        # Check if photos are available
+        # --- THIS IS THE FIX for the TypeError ---
+        # Provide a safe fallback for remarks BEFORE using it in the f-string.
+        remarks = attrs.get("PublicRemarks") or ""
+
+        price_display = f"${price:,.0f}" if isinstance(price, (int, float)) else "Contact for pricing"
+        sqft_display = f"{sqft:,.0f}" if isinstance(sqft, (int, float)) else "Contact for details"
+        
         media = attrs.get("Media", [])
         photo_count = len([m for m in media if m.get("MediaCategory") == "Photo"])
-        has_photos = photo_count > 0
         
-        # Get client context for personalization
         client_context = ""
         if matched_audience:
             primary_client = matched_audience[0]
             client_name = primary_client.client_name
             match_reasons = primary_client.match_reasons or []
             
-            # Build client context based on match reasons
             if match_reasons:
                 context_parts = []
                 for reason in match_reasons:
@@ -297,8 +269,8 @@ async def draft_outbound_campaign_message(
         
         Property Details:
         - Address: {address}
-        - Price: ${price:,} if price else "Contact for pricing"
-        - Beds: {beds} | Baths: {baths} | SqFt: {sqft:,} if sqft else "Contact for details"
+        - Price: {price_display}
+        - Beds: {beds} | Baths: {baths} | SqFt: {sqft_display}
         - Photos: {photo_count} photos available
         - Description: {remarks[:100]}...
         
@@ -313,13 +285,23 @@ async def draft_outbound_campaign_message(
         6. Make it personal based on client context - don't use generic "new listing alert"
         
         Examples based on context:
-        - For bedroom preferences: "Hi [Client Name], found a {beds}bd home that matches your needs! {address} - ${price:,}. Perfect size for your family."
-        - For price range: "Hi [Client Name], this {address} property fits your budget perfectly! {beds}bd/{baths}ba, ${price:,}. Worth checking out."
-        - For location: "Hi [Client Name], new property in your preferred area! {address} - {beds}bd/{baths}ba, ${price:,}. Great location match."
-        - Generic: "Hi [Client Name], thought of you for this {address} property! {beds}bd/{baths}ba, ${price:,}. Let me know if you'd like to see it."
+        - For bedroom preferences: "Hi [Client Name], found a {beds}bd home that matches your needs! {address} - {price_display}. Perfect size for your family."
+        - For price range: "Hi [Client Name], this {address} property fits your budget perfectly! {beds}bd/{baths}ba, {price_display}. Worth checking out."
+        - For location: "Hi [Client Name], new property in your preferred area! {address} - {beds}bd/{baths}ba, {price_display}. Great location match."
+        - Generic: "Hi [Client Name], thought of you for this {address} property! {address} - {beds}bd/{baths}ba, {price_display}. Let me know if you'd like to see it."
         """
-    # This `elif` block previously caused the bug. By handling `content_suggestion` explicitly above,
-    # it now correctly serves as a fallback for other event types that have a resource but no special logic.
+    elif event_type == "recency_nudge":
+        client_name = matched_audience[0].client_name
+        prompt = f"""
+        {base_prompt_intro}
+        A 'recency_nudge' event has occurred. This means the client, {client_name}, hasn't been contacted in a while.
+        Your task is to draft a short, friendly, and low-pressure SMS message to check in.
+        - Start with a warm greeting.
+        - Mention it's been a little while and you were thinking of them.
+        - Ask a simple, open-ended question like "How have you been?" or "How are things?".
+        - Keep it brief and casual. Avoid sounding salesy or demanding.
+        - The goal is to simply restart the conversation.
+        """
     elif resource:
         prompt = f"""
         {base_prompt_intro}
@@ -328,7 +310,6 @@ async def draft_outbound_campaign_message(
         Draft a generic but relevant message to share this with a client.
         """
     else:
-        # Fallback for events without a resource
         prompt = f"A '{event_type}' event occurred. Draft a generic check-in message for a client."
 
     llm_response = await openai_service.generate_text_completion(
@@ -339,23 +320,7 @@ async def draft_outbound_campaign_message(
         model="gpt-4o-mini"
     )
 
-    final_message = llm_response.strip() if llm_response else ""
-    
-    # For property listings, append photo information if available
-    if event_type == "listing_announcement" and resource and resource.attributes:
-        attrs = resource.attributes
-        media = attrs.get("Media", [])
-        photo_count = len([m for m in media if m.get("MediaCategory") == "Photo"])
-        
-        if photo_count > 0:
-            # Make photo link more contextual
-            if photo_count > 1:
-                photo_text = f"\n\n📸 View all {photo_count} photos to see more details"
-            else:
-                photo_text = f"\n\n📸 View the photo to see more details"
-            final_message += photo_text
-    
-    return final_message
+    return llm_response.strip() if llm_response else ""
 
 
 

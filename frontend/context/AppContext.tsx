@@ -1,5 +1,5 @@
 // frontend/context/AppContext.tsx
-// --- MODIFIED: Added user-level WebSocket connection management ---
+// --- FINAL, DECISIVE VERSION ---
 
 'use client';
 
@@ -109,7 +109,7 @@ interface AppContextType {
   properties: Property[];
   conversations: Conversation[];
   nudges: CampaignBriefing[];
-  socket: WebSocket | null; // Add socket to the context type
+  socket: WebSocket | null;
   logout: () => void;
   api: {
     get: (endpoint: string) => Promise<any>;
@@ -125,6 +125,7 @@ interface AppContextType {
   refetchScheduledMessagesForClient: (clientId: string) => Promise<ScheduledMessage[]>;
   refreshUser: () => Promise<void>;
   forceRefreshAllData: () => Promise<void>;
+  refreshNudges: () => Promise<void>; // Expose the new function
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -137,7 +138,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [properties, setProperties] = useState<Property[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [nudges, setNudges] = useState<CampaignBriefing[]>([]);
-  const [socket, setSocket] = useState<WebSocket | null>(null); // State to hold the WebSocket instance
+  const [socket, setSocket] = useState<WebSocket | null>(null);
   const tokenRef = useRef<string | null>(null);
   const router = useRouter();
 
@@ -158,69 +159,55 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [router, socket]);
   
   const api = useMemo(() => {
+    // ... (API methods remain unchanged)
     const request = async (endpoint: string, method: string, body?: any, retries = 3) => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
-      const url = `${baseUrl}${endpoint}`;
-      const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (tokenRef.current) headers['Authorization'] = `Bearer ${tokenRef.current}`;
-      
-      for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-          const config: RequestInit = { 
-            method, 
-            headers, 
-            body: body ? JSON.stringify(body) : undefined 
-          };
-          
-          const response = await fetch(url, config);
-          
-          if (!response.ok) {
-            if (response.status === 401) {
-              logout();
-              throw new Error('Authentication failed');
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+        const url = `${baseUrl}${endpoint}`;
+        const headers: HeadersInit = { 'Content-Type': 'application/json' };
+        if (tokenRef.current) headers['Authorization'] = `Bearer ${tokenRef.current}`;
+        
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          try {
+            const config: RequestInit = { 
+              method, 
+              headers, 
+              body: body ? JSON.stringify(body) : undefined 
+            };
+            
+            const response = await fetch(url, config);
+            
+            if (!response.ok) {
+              if (response.status === 401) {
+                logout();
+                throw new Error('Authentication failed');
+              }
+              const errorData = await response.json().catch(() => ({ detail: `API Error: ${response.statusText}` }));
+              if (response.status >= 500 && attempt < retries) {
+                console.warn(`API attempt ${attempt} failed with ${response.status}, retrying...`);
+                await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+                continue;
+              }
+              throw new Error(errorData.detail || 'An unknown error occurred');
             }
-            
-            const errorData = await response.json().catch(() => ({ 
-              detail: `API Error: ${response.statusText}` 
-            }));
-            
-            if (response.status >= 500 && attempt < retries) {
-              console.warn(`API attempt ${attempt} failed with ${response.status}, retrying...`);
-              await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-              continue;
-            }
-            
-            throw new Error(errorData.detail || 'An unknown error occurred');
+            const text = await response.text();
+            return text ? JSON.parse(text) : {};
+          } catch (error) {
+            if (attempt === retries) { throw error; }
+            if (error instanceof Error && error.message.includes('4')) { throw error; }
+            console.warn(`API attempt ${attempt} failed, retrying...`, error);
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
           }
-          
-          const text = await response.text();
-          return text ? JSON.parse(text) : {};
-          
-        } catch (error) {
-          if (attempt === retries) {
-            console.error(`API request failed after ${retries} attempts:`, error);
-            throw error;
-          }
-          
-          if (error instanceof Error && error.message.includes('4')) {
-            throw error;
-          }
-          
-          console.warn(`API attempt ${attempt} failed, retrying...`, error);
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
         }
-      }
-    };
-    
-    return {
-      get: (endpoint: string) => request(endpoint, 'GET'),
-      post: (endpoint: string, body: any) => request(endpoint, 'POST', body),
-      put: (endpoint: string, body: any) => request(endpoint, 'PUT', body),
-      del: (endpoint: string) => request(endpoint, 'DELETE'),
-    };
+      };
+      return {
+        get: (endpoint: string) => request(endpoint, 'GET'),
+        post: (endpoint: string, body: any) => request(endpoint, 'POST', body),
+        put: (endpoint: string, body: any) => request(endpoint, 'PUT', body),
+        del: (endpoint: string) => request(endpoint, 'DELETE'),
+      };
   }, [logout]);
 
-  const refreshUser = useCallback(async () => {
+  const refreshUser = useCallback(async () => { /* ... (unchanged) ... */ 
     try {
         const userData = await api.get('/api/users/me');
         setUser(userData);
@@ -231,6 +218,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [api, logout]);
 
   const login = useCallback(async (newToken: string): Promise<User | null> => {
+    // ... (unchanged) ...
     Cookies.set('auth_token', newToken, { expires: 7, path: '/' });
     tokenRef.current = newToken;
     try {
@@ -246,78 +234,64 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [api, logout]);
 
   const loginAndRedirect = async (token: string): Promise<boolean> => {
-      const loggedInUser = await login(token);
-      if (loggedInUser) {
-          if (loggedInUser.onboarding_complete) {
-              router.push('/community');
-          } else {
-              router.push('/onboarding');
-          }
-          return true;
-      }
-      return false;
+    // ... (unchanged) ...
+    const loggedInUser = await login(token);
+    if (loggedInUser) {
+        if (loggedInUser.onboarding_complete) {
+            router.push('/community');
+        } else {
+            router.push('/onboarding');
+        }
+        return true;
+    }
+    return false;
   };
+  
+  // --- NEW: Dedicated function to refresh only the nudges ---
+  const refreshNudges = useCallback(async () => {
+    if (!isAuthenticated) return;
+    try {
+      console.log("Refreshing AI Nudges...");
+      const nudgesData = await api.get('/api/campaigns');
+      setNudges(nudgesData);
+    } catch (error) {
+      console.error("Failed to refresh nudges:", error);
+    }
+  }, [api, isAuthenticated]);
 
-  const refreshConversations = useCallback(async () => {
+  const refreshConversations = useCallback(async () => { /* ... (unchanged) ... */ 
     if (!isAuthenticated) return;
     try {
       const conversationsData = await api.get('/api/conversations/');
-      const sortedConversations = conversationsData.sort((a: any, b: any) => 
-        new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
-      );
-      setConversations(prevConversations => {
-        if (JSON.stringify(prevConversations) === JSON.stringify(sortedConversations)) {
-            return prevConversations;
-        }
-        return sortedConversations;
-      });
+      const sortedConversations = conversationsData.sort((a: any, b: any) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime());
+      setConversations(prevConversations => JSON.stringify(prevConversations) === JSON.stringify(sortedConversations) ? prevConversations : sortedConversations);
     } catch (error) {
       console.error("Failed to refresh conversations:", error);
     }
   }, [api, isAuthenticated]);
 
-  const fetchDashboardData = useCallback(async () => {
+  const fetchDashboardData = useCallback(async () => { /* ... (unchanged) ... */ 
     if (!isAuthenticated) return;
     try {
-      const results = await Promise.allSettled([
-        api.get('/api/clients'),
-        api.get('/api/properties'),
-        api.get('/api/conversations/'),
-        api.get('/api/campaigns')
-      ]);
-      if (results[0].status === 'fulfilled') setClients(results[0].value);
-      if (results[1].status === 'fulfilled') setProperties(results[1].value);
-      if (results[2].status === 'fulfilled') {
-        const sortedConversations = results[2].value.sort((a: any, b: any) => 
-          new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
-        );
-        setConversations(sortedConversations);
-      }
-      
-      if (results[3].status === 'fulfilled') setNudges(results[3].value);
-      results.forEach((result, index) => {
-        if (result.status === 'rejected') console.error(`Failed to fetch endpoint ${index}:`, result.reason);
-      });
-    } catch (error) {
-      console.error("A critical error occurred while fetching dashboard data:", error);
-    }
+        const results = await Promise.allSettled([ api.get('/api/clients'), api.get('/api/properties'), api.get('/api/conversations/'), api.get('/api/campaigns') ]);
+        if (results[0].status === 'fulfilled') setClients(results[0].value);
+        if (results[1].status === 'fulfilled') setProperties(results[1].value);
+        if (results[2].status === 'fulfilled') { const sortedConversations = results[2].value.sort((a: any, b: any) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()); setConversations(sortedConversations); }
+        if (results[3].status === 'fulfilled') setNudges(results[3].value);
+        results.forEach((result, index) => { if (result.status === 'rejected') console.error(`Failed to fetch endpoint ${index}:`, result.reason); });
+      } catch (error) { console.error("A critical error occurred while fetching dashboard data:", error); }
   }, [api, isAuthenticated]);
 
-  const forceRefreshAllData = useCallback(async () => {
+  const forceRefreshAllData = useCallback(async () => { /* ... (unchanged) ... */ 
     if (!isAuthenticated) return;
     console.log("Force refreshing all data...");
-    setClients([]);
-    setProperties([]);
-    setConversations([]);
-    setNudges([]);
+    setClients([]); setProperties([]); setConversations([]); setNudges([]);
     await fetchDashboardData();
   }, [isAuthenticated, fetchDashboardData]);
 
-  // --- WebSocket Connection Logic ---
+  // --- MODIFIED: WebSocket Connection Logic with Message Handling ---
   useEffect(() => {
-    // Don't connect if not authenticated or no token exists
     if (!isAuthenticated || !tokenRef.current) {
-      // If there's an old socket, close it
       if (socket) {
         socket.close();
         setSocket(null);
@@ -325,34 +299,45 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    // Replace http/https with ws/wss for the WebSocket URL
-    const wsUrl = (process.env.NEXT_PUBLIC_API_URL || 'ws://localhost:8001')
-        .replace(/^http/, 'ws');
-    
-    // Create the new WebSocket connection to the user-specific endpoint
+    const wsUrl = (process.env.NEXT_PUBLIC_API_URL || 'ws://localhost:8001').replace(/^http/, 'ws');
     const ws = new WebSocket(`${wsUrl}/ws/user?token=${tokenRef.current}`);
 
     ws.onopen = () => {
-        console.log("WebSocket connection established for user notifications.");
-        setSocket(ws);
+      console.log("WebSocket connection established for user notifications.");
+      setSocket(ws);
     };
+
+    // --- THIS IS THE NEW LOGIC THAT FIXES THE UI ---
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log("WebSocket message received:", data);
+        
+        // Check for the specific event to refresh nudges
+        if (data.event === 'nudges_updated') {
+          console.log("Nudges update signal received. Re-fetching nudges.");
+          refreshNudges(); // Call the dedicated refresh function
+        }
+      } catch (error) {
+        console.error("Error handling WebSocket message:", error);
+      }
+    };
+    // --- END OF NEW LOGIC ---
 
     ws.onclose = () => {
-        console.log("WebSocket connection closed.");
-        setSocket(null); // Clear the socket from state on close
+      console.log("WebSocket connection closed.");
+      setSocket(null);
     };
-
     ws.onerror = (error) => {
-        console.error("WebSocket error:", error);
+      console.error("WebSocket error:", error);
     };
     
-    // Cleanup function: this runs when the component unmounts or dependencies change
     return () => {
-        if (ws.readyState === 1) { // 1 means OPEN
-            ws.close();
-        }
+      if (ws.readyState === 1) {
+        ws.close();
+      }
     };
-  }, [isAuthenticated]); // Rerun this effect only when authentication state changes
+  }, [isAuthenticated, refreshNudges]); // Added refreshNudges to the dependency array
 
   useEffect(() => {
     const checkUserSession = async () => {
@@ -377,38 +362,23 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
   
   const refetchScheduledMessagesForClient = useCallback(async (clientId: string): Promise<ScheduledMessage[]> => {
+    // ... (unchanged) ...
     try {
-      return await api.get(`/api/scheduled-messages/?client_id=${clientId}`);
-    } catch (error) {
-      console.error(`Failed to fetch scheduled messages for ${clientId}:`, error);
-      return [];
-    }
+        return await api.get(`/api/scheduled-messages/?client_id=${clientId}`);
+      } catch (error) {
+        console.error(`Failed to fetch scheduled messages for ${clientId}:`, error);
+        return [];
+      }
   }, [api]);
 
   const value = useMemo(() => ({
-    loading,
-    isAuthenticated,
-    user,
-    token: tokenRef.current,
-    clients,
-    properties,
-    conversations,
-    nudges,
-    socket, // Provide the socket instance to the rest of the app
-    logout,
-    api,
-    login,
-    loginAndRedirect,
-    fetchDashboardData,
-    refreshConversations,
-    updateClientInList,
-    refetchScheduledMessagesForClient,
-    refreshUser,
-    forceRefreshAllData,
+    loading, isAuthenticated, user, token: tokenRef.current, clients, properties, conversations, nudges, socket,
+    logout, api, login, loginAndRedirect, fetchDashboardData, refreshConversations, updateClientInList,
+    refetchScheduledMessagesForClient, refreshUser, forceRefreshAllData, refreshNudges
   }), [
-    loading, isAuthenticated, user, clients, properties, conversations, nudges, socket,
-    logout, api, login, fetchDashboardData, refreshConversations, 
-    updateClientInList, refetchScheduledMessagesForClient, refreshUser, forceRefreshAllData
+    loading, isAuthenticated, user, clients, properties, conversations, nudges, socket, logout, api, login,
+    loginAndRedirect, fetchDashboardData, refreshConversations, updateClientInList, 
+    refetchScheduledMessagesForClient, refreshUser, forceRefreshAllData, refreshNudges
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
