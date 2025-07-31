@@ -121,7 +121,7 @@ async def create_bulk_scheduled_messages(
     if not data.client_ids:
         raise HTTPException(status_code=400, detail="client_ids list cannot be empty.")
 
-    clients = crm_service.get_clients_by_ids(client_ids=data.client_ids, user_id=current_user.id, session=session)
+    clients = crm_service.get_clients_by_ids(client_ids=data.client_ids, user_id=current_user.id)
     if len(clients) != len(data.client_ids):
         raise HTTPException(status_code=403, detail="One or more clients not found or do not belong to the user.")
 

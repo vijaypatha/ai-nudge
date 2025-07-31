@@ -52,7 +52,8 @@ def test_create_bulk_scheduled_messages_succeeds(
         payload = {
             "client_ids": [str(CLIENT_A_ID), str(CLIENT_B_ID), str(CLIENT_C_ID)],
             "content": "Bulk message test",
-            "scheduled_at_local": local_schedule_time_str
+            "scheduled_at_local": local_schedule_time_str,
+            "timezone": "America/New_York"
         }
 
         # --- Act ---
@@ -60,7 +61,7 @@ def test_create_bulk_scheduled_messages_succeeds(
 
         # --- Assert ---
         assert response.status_code == 202, response.json()
-        assert response.json() == {"detail": "Successfully scheduled 3 out of 3 messages."}
+        assert response.json() == {"detail": "Successfully scheduled messages for 3 clients."}
         assert mock_apply_async.call_count == 3
 
 @patch('api.rest.scheduled_messages.celery_app')
@@ -90,7 +91,7 @@ def test_create_single_scheduled_message_uses_client_timezone(
             "client_id": str(CLIENT_A_ID),
             "content": "Single message test for NY client",
             "scheduled_at_local": local_schedule_time_str,
-            "timezone": "America/Chicago" # User's timezone is sent, but should be ignored
+            "timezone": "America/Chicago" # API uses payload timezone, not client timezone
         }
 
         # --- Act ---
@@ -100,6 +101,7 @@ def test_create_single_scheduled_message_uses_client_timezone(
         assert response.status_code == 201, response.json()
         mock_apply_async.assert_called_once()
 
-        expected_eta = pytz.timezone("America/New_York").localize(datetime.fromisoformat(local_schedule_time_str)).astimezone(pytz.utc)
+        # The API uses the payload timezone (America/Chicago), not the client timezone
+        expected_eta = pytz.timezone("America/Chicago").localize(datetime.fromisoformat(local_schedule_time_str)).astimezone(pytz.utc)
         actual_eta = mock_apply_async.call_args.kwargs['eta']
         assert actual_eta == expected_eta

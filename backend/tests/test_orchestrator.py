@@ -350,8 +350,10 @@ class TestHandleIncomingMessage:
         mock_crm_service.get_client_by_id.return_value = mock_client
         mock_crm_service.update_client_intel = AsyncMock()
         mock_conversation_agent.generate_recommendation_slate = AsyncMock(return_value={
-            "recommendations": [{"type": "SUGGEST_DRAFT", "payload": {"text": "Test draft"}}],
-            "tags": ["interested", "buyer", "urgent"]
+            "recommendations": [
+                {"type": "SUGGEST_DRAFT", "payload": {"text": "Test draft"}},
+                {"type": "UPDATE_CLIENT_INTEL", "payload": {"tags_to_add": ["interested", "buyer", "urgent"]}}
+            ]
         })
         mock_conversation_agent.detect_conversational_intent = AsyncMock(return_value=None)
         mock_websocket_manager.broadcast_json_to_client = AsyncMock()
@@ -373,7 +375,8 @@ class TestHandleIncomingMessage:
         mock_crm_service.update_client_intel.assert_called_once_with(
             client_id=mock_client.id,
             user_id=mock_user.id,
-            tags_to_add=["interested", "buyer", "urgent"]
+            tags_to_add=["interested", "buyer", "urgent"],
+            notes_to_add=None
         )
 
     @pytest.mark.asyncio

@@ -95,12 +95,10 @@ def test_update_scheduled_message_succeeds(mock_celery, authenticated_client: Te
 
 def test_delete_scheduled_message_succeeds(authenticated_client: TestClient, scheduled_message: ScheduledMessage, session: Session):
     response = authenticated_client.delete(f"/api/scheduled-messages/{scheduled_message.id}")
-    assert response.status_code == 200  # Updated to match actual API behavior
+    assert response.status_code == 204  # DELETE returns 204 No Content
     
-    # --- FIX: Expunge the object from the test session cache. ---
-    # This detaches the instance from the session entirely. Now, session.get()
-    # will query the database directly instead of trying to refresh a stale object.
-    session.expunge(scheduled_message)
+    # --- FIX: Refresh the object in the session to avoid detachment issues. ---
+    session.refresh(scheduled_message)
     
     db_msg = session.get(ScheduledMessage, scheduled_message.id)
     # The message should be cancelled, not deleted (for audit purposes)

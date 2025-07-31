@@ -14,7 +14,7 @@ from unittest.mock import patch
 # Patches to silence noisy startup functions
 lifespan_patches = [
     patch('api.main.seed_database', return_value=None),
-    patch('api.main.audience_builder.initialize_client_index', return_value=None)
+    patch('api.main.semantic_service.initialize_vector_index', return_value=None)
 ]
 
 # App import and DB setup
