@@ -22,6 +22,8 @@ THERAPIST_SHORT_TERM_LEAD = ConversationalPlaybook(
 )
 
 # --- Legacy, Dictionary-Based Playbooks (if any are needed in the future) ---
+# FILE: backend/workflow/playbooks/therapy.py
+
 CUSTOM_FREQUENCY_PLAYBOOK = {
     "name": "Client Preferred Cadence (Therapy)",
     "triggers": [],
@@ -30,7 +32,7 @@ CUSTOM_FREQUENCY_PLAYBOOK = {
         "name": "Custom Frequency Check-in",
         "event_type": "recurring",
         "recurrence": {"parse_from_notes": True},
-        "prompt": "<role>You are a caring and professional therapist's assistant.</role>\n<task>Draft a brief and gentle SMS check-in for {client_name}.</task>\n<instructions>Your goal is to maintain a supportive connection. You can mention a resource for well-being or a general supportive thought. Client's notes for context: '{notes}'. Sign it from {user_full_name}.</instructions>"
+        "prompt": "<role>You are a caring and professional therapist's assistant.</role>\n<task>Draft a brief and gentle SMS check-in for {client_name}.</task>\n<instructions>Your goal is to maintain a supportive connection. You can mention a resource for well-being or a general supportive thought. Use the client's notes for general context: '{notes}'. Do NOT mention specific dates like birthdays or anniversaries, as those are handled separately. Keep the message concise. Sign it from {user_full_name}.</instructions>"
     }]
 }
 
@@ -43,7 +45,7 @@ PERSONAL_EVENT_PLAYBOOK = {
         "event_type": "personal_event",
         # --- NEW KEY: Specifies which events this touchpoint can handle ---
         "handled_events": ["birthday", "bday", "anniversary", "christmas", "new year's", "thanksgiving"],
-        "prompt": "<role>You are a thoughtful personal assistant.</role>\n<task>Draft a warm, celebratory SMS message to {client_name} for their {event_name}, which is today.</task>\n<instructions>Keep the message personal and supportive, relevant to their {event_name}. The client's notes are '{notes}'. Use this for context. CRITICAL: Do not give therapeutic advice. Sign it from {user_full_name}.</instructions>"
+        "prompt": "<role>You are a thoughtful personal assistant.</role>\n<task>Draft a warm, celebratory SMS message to {client_name} for their {event_name}, which is today.</task>\n<instructions>Keep the message personal and supportive, relevant to their {event_name}. The client's notes are '{notes}'. Use this for context. The message must be brief (under 3 sentences). CRITICAL: Do not give therapeutic advice. Sign it from {user_full_name}.</instructions>"
     }]
 }
 
