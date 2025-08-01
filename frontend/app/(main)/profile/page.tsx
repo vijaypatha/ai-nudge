@@ -1,10 +1,11 @@
 // frontend/app/(main)/profile/page.tsx
-// --- UPDATED: Removed MLS username/password fields and related save logic.
+// --- REVISED: Restructured based on user feedback to prioritize user details,
+// --- restore brand identity, and improve visual hierarchy.
 
 "use client";
 
 import { useState, useEffect, ChangeEvent, FC } from "react";
-import { Trash2, Edit3, Save, XCircle, Loader2, User, Briefcase, Bot, LogOut, Sparkles } from 'lucide-react';
+import { Trash2, Edit3, Save, XCircle, Loader2, User, Briefcase, Bot, LogOut, Sparkles, Library, Palette } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { useAppContext, User as UserType } from '@/context/AppContext';
 import { TimezoneSelector } from "@/components/ui/TimezoneSelector";
@@ -54,7 +55,7 @@ const FaqCard: FC<{
   const baseInputStyles = "w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition text-sm";
 
   return (
-    <div className={`flex flex-col w-full rounded-xl border bg-gray-800/40 p-5 transition-all ${isMasterEnabled && item.is_enabled ? 'border-white/20' : 'border-white/10 bg-gray-900/50'}`}>
+    <div className={`flex flex-col w-full rounded-xl border bg-gray-900/50 p-5 transition-all ${isMasterEnabled && item.is_enabled ? 'border-white/20' : 'border-white/10 bg-gray-900/80'}`}>
       <div className="flex-grow">
         {isEditing ? (
           <div className="space-y-3">
@@ -112,7 +113,7 @@ export default function ProfilePage() {
     const [showConfetti, setShowConfetti] = useState(false);
     const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
 
-    // Add window size tracking for confetti
+    // --- State Management and Data Fetching (Unchanged) ---
     useEffect(() => {
         const handleResize = () => setWindowSize({ width: window.innerWidth, height: window.innerHeight });
         window.addEventListener('resize', handleResize);
@@ -124,25 +125,19 @@ export default function ProfilePage() {
         setProfile(p => p ? { ...p, [e.target.name]: e.target.value } : null);
     };
 
-    // --- MODIFIED: Removed MLS fields from the save payload ---
-    // frontend/app/(main)/profile/page.tsx
     const handleProfileSave = async (initialData?: Partial<UserType>) => {
         const dataToSave = initialData || profile;
         if (!dataToSave) return;
-        
         setIsSaving(true);
         setError(null);
-        
         try {
-            // This payload now correctly includes the 'specialties' field
             const payload = {
                 full_name: dataToSave.full_name,
                 email: dataToSave.email,
                 timezone: dataToSave.timezone,
-                specialties: dataToSave.specialties, // This field is now correctly typed and included
+                specialties: dataToSave.specialties,
                 ...initialData
             };
-            
             const updatedUser = await api.put('/api/users/me', payload);
             setProfile(updatedUser);
             await refreshUser();
@@ -211,7 +206,6 @@ export default function ProfilePage() {
         try {
             if (isNew) {
                 await api.post('/api/faqs/', payload);
-                // Show confetti for new FAQ
                 setShowConfetti(true);
                 setTimeout(() => setShowConfetti(false), 7000);
             } else {
@@ -238,16 +232,12 @@ export default function ProfilePage() {
         }
     };
 
-    // --- MODIFIED: Removed the MLS fields from the JSX for 'realtor' user type ---
-    // frontend/app/(main)/profile/page.tsx
     const renderBusinessDetails = () => {
         if (!profile) return null;
         switch(profile.user_type) {
             case 'realtor':
-                return <p className="text-sm text-gray-400">Your MLS connection is managed automatically by the system.</p>;
-            
+                return <p className="text-sm text-gray-400">Your MLS connection is managed automatically, providing the AI with real-time property data.</p>;
             case 'therapist':
-                // The new component is rendered here, passing state down
                 return (
                     <ContentDiscovery 
                         initialSpecialties={profile.specialties || []}
@@ -257,115 +247,118 @@ export default function ProfilePage() {
                     />
                 );
             default:
-                return <p className="text-sm text-gray-500">No business-specific settings available for this user type.</p>;
+                return <p className="text-sm text-gray-500">No business-specific settings available.</p>;
         }
     };
-
+    
+    // --- Loading and Error States (Unchanged) ---
     if (isLoading || isContextLoading) return <div className="flex items-center justify-center h-screen bg-gray-900"><Loader2 className="animate-spin h-8 w-8 text-teal-500" /></div>;
     if (error && !profile) return <div className="p-8 text-center text-red-400 bg-gray-900">{error}</div>;
     if (!profile) return null;
 
+    // --- REVISED: JSX with improved hierarchy and structure based on feedback ---
     return (
         <>
-            {/* Confetti for successful FAQ additions */}
             {showConfetti && (
                 <Confetti
-                    width={windowSize.width}
-                    height={windowSize.height}
-                    recycle={false}
-                    numberOfPieces={600}
-                    tweenDuration={7000}
-                    colors={[
-                        ACTIVE_THEME.primary.from,
-                        ACTIVE_THEME.primary.to,
-                        ACTIVE_THEME.accent,
-                        ACTIVE_THEME.action,
-                        '#ffffff'
-                    ]}
+                    width={windowSize.width} height={windowSize.height} recycle={false} numberOfPieces={600}
+                    tweenDuration={7000} colors={[ACTIVE_THEME.primary.from, ACTIVE_THEME.primary.to, ACTIVE_THEME.accent, ACTIVE_THEME.action, '#ffffff']}
                 />
             )}
 
             <main className="flex-1 overflow-y-auto bg-gray-900 text-white p-6 md:p-8 lg:p-12">
-                <div className="max-w-4xl mx-auto space-y-12">
+                <div className="max-w-5xl mx-auto space-y-12">
+
+                    {/* --- HEADER --- */}
+                    <div className="flex justify-between items-start">
+                        <div>
+                           <h1 className="text-3xl font-bold text-white">Profile & Settings</h1>
+                           <p className="text-gray-400 mt-1">Manage your account details, AI assistant, and content.</p>
+                        </div>
+                        <button onClick={logout} className="px-4 py-2 text-sm font-semibold flex items-center gap-2 bg-gray-700/50 hover:bg-gray-700 rounded-md">
+                           <LogOut size={16}/> Logout
+                        </button>
+                    </div>
+
+                    {/* --- CARD 1: MY PROFILE --- */}
                     <div className="bg-gray-800/40 rounded-xl border border-white/10 p-8">
                         <div className="flex justify-between items-center mb-6">
-                            <h1 className="text-2xl font-bold text-white flex items-center gap-3"><User /> My Profile</h1>
-                            <div className="flex items-center gap-2">
-                                <button onClick={logout} className="px-4 py-2 text-sm font-semibold flex items-center gap-2 bg-gray-700/50 hover:bg-gray-700 rounded-md">
-                                   <LogOut size={16}/> Logout
-                                </button>
-                                <button onClick={() => isEditingProfile ? handleProfileSave() : setIsEditingProfile(true)} disabled={isSaving} className="btn-primary px-4 py-2 text-sm font-semibold flex items-center gap-2">
-                                    {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving...</> : (isEditingProfile ? <><Save size={16}/>Save Profile</> : <><Edit3 size={16}/>Edit Profile</>)}
-                                </button>
+                            <div className="flex items-center gap-3">
+                                <User className="w-6 h-6 text-gray-300"/>
+                                <h2 className="text-xl font-bold text-white">My Profile</h2>
                             </div>
+                             <button onClick={() => isEditingProfile ? handleProfileSave() : setIsEditingProfile(true)} disabled={isSaving} className="btn-primary px-4 py-2 text-sm font-semibold flex items-center gap-2">
+                                 {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Saving...</> : (isEditingProfile ? <><Save size={16}/>Save Profile</> : <><Edit3 size={16}/>Edit Profile</>)}
+                             </button>
                         </div>
-                        <div className="space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="space-y-1"><label className="text-sm font-medium text-gray-400">Full Name</label><input name="full_name" value={profile.full_name || ''} onChange={handleProfileChange} disabled={!isEditingProfile} className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white disabled:opacity-50" /></div>
-                                <div className="space-y-1"><label className="text-sm font-medium text-gray-400">Contact Phone</label><input value={profile.phone_number || ''} disabled={true} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-gray-500 cursor-not-allowed" /></div>
-                                <div className="space-y-1"><label className="text-sm font-medium text-gray-400">Email Address</label><input name="email" type="email" value={profile.email || ''} onChange={handleProfileChange} disabled={!isEditingProfile} className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white disabled:opacity-50" /></div>
-                                <div className="space-y-1"><label className="text-sm font-medium text-gray-400">My Default Time Zone</label>
-                                    <TimezoneSelector value={profile.timezone || ''} onChange={handleProfileChange} disabled={!isEditingProfile} />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-1"><label className="text-sm font-medium text-gray-400">Full Name</label><input name="full_name" value={profile.full_name || ''} onChange={handleProfileChange} disabled={!isEditingProfile} className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white disabled:opacity-50" /></div>
+                            <div className="space-y-1"><label className="text-sm font-medium text-gray-400">Your Personal Phone</label><input value={profile.phone_number || ''} disabled={true} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-gray-500 cursor-not-allowed" /></div>
+                            <div className="space-y-1"><label className="text-sm font-medium text-gray-400">Email Address</label><input name="email" type="email" value={profile.email || ''} onChange={handleProfileChange} disabled={!isEditingProfile} className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white disabled:opacity-50" /></div>
+                            <div className="space-y-1"><label className="text-sm font-medium text-gray-400">My Default Time Zone</label><TimezoneSelector value={profile.timezone || ''} onChange={handleProfileChange} disabled={!isEditingProfile} /></div>
+                            <div className="space-y-1"><label className="text-sm font-medium text-gray-400">AI Nudge Number</label><input value={profile.twilio_phone_number || 'Not assigned'} disabled={true} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-gray-500 cursor-not-allowed" /></div>
+                        </div>
+                    </div>
+
+                    {/* --- CARD 2: AI NUDGE AUTOPILOT --- */}
+                    <div className="bg-gray-800/40 rounded-xl border border-white/10 p-8 space-y-8">
+                        <div>
+                            <div className="flex items-center gap-3">
+                                <Bot className="w-6 h-6 text-cyan-400" />
+                                <h2 className="text-xl font-bold text-white">AI Nudge AutoPilot</h2>
+                            </div>
+                            <p className="text-gray-300 mt-2">
+                                Your business's own ChatGPT, answering client texts 24/7. Train it with your unique knowledge.
+                            </p>
+                        </div>
+                        
+                        <div className="flex items-center space-x-3 p-4 rounded-lg bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border border-cyan-500/20">
+                            <input type="checkbox" id="master-faq-toggle" checked={profile.faq_auto_responder_enabled} onChange={(e) => handleMasterSwitchToggle(e.target.checked)} className="h-4 w-4 rounded bg-white/10 border-white/20 text-cyan-500 focus:ring-cyan-500" />
+                            <label htmlFor="master-faq-toggle" className="text-base font-medium text-white">Enable AutoPilot</label>
+                        </div>
+                        
+                        <div className="border-t border-white/10 pt-6">
+                            <h3 className="text-lg font-semibold text-white flex items-center gap-3"><Briefcase /> Business Context</h3>
+                            <p className="text-sm text-gray-400 mt-1 mb-4">Provide key details about your business for the AI to use in conversation.</p>
+                            {renderBusinessDetails()}
+                        </div>
+
+                        <div className="border-t border-white/10 pt-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <div>
+                                    <h3 className="text-lg font-semibold text-white flex items-center gap-3"><Sparkles /> Knowledge Base</h3>
+                                    <p className="text-sm text-gray-400 mt-1">Train your AI by adding question-and-answer pairs. The more you add, the smarter it gets.</p>
                                 </div>
+                                <button onClick={handleAddFaq} className="btn-secondary px-3 py-1.5 text-sm font-semibold flex items-center gap-2 whitespace-nowrap">+ Add FAQ</button>
+                            </div>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                {faqs.map(faq => (
+                                    <FaqCard key={faq.id} item={faq} onUpdate={handleUpdateFaq} onRemove={handleRemoveFaq} isMasterEnabled={profile.faq_auto_responder_enabled || false} />
+                                ))}
                             </div>
                         </div>
                     </div>
+
+                    {/* --- CARD 3: CONTENT RESOURCE LIBRARY --- */}
                     <div className="bg-gray-800/40 rounded-xl border border-white/10 p-8">
-                        <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3"><Briefcase /> Business Details</h2>
-                        {renderBusinessDetails()}
-                    </div>
-                    
-                    {/* Theme Switcher Section */}
-                    <div className="bg-gray-800/40 rounded-xl border border-white/10 p-8">
-                        <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">🎨 App Theme</h2>
-                        <p className="text-sm text-gray-400 mb-4">Choose your preferred color scheme for the entire app.</p>
-                        <ThemeSwitcher />
-                    </div>
-                    
-                    {/* Content Resources Section */}
-                    <div className="bg-gray-800/40 rounded-xl border border-white/10 p-8">
+                        <div className="flex items-center gap-3">
+                           <Library className="w-6 h-6 text-teal-300"/>
+                           <h2 className="text-xl font-bold text-white">Content Resource Library</h2>
+                        </div>
+                        <p className="text-gray-300 mt-2 mb-6">Upload documents and links that your AI assistant can intelligently share with clients when relevant.</p>
                         <ContentResourceManager api={api} />
                     </div>
                     
-                    {/* AI Nudge AutoPilot Section */}
+                    {/* --- CARD 4: APP APPEARANCE --- */}
                     <div className="bg-gray-800/40 rounded-xl border border-white/10 p-8">
-                        <div className="flex justify-between items-center mb-2">
-                            <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-                                <Bot className="text-cyan-400" />
-                                AI Nudge AutoPilot
-                            </h2>
-                            <button onClick={handleAddFaq} className="px-3 py-1.5 text-sm font-semibold bg-white/10 rounded-lg hover:bg-white/20 flex items-center gap-2">
-                                <Sparkles className="w-4 h-4" />
-                                + Add FAQ
-                            </button>
+                        <div className="flex items-center gap-3">
+                           <Palette className="w-6 h-6 text-purple-300"/>
+                           <h2 className="text-xl font-bold text-white">App Appearance</h2>
                         </div>
-                        <p className="text-sm text-gray-400 mb-6">
-                            Train your AI co-pilot to answer common questions instantly and maintain your authentic voice.
-                        </p>
-                        <div className="flex items-center space-x-3 p-4 rounded-lg bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border border-cyan-500/20 mb-8">
-                            <input 
-                                type="checkbox" 
-                                id="master-faq-toggle" 
-                                checked={profile.faq_auto_responder_enabled} 
-                                onChange={(e) => handleMasterSwitchToggle(e.target.checked)} 
-                                className="h-4 w-4 rounded bg-white/10 border-white/20 text-cyan-500 focus:ring-cyan-500" 
-                            />
-                            <label htmlFor="master-faq-toggle" className="text-base font-medium text-white">
-                                Enable AI Nudge AutoPilot
-                            </label>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {faqs.map(faq => (
-                                <FaqCard 
-                                    key={faq.id} 
-                                    item={faq} 
-                                    onUpdate={handleUpdateFaq} 
-                                    onRemove={handleRemoveFaq} 
-                                    isMasterEnabled={profile.faq_auto_responder_enabled || false} 
-                                />
-                            ))}
-                        </div>
+                        <p className="text-gray-300 mt-2 mb-6">Choose your preferred color scheme for the dashboard.</p>
+                        <ThemeSwitcher />
                     </div>
+
                 </div>
             </main>
         </>

@@ -12,6 +12,7 @@ export interface User {
   full_name: string;
   email?: string;
   phone_number: string;
+  twilio_phone_number?: string;
   user_type: 'realtor' | 'therapist' | 'loan_officer' | null;
   onboarding_complete: boolean;
   onboarding_state: {
