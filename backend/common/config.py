@@ -44,7 +44,22 @@ class Settings(BaseSettings):
     RESCAN_LOOKBACK_DAYS: int = 30
     FAQ_AUTO_REPLY_ENABLED: bool = True
     
-    WEBSOCKET_ALLOWED_ORIGINS: List[str] = ["http://localhost:3000"]
+    WEBSOCKET_ALLOWED_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "https://ai-nudge-frontend.onrender.com",
+        "https://ai-nudge.onrender.com"
+    ]
+
+    @property
+    def cors_origins(self) -> List[str]:
+        """Get CORS origins based on environment."""
+        if self.ENVIRONMENT == "production":
+            return [
+                "https://ai-nudge-frontend.onrender.com",
+                "https://ai-nudge.onrender.com"
+            ]
+        else:
+            return ["http://localhost:3000"]
 
     # MLS Providers
     MLS_PROVIDER: str

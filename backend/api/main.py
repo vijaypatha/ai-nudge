@@ -62,7 +62,7 @@ app = FastAPI(
     swagger_ui_parameters=swagger_ui_parameters
 )
 
-origins = settings.WEBSOCKET_ALLOWED_ORIGINS
+origins = settings.cors_origins
 
 app.add_middleware(
     CORSMiddleware,
