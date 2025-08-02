@@ -4,8 +4,7 @@ databases:
   - name: ai-nudge-db
     databaseName: ai_nudge_db
     user: ai_nudge_user
-    plan: free 
-    postgresMajorVersion: 17
+    plan: free
 
 services:
   # ---------- BACKEND (FastAPI) ----------
