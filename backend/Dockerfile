@@ -43,6 +43,8 @@ RUN echo '#!/bin/bash\nset -e\necho "Running migrations..."\nalembic upgrade hea
     chmod +x /app/start.sh && \
     chown app:app /app/start.sh
 
+WORKDIR /app/backend
+
 # Switch to non-root user
 USER app
 
