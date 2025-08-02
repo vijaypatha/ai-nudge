@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     MICROSOFT_CLIENT_SECRET: Optional[str] = None
     MICROSOFT_REDIRECT_URI: Optional[str] = None
 
+    ADMIN_FULL_NAME: Optional[str] = None
+    ADMIN_EMAIL: Optional[str] = None
+    ADMIN_PHONE_NUMBER: Optional[str] = None
+    ADMIN_TWILIO_PHONE_NUMBER: Optional[str] = None
+
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Only validate environment if not in migration mode

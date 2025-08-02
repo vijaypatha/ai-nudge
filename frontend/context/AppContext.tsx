@@ -28,6 +28,9 @@ export interface User {
   license_number?: string;
   specialties?: string[];
   faq_auto_responder_enabled: boolean;
+  vertical?: string;
+  tool_provider?: string;
+  super_user?: boolean;
 }
 
 export interface Client { 

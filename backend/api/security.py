@@ -37,3 +37,28 @@ def get_current_user_from_token(token: str = Depends(oauth2_scheme)) -> User:
         if user is None:
             raise credentials_exception
         return user
+
+def is_super_user(user: User) -> bool:
+    """
+    Check if a user has super user privileges.
+    (This function can be kept for potential future admin roles).
+    """
+    return user.super_user is True
+
+def get_user_accessible_verticals(user: User) -> list[str]:
+    """
+    Get the list of verticals a user can access.
+    - If user.vertical is None, they get access to all verticals.
+    - Otherwise, they are restricted to their assigned vertical.
+    """
+    if user.vertical is None:
+        # This user has an "All-Access" account.
+        try:
+            from agent_core.brain.verticals import VERTICAL_CONFIGS
+            return list(VERTICAL_CONFIGS.keys())  # Automatically gets all configured verticals
+        except ImportError:
+            # Fallback to hardcoded list if registry not available
+            return ["real_estate", "therapy", "loan_officer"]
+    else:
+        # This is a standard user restricted to their single assigned vertical.
+        return [user.vertical]

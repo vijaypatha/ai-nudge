@@ -37,7 +37,9 @@ class User(SQLModel, table=True):
     vertical: Optional[str] = Field(default=None, index=True)
     # Stores the key for the integration tool factory (e.g., 'flexmls_spark')
     tool_provider: Optional[str] = Field(default=None, index=True)
-
+    # --- NEW: Super User Flag ---
+    # Allows access to all verticals for monitoring purposes
+    super_user: bool = Field(default=False, index=True)
 
     # --- Onboarding Tracking Fields ---
     onboarding_complete: bool = Field(default=False)
@@ -64,8 +66,6 @@ class User(SQLModel, table=True):
     twilio_phone_number: Optional[str] = Field(default=None, index=True)
     timezone: Optional[str] = Field(default=None, index=True)
 
-
-
     # --- Relationships ---
     campaigns: List["CampaignBriefing"] = Relationship(back_populates="user")
     faqs: List["Faq"] = Relationship(back_populates="user")
@@ -87,6 +87,7 @@ class UserUpdate(SQLModel):
     # --- NEW: Add new fields to the update model ---
     vertical: Optional[str] = None
     tool_provider: Optional[str] = None
+    super_user: Optional[bool] = None
 
     # Existing Fields
     market_focus: Optional[List[str]] = None
