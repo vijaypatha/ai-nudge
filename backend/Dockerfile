@@ -9,7 +9,7 @@ ENV PYTHONPATH=/app
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies for common Python packages
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
@@ -21,28 +21,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Rust toolchain (required by some Python packages like cryptography)
+# Install Rust toolchain
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Copy requirements file first to leverage Docker cache
+# Copy requirements and install dependencies
 COPY backend/requirements-render.txt .
-
-# Install Python dependencies globally (no virtual environment)
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements-render.txt
 
 # Copy application code
 COPY . .
 
-# Create a non-root user for security (optional but recommended)
+# Create non-root user and set proper permissions
 RUN useradd --create-home --shell /bin/bash app && \
-    chown -R app:app /app
+    chown -R app:app /app && \
+    chmod -R 755 /app
 
+# Create start script with proper permissions
+RUN echo '#!/bin/bash\nset -e\necho "Running migrations..."\nalembic upgrade head\necho "Starting server..."\nexec uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}' > /app/start.sh && \
+    chmod +x /app/start.sh && \
+    chown app:app /app/start.sh
+
+# Switch to non-root user
 USER app
 
-# Expose port 8000 for the FastAPI app
+# Expose port
 EXPOSE 8000
 
-# Use a shell command to run migrations and start the app
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use start script
+CMD ["/app/start.sh"]
