@@ -5,6 +5,10 @@
 Script to create an All-Access Standard Account.
 This script reads sensitive user details from environment variables for security.
 """
+# --- ADD THESE TWO LINES AT THE VERY TOP ---
+from dotenv import load_dotenv
+load_dotenv()
+# -----------------------------------------
 
 import sys
 from sqlmodel import Session

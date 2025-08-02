@@ -659,29 +659,32 @@ def update_slate_status(slate_id: uuid.UUID, new_status: CampaignStatus, user_id
 
 # --- Universal Message Log Functions ---
 
-def save_message(message: Message, session: Optional[Session] = None):
+def save_message(message: Message, session: Optional[Session] = None) -> Message:
     """
     Saves a single inbound or outbound message to the universal log with transaction safety.
+    Returns the saved message object.
     """
-    def _save(db_session: Session):
+    def _save(db_session: Session) -> Message:
         try:
             db_session.add(message)
-            db_session.flush()  # Ensure ID is generated
+            db_session.flush()
             db_session.refresh(message)
             logging.info(f"CRM: Message saved successfully - ID: {message.id}, Client: {message.client_id}, Direction: {message.direction}")
+            return message  # FIX: Return the saved message object
         except Exception as e:
             logging.error(f"CRM: Failed to save message: {e}", exc_info=True)
             db_session.rollback()
             raise
 
     if session:
-        _save(session)
+        return _save(session)  # FIX: Return the result from the helper
     else:
         with Session(engine) as new_session:
             try:
-                _save(new_session)
+                saved_message = _save(new_session)
                 new_session.commit()
                 logging.info(f"CRM: Message committed successfully for client_id: {message.client_id}")
+                return saved_message  # FIX: Return the saved message object
             except Exception as e:
                 logging.error(f"CRM: Failed to commit message: {e}", exc_info=True)
                 new_session.rollback()

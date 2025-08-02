@@ -1,5 +1,4 @@
-# backend/api/rest/websockets.py
-# --- MODIFIED: Added a user-level websocket endpoint ---
+# File: backend/api/rest/websockets.py
 
 import logging
 import asyncio
@@ -17,14 +16,28 @@ router = APIRouter()
 async def get_user_from_token(token: str) -> User | None:
     """Helper function to authenticate a user from a JWT token."""
     try:
+        # --- FIX: Add detailed logging to diagnose the 403 error ---
+        logging.info(f"WS_AUTH: Attempting to decode token...")
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
         user_id: str | None = payload.get("sub")
-        if user_id:
-            with Session(engine) as session:
-                return session.get(User, user_id)
-    except (JWTError, Exception):
+        if not user_id:
+            logging.warning("WS_AUTH: Token is valid but missing 'sub' (user_id).")
+            return None
+
+        logging.info(f"WS_AUTH: Token decoded successfully. User ID: {user_id}")
+        with Session(engine) as session:
+            user = session.get(User, user_id)
+            if not user:
+                logging.warning(f"WS_AUTH: User with ID {user_id} not found in database.")
+                return None
+            logging.info(f"WS_AUTH: User {user_id} found in database. Authentication successful.")
+            return user
+    except JWTError as e:
+        logging.error(f"WS_AUTH: JWTError during token decoding. SECRET_KEY may be wrong. Error: {e}", exc_info=True)
         return None
-    return None
+    except Exception as e:
+        logging.error(f"WS_AUTH: An unexpected error occurred during token validation. Error: {e}", exc_info=True)
+        return None
 
 @router.websocket("/ws/user")
 async def user_websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
@@ -59,7 +72,7 @@ async def client_websocket_endpoint(websocket: WebSocket, client_id: str, token:
     # Connect to both client and user channels
     await manager.connect_client(websocket, client_id)
     await manager.connect_user(websocket, str(user.id))
-    
+
     try:
         while True:
             await websocket.receive_text()
