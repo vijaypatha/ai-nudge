@@ -26,7 +26,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --de
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Copy requirements file first to leverage Docker cache
-COPY requirements-render.txt .
+COPY backend/requirements-render.txt .
 
 # Install Python dependencies globally (no virtual environment)
 RUN pip install --no-cache-dir --upgrade pip && \
