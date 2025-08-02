@@ -1,4 +1,4 @@
-# render.yaml (Fixed Celery Module Paths)
+# render.yaml (Updated with Auto-Deploy Disabled)
 
 databases:
   - name: ai-nudge-db
@@ -15,6 +15,7 @@ services:
     dockerfilePath: ./backend/Dockerfile
     healthCheckPath: /test-db
     plan: starter
+    autoDeploy: false  # Add this line
     dockerCommand: >
       sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port $PORT"
     envVars:
@@ -36,6 +37,7 @@ services:
     repo: https://github.com/vijaypatha/ai-nudge
     dockerfilePath: ./backend/Dockerfile
     plan: starter
+    autoDeploy: false  # Add this line
     dockerCommand: "celery -A backend.celery_worker.celery_app worker --loglevel=info --concurrency=2"
     envVars:
       - key: RUNNING_IN_CELERY
@@ -58,6 +60,7 @@ services:
     repo: https://github.com/vijaypatha/ai-nudge
     dockerfilePath: ./backend/Dockerfile
     plan: starter
+    autoDeploy: false  # Add this line
     dockerCommand: "celery -A backend.celery_worker.celery_app beat --loglevel=info"
     envVars:
       - key: RUNNING_IN_CELERY
