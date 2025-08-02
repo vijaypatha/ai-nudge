@@ -1,16 +1,16 @@
-# render.yaml (Unified Version)
+# render.yaml (AI Nudge - Corrected Version)
 
 databases:
-  - name: realestate-db
-    databaseName: realestate_db
-    user: realestate_user
+  - name: ai-nudge-db
+    databaseName: ai_nudge_db
+    user: ai_nudge_user
     plan: free
     postgresMajorVersion: 15
 
 services:
   # ---------- BACKEND (FastAPI) ----------
   - type: web
-    name: backend
+    name: ai-nudge-backend
     runtime: docker
     repo: https://github.com/vijaypatha/ai-nudge
     dockerfilePath: ./backend/Dockerfile
@@ -22,7 +22,7 @@ services:
       - fromGroup: ainudge-env-group
       - key: DATABASE_URL
         fromDatabase:
-          name: realestate-db
+          name: ai-nudge-db
           property: connectionString
       - key: REDIS_URL
         fromService:
@@ -32,7 +32,7 @@ services:
 
   # ---------- CELERY WORKER ----------
   - type: worker
-    name: celery-worker
+    name: ai-nudge-celery-worker
     runtime: docker
     repo: https://github.com/vijaypatha/ai-nudge
     dockerfilePath: ./backend/Dockerfile
@@ -44,7 +44,7 @@ services:
       - fromGroup: ainudge-env-group
       - key: DATABASE_URL
         fromDatabase:
-          name: realestate-db
+          name: ai-nudge-db
           property: connectionString
       - key: REDIS_URL
         fromService:
@@ -54,7 +54,7 @@ services:
 
   # ---------- CELERY BEAT SCHEDULER ----------
   - type: worker
-    name: celery-beat
+    name: ai-nudge-celery-beat
     runtime: docker
     repo: https://github.com/vijaypatha/ai-nudge
     dockerfilePath: ./backend/Dockerfile
@@ -66,7 +66,7 @@ services:
       - fromGroup: ainudge-env-group
       - key: DATABASE_URL
         fromDatabase:
-          name: realestate-db
+          name: ai-nudge-db
           property: connectionString
       - key: REDIS_URL
         fromService:
