@@ -1,9 +1,9 @@
-# render.yaml (Final Version)
+# render.yaml (Corrected Version)
 
 databases:
   - name: realestate-db
     databaseName: realestate_db
-    user: postgres
+    user: realestate_user
     plan: free
     postgresMajorVersion: 15
 
@@ -16,60 +16,18 @@ services:
     dockerfilePath: ./backend/Dockerfile
     healthCheckPath: /test-db
     plan: starter
-    startCommand: >
+    dockerCommand: >
       sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port $PORT"
     envVars:
-      # --- Linked from Env Group 'ainudge-env-group' ---
-      - key: ENVIRONMENT
-        fromGroup: ainudge-env-group
-      - key: PYTHONUNBUFFERED
-        fromGroup: ainudge-env-group
-      - key: FRONTEND_APP_URL
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_REDIRECT_URI
-        fromGroup: ainudge-env-group
-      - key: FAQ_AUTO_REPLY_ENABLED
-        fromGroup: ainudge-env-group
-      - key: LLM_PROVIDER
-        fromGroup: ainudge-env-group
-      - key: MLS_PROVIDER
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_API_KEY
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_CLIENT_ID
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_CLIENT_SECRET
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_CSE_ID
-        fromGroup: ainudge-env-group
-      - key: OPENAI_API_KEY
-        fromGroup: ainudge-env-group
-      - key: RESO_API_BASE_URL
-        fromGroup: ainudge-env-group
-      - key: RESO_API_TOKEN
-        fromGroup: ainudge-env-group
-      - key: SECRET_KEY
-        fromGroup: ainudge-env-group
-      - key: SPARK_API_DEMO_TOKEN
-        fromGroup: ainudge-env-group
-      - key: TWILIO_ACCOUNT_SID
-        fromGroup: ainudge-env-group
-      - key: TWILIO_AUTH_TOKEN
-        fromGroup: ainudge-env-group
-      - key: TWILIO_DEFAULT_MESSAGING_SERVICE_SID
-        fromGroup: ainudge-env-group
-      - key: TWILIO_PHONE_NUMBER
-        fromGroup: ainudge-env-group
-      - key: TWILIO_VERIFY_SERVICE_SID
-        fromGroup: ainudge-env-group
-      # --- Linked from other services ---
+      - fromGroup: ainudge-env-group
       - key: DATABASE_URL
         fromDatabase:
           name: realestate-db
           property: connectionString
       - key: REDIS_URL
-        fromRedis:
-          name: ai-nudge-redis # <-- Corrected Name
+        fromService:
+          name: ai-nudge-redis
+          type: keyvalue
           property: connectionString
 
   # ---------- FRONTEND (Next.js) ----------
@@ -79,7 +37,7 @@ services:
     repo: https://github.com/vijaypatha/ai-nudge
     dockerfilePath: ./frontend/Dockerfile
     plan: starter
-    startCommand: "npm start"
+    dockerCommand: "npm start"
     buildFilter:
       paths:
         - "frontend/**"
@@ -89,12 +47,10 @@ services:
         fromService:
           type: web
           name: backend
-          property: url
+          property: hostport
       - key: NODE_ENV
         value: production
-      # --- You may need other public variables from your group here ---
-      - key: NEXT_PUBLIC_SOME_VAR # Example
-        fromGroup: ainudge-env-group
+      - fromGroup: ainudge-env-group
 
   # ---------- CELERY WORKER ----------
   - type: worker
@@ -103,61 +59,19 @@ services:
     repo: https://github.com/vijaypatha/ai-nudge
     dockerfilePath: ./backend/Dockerfile
     plan: starter
-    startCommand: "celery -A celery_worker.celery_app worker --loglevel=info --concurrency=2"
+    dockerCommand: "celery -A celery_worker.celery_app worker --loglevel=info --concurrency=2"
     envVars:
       - key: RUNNING_IN_CELERY
         value: "true"
-      # --- Linked from Env Group 'ainudge-env-group' ---
-      - key: ENVIRONMENT
-        fromGroup: ainudge-env-group
-      - key: PYTHONUNBUFFERED
-        fromGroup: ainudge-env-group
-      - key: FRONTEND_APP_URL
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_REDIRECT_URI
-        fromGroup: ainudge-env-group
-      - key: FAQ_AUTO_REPLY_ENABLED
-        fromGroup: ainudge-env-group
-      - key: LLM_PROVIDER
-        fromGroup: ainudge-env-group
-      - key: MLS_PROVIDER
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_API_KEY
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_CLIENT_ID
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_CLIENT_SECRET
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_CSE_ID
-        fromGroup: ainudge-env-group
-      - key: OPENAI_API_KEY
-        fromGroup: ainudge-env-group
-      - key: RESO_API_BASE_URL
-        fromGroup: ainudge-env-group
-      - key: RESO_API_TOKEN
-        fromGroup: ainudge-env-group
-      - key: SECRET_KEY
-        fromGroup: ainudge-env-group
-      - key: SPARK_API_DEMO_TOKEN
-        fromGroup: ainudge-env-group
-      - key: TWILIO_ACCOUNT_SID
-        fromGroup: ainudge-env-group
-      - key: TWILIO_AUTH_TOKEN
-        fromGroup: ainudge-env-group
-      - key: TWILIO_DEFAULT_MESSAGING_SERVICE_SID
-        fromGroup: ainudge-env-group
-      - key: TWILIO_PHONE_NUMBER
-        fromGroup: ainudge-env-group
-      - key: TWILIO_VERIFY_SERVICE_SID
-        fromGroup: ainudge-env-group
-      # --- Linked from other services ---
+      - fromGroup: ainudge-env-group
       - key: DATABASE_URL
         fromDatabase:
           name: realestate-db
           property: connectionString
       - key: REDIS_URL
-        fromRedis:
-          name: ai-nudge-redis # <-- Corrected Name
+        fromService:
+          name: ai-nudge-redis
+          type: keyvalue
           property: connectionString
 
   # ---------- CELERY BEAT SCHEDULER ----------
@@ -167,59 +81,23 @@ services:
     repo: https://github.com/vijaypatha/ai-nudge
     dockerfilePath: ./backend/Dockerfile
     plan: starter
-    startCommand: "celery -A celery_worker.celery_app beat --loglevel=info"
+    dockerCommand: "celery -A celery_worker.celery_app beat --loglevel=info"
     envVars:
       - key: RUNNING_IN_CELERY
         value: "true"
-      # --- Linked from Env Group 'ainudge-env-group' ---
-      - key: ENVIRONMENT
-        fromGroup: ainudge-env-group
-      - key: PYTHONUNBUFFERED
-        fromGroup: ainudge-env-group
-      - key: FRONTEND_APP_URL
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_REDIRECT_URI
-        fromGroup: ainudge-env-group
-      - key: FAQ_AUTO_REPLY_ENABLED
-        fromGroup: ainudge-env-group
-      - key: LLM_PROVIDER
-        fromGroup: ainudge-env-group
-      - key: MLS_PROVIDER
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_API_KEY
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_CLIENT_ID
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_CLIENT_SECRET
-        fromGroup: ainudge-env-group
-      - key: GOOGLE_CSE_ID
-        fromGroup: ainudge-env-group
-      - key: OPENAI_API_KEY
-        fromGroup: ainudge-env-group
-      - key: RESO_API_BASE_URL
-        fromGroup: ainudge-env-group
-      - key: RESO_API_TOKEN
-        fromGroup: ainudge-env-group
-      - key: SECRET_KEY
-        fromGroup: ainudge-env-group
-      - key: SPARK_API_DEMO_TOKEN
-        fromGroup: ainudge-env-group
-      - key: TWILIO_ACCOUNT_SID
-        fromGroup: ainudge-env-group
-      - key: TWILIO_AUTH_TOKEN
-        fromGroup: ainudge-env-group
-      - key: TWILIO_DEFAULT_MESSAGING_SERVICE_SID
-        fromGroup: ainudge-env-group
-      - key: TWILIO_PHONE_NUMBER
-        fromGroup: ainudge-env-group
-      - key: TWILIO_VERIFY_SERVICE_SID
-        fromGroup: ainudge-env-group
-      # --- Linked from other services ---
+      - fromGroup: ainudge-env-group
       - key: DATABASE_URL
         fromDatabase:
           name: realestate-db
           property: connectionString
       - key: REDIS_URL
-        fromRedis:
-          name: ai-nudge-redis # <-- Corrected Name
+        fromService:
+          name: ai-nudge-redis
+          type: keyvalue
           property: connectionString
+
+  # ---------- REDIS SERVICE ----------
+  - type: keyvalue
+    name: ai-nudge-redis
+    plan: starter
+    ipAllowList: []
