@@ -365,7 +365,11 @@ def main_opportunity_pipeline_task(minutes_ago: int | None = None):
     Celery entry point to trigger the main opportunity pipeline.
     Accepts an optional 'minutes_ago' for manual backfills.
     """
-    logger.info("CELERY: Triggering main opportunity pipeline...")
+    logger.info("CELERY: ==========================================")
+    logger.info("CELERY: STARTING MAIN OPPORTUNITY PIPELINE TASK")
+    logger.info("CELERY: ==========================================")
+    logger.info(f"CELERY: Task triggered at {datetime.now(timezone.utc)}")
+    logger.info(f"CELERY: minutes_ago parameter: {minutes_ago}")
     
     pipeline_run = None
     start_time = datetime.now(timezone.utc)
@@ -384,7 +388,9 @@ def main_opportunity_pipeline_task(minutes_ago: int | None = None):
             logger.info(f"CELERY: Created pipeline run record with ID {pipeline_run.id}")
         
         # Run the asynchronous pipeline function, passing the argument through
+        logger.info("CELERY: About to call run_main_opportunity_pipeline...")
         result = asyncio.run(run_main_opportunity_pipeline(minutes_ago=minutes_ago))
+        logger.info(f"CELERY: Pipeline execution completed with result: {result}")
         
         # Update pipeline run with success
         end_time = datetime.now(timezone.utc)
@@ -402,10 +408,15 @@ def main_opportunity_pipeline_task(minutes_ago: int | None = None):
                 session.add(db_pipeline_run)
                 session.commit()
         
-        logger.info("CELERY: Main opportunity pipeline completed successfully.")
+        logger.info("CELERY: ==========================================")
+        logger.info("CELERY: MAIN OPPORTUNITY PIPELINE COMPLETED SUCCESSFULLY")
+        logger.info("CELERY: ==========================================")
         return {"status": "success", "pipeline_run_id": str(pipeline_run.id)}
         
     except Exception as e:
+        logger.error("CELERY: ==========================================")
+        logger.error("CELERY: MAIN OPPORTUNITY PIPELINE FAILED")
+        logger.error("CELERY: ==========================================")
         logger.error(f"CELERY: Main opportunity pipeline failed: {e}", exc_info=True)
         
         # Update pipeline run with failure

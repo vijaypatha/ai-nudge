@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from starlette.types import ASGIApp, Scope, Receive, Send
+from datetime import datetime, timezone
 
 try:
     # --- MODIFIED: Import the websocket router directly ---
@@ -133,3 +134,31 @@ async def root_twilio_webhook(request: Request):
 @app.get("/")
 async def read_root():
     return {"message": "Welcome to AI Nudge Backend API!"}
+
+@app.get("/test-db")
+async def test_db_health():
+    """
+    Health check endpoint for Render deployment.
+    Tests database connectivity and returns status.
+    """
+    try:
+        from sqlmodel import Session, select
+        from data.database import engine
+        from data.models.user import User
+        
+        with Session(engine) as session:
+            # Test basic database query
+            user_count = session.exec(select(User)).first()
+            
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logging.error(f"Health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }

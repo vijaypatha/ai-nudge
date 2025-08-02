@@ -36,13 +36,13 @@ celery_app.conf.update(
 
 # --- Celery Beat Schedules (The "Company Clock") ---
 celery_app.conf.beat_schedule = {
-    'health-check-every-hour': {
+    'health-check-every-15-minutes': {
         'task': 'celery_tasks.health_check_task',
-        'schedule': crontab(minute=0), # Run every hour
+        'schedule': crontab(minute='*/15'), # Run every 15 minutes
     },
     'main-opportunity-pipeline-every-2-hours': {
         'task': 'celery_tasks.main_opportunity_pipeline_task',
-        'schedule': crontab(minute=0, hour='*/2'), # Run every 2 hours
-        #'schedule': crontab(minute='*/2'), # TEMP: Run every 2 minutes for testing
+        'schedule': crontab(minute=0, hour='0,2,4,6,8,10,12,14,16,18,20,22'), # Run every 2 hours at specific times
+        #'schedule': crontab(minute='*/5'), # TEMP: Run every 5 minutes for testing
     }
 }
