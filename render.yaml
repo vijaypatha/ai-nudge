@@ -1,4 +1,4 @@
-# render.yaml v6.0.0
+# render.yaml v7.0.0
 
 databases:
   - name: ai-nudge-db
