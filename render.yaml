@@ -1,4 +1,4 @@
-# render.yaml (Backend-Only Version)
+# render.yaml (Unified Version)
 
 databases:
   - name: realestate-db
