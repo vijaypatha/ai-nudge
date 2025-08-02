@@ -1,4 +1,4 @@
-# render.yaml v7.0.0
+# render.yaml (Fixed Celery Module Paths)
 
 databases:
   - name: ai-nudge-db
@@ -36,7 +36,7 @@ services:
     repo: https://github.com/vijaypatha/ai-nudge
     dockerfilePath: ./backend/Dockerfile
     plan: starter
-    dockerCommand: "celery -A celery_worker.celery_app worker --loglevel=info --concurrency=2"
+    dockerCommand: "celery -A backend.celery_worker.celery_app worker --loglevel=info --concurrency=2"
     envVars:
       - key: RUNNING_IN_CELERY
         value: "true"
@@ -58,7 +58,7 @@ services:
     repo: https://github.com/vijaypatha/ai-nudge
     dockerfilePath: ./backend/Dockerfile
     plan: starter
-    dockerCommand: "celery -A celery_worker.celery_app beat --loglevel=info"
+    dockerCommand: "celery -A backend.celery_worker.celery_app beat --loglevel=info"
     envVars:
       - key: RUNNING_IN_CELERY
         value: "true"
