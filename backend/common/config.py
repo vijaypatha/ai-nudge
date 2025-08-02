@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     ALLOWED_CORS_ORIGINS: str = "http://localhost:3000,https://ai-nudge-frontend.onrender.com,https://ai-nudge.onrender.com"
     CORS_ORIGIN_REGEX: Optional[str] = r"https://ai-nudge-frontend-pr-.*\.onrender\.com"
     
-    WEBSOCKET_ALLOWED_ORIGINS: str = '[]' # Default to an empty JSON array
+    WEBSOCKET_ALLOWED_ORIGINS: str = '["https://www.ainudge.app", "https://ainudge.app"]' # Allow your domains
 
     
     def __init__(self, **kwargs):

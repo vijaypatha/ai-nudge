@@ -3,7 +3,7 @@
 
 import json
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from starlette.types import ASGIApp, Scope, Receive, Send
@@ -92,6 +92,43 @@ except json.JSONDecodeError:
 app.include_router(api_router, prefix="/api") # For all standard REST endpoints
 app.include_router(websockets_router)         # For WebSockets, at the root level
 app.include_router(webhooks_router, prefix="/webhooks")
+
+# --- ADDED: Root-level Twilio webhook as backup ---
+@app.post("/twilio/incoming-sms")
+async def root_twilio_webhook(request: Request):
+    """
+    Root-level webhook for Twilio incoming SMS.
+    This is a backup endpoint in case Twilio is configured to send to /twilio/incoming-sms
+    """
+    from urllib.parse import parse_qs
+    from twilio.twiml.messaging_response import MessagingResponse
+    from integrations import twilio_incoming
+    
+    logging.info("Received incoming SMS webhook from Twilio at root level.")
+    try:
+        # Twilio sends data as application/x-www-form-urlencoded
+        body = await request.body()
+        form_data = parse_qs(body.decode('utf-8'))
+
+        from_number = form_data.get('From', [None])[0]
+        to_number = form_data.get('To', [None])[0]
+        message_body = form_data.get('Body', [None])[0]
+
+        if not all([from_number, to_number, message_body]):
+            logging.error(f"Missing required Twilio parameters. From: {from_number}, To: {to_number}, Body: {message_body}")
+            return Response(content=str(MessagingResponse()), media_type="application/xml")
+
+        logging.info(f"Incoming SMS from {from_number} to {to_number}: '{message_body}'")
+
+        # Hand off to the core processing logic
+        await twilio_incoming.process_incoming_sms(from_number=from_number, to_number=to_number, body=message_body)
+
+        # Return an empty TwiML response to Twilio to acknowledge receipt
+        return Response(content=str(MessagingResponse()), media_type="application/xml")
+
+    except Exception as e:
+        logging.error(f"Error processing incoming Twilio SMS: {e}")
+        return Response(content=str(MessagingResponse()), media_type="application/xml")
 
 @app.get("/")
 async def read_root():
