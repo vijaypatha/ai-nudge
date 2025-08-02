@@ -1,10 +1,10 @@
-# render.yaml (AI Nudge - Corrected Version)
+# render.yaml v6.0.0
 
 databases:
   - name: ai-nudge-db
     databaseName: ai_nudge_db
     user: ai_nudge_user
-    plan: free
+    plan: free 
     postgresMajorVersion: 15
 
 services:
