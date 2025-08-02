@@ -38,7 +38,7 @@ export const AddContactModal: FC<AddContactModalProps> = ({ isOpen, onClose, onC
             const newClient = await api.post('/api/clients/manual', {
                 full_name: fullName,
                 email: email || undefined,
-                phone_number: phone || undefined,
+                phone: phone || undefined,
             });
 
             setSuccess(`Successfully added ${newClient.full_name}!`);
