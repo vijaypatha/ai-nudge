@@ -17,6 +17,12 @@ pip-cache/
 .pytest_cache/
 *.sqlite3
 
+# Celery Beat schedule files
+celerybeat-schedule*
+celerybeat-schedule.db
+celerybeat-schedule.dir
+celerybeat-schedule.pag
+
 # Node
 node_modules/
 .next/

@@ -61,7 +61,7 @@ services:
     dockerfilePath: ./backend/Dockerfile
     plan: starter
     autoDeploy: false  # Add this line
-    dockerCommand: "celery -A backend.celery_worker.celery_app beat --loglevel=info"
+    dockerCommand: "celery -A backend.celery_worker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule"
     envVars:
       - key: RUNNING_IN_CELERY
         value: "true"

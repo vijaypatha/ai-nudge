@@ -100,7 +100,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    command: celery -A celery_worker.celery_app beat --loglevel=info --schedule=/app/celerybeat-schedule.db
+    command: celery -A celery_worker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     environment:
       ENVIRONMENT: development
       PYTHONPATH: /app
