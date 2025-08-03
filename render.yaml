@@ -16,20 +16,7 @@ services:
     healthCheckPath: /test-db
     plan: starter
     autoDeploy: false  # Add this line
-    dockerCommand: >
-      sh -c "alembic upgrade head && 
-      echo '=== DATABASE STATE CHECK ===' && 
-      python -c 'from sqlmodel import Session, select; from data.database import engine; from data.models import User; session = Session(engine); users = session.exec(select(User)).all(); print(f\"Found {len(users)} users in database\"); [print(f\"- {u.full_name} ({u.email})\") for u in users]; exit(0 if len(users) > 0 else 1)' && 
-      if [ $? -eq 1 ]; then 
-        echo '=== DATABASE IS EMPTY - RUNNING SEED ===' && 
-        python create_super_user.py || echo '⚠️  Super user creation failed, continuing with seed data...' && 
-        python -c 'import asyncio; from data.seed import seed_database; asyncio.run(seed_database())' && 
-        echo '=== SEEDING COMPLETED ==='; 
-      else 
-        echo '=== DATABASE HAS DATA - SKIPPING SEED ==='; 
-      fi && 
-      echo '=== STARTING SERVER ===' && 
-      uvicorn api.main:app --host 0.0.0.0 --port $PORT"
+    dockerCommand: "./start_render.sh"
     envVars:
       - fromGroup: ainudge-env-group
       - key: DATABASE_URL
