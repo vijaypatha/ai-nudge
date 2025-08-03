@@ -106,7 +106,7 @@ async def trigger_comprehensive_test_suite(current_user: User = Depends(get_curr
 async def trigger_market_scan(minutes_ago: int = 60, current_user: User = Depends(get_current_user_from_token)):
     """Trigger the main opportunity pipeline for the current user"""
     from workflow.pipeline import run_main_opportunity_pipeline
-    await run_main_opportunity_pipeline()
+    await run_main_opportunity_pipeline(minutes_ago=minutes_ago)
     return {"status": "accepted", "message": f"Full market scan initiated for current user, looking back {minutes_ago} minutes."}
 
 @router.post("/run-daily-scan", status_code=status.HTTP_202_ACCEPTED)
