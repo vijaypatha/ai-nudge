@@ -9,7 +9,8 @@ from .client import Client
 from .message import Message, ScheduledMessage
 from .campaign import CampaignBriefing
 from .resource import Resource, ContentResource
-from .event import MarketEvent
+# --- THIS IS THE FIX: Add PipelineRun to this import line ---
+from .event import MarketEvent, PipelineRun
 from .faq import Faq
 from .feedback import NegativePreference
 
@@ -24,4 +25,6 @@ __all__ = [
     "MarketEvent",
     "Faq",
     "NegativePreference",
+    # --- ADDED: Also add PipelineRun to the __all__ list for completeness ---
+    "PipelineRun",
 ]
