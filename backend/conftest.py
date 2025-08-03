@@ -16,18 +16,25 @@ lifespan_patches = [
     patch('api.main.semantic_service.initialize_vector_index', return_value=None)
 ]
 
-# App import and DB setup
-from api.main import app
-from api.security import get_current_user_from_token
-from data.database import get_session
-from data.models.user import User
-
-# Test database engine setup
+# Test database engine setup - SINGLE ENGINE FOR ALL TESTS
 engine = create_engine(
     "sqlite:///:memory:",
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
+
+# --- CRITICAL FIX: Ensure all models are imported ONCE before any tests run ---
+# This prevents the "Table is already defined" error by ensuring all models
+# are registered with SQLModel.metadata before any test execution
+from data.models import (
+    User, Client, Resource, ContentResource, Message, ScheduledMessage,
+    CampaignBriefing, MarketEvent, PipelineRun, Faq, NegativePreference
+)
+
+# App import and DB setup
+from api.main import app
+from api.security import get_current_user_from_token
+from data.database import get_session
 
 # --- NEW: This fixture ensures all modules use the same test engine ---
 @pytest.fixture(scope='session', autouse=True)
@@ -47,6 +54,16 @@ def session_fixture() -> Generator[Session, None, None]:
     """Creates a new, empty database session for each test."""
     for p in lifespan_patches:
         p.start()
+    
+    # --- CRITICAL FIX: Clear metadata before creating tables ---
+    # This prevents "Table is already defined" errors
+    SQLModel.metadata.clear()
+    
+    # Re-import models to ensure they're registered with the cleared metadata
+    from data.models import (
+        User, Client, Resource, ContentResource, Message, ScheduledMessage,
+        CampaignBriefing, MarketEvent, PipelineRun, Faq, NegativePreference
+    )
     
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:

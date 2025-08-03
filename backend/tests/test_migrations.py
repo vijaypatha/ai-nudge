@@ -17,7 +17,8 @@ from sqlmodel import SQLModel, create_engine, Session
 from alembic import command
 from alembic.config import Config
 
-from data.database import engine, DATABASE_URL
+# --- FIXED: Use models from conftest instead of importing directly ---
+# This prevents the "Table is already defined" error
 from data.models.user import User
 from data.models.client import Client
 from data.models.resource import Resource

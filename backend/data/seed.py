@@ -11,14 +11,14 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from .database import engine
-from .models.user import User, UserType
-from .models.client import Client
-# --- MODIFIED: Import all models to ensure correct deletion order ---
-from .models.message import Message, ScheduledMessage
-from .models.resource import Resource, ContentResource
-from .models.campaign import CampaignBriefing
-from .models.faq import Faq
-from .models.event import MarketEvent, PipelineRun
+# --- FIXED: Defer model imports to prevent table redefinition ---
+# from .models.user import User, UserType
+# from .models.client import Client
+# from .models.message import Message, ScheduledMessage
+# from .models.resource import Resource, ContentResource
+# from .models.campaign import CampaignBriefing
+# from .models.faq import Faq
+# from .models.event import MarketEvent, PipelineRun
 from common.config import get_settings
 from . import crm as crm_service
 settings = get_settings()
@@ -37,6 +37,16 @@ async def seed_database():
     with Session(engine) as session:
         # --- MODIFIED: Corrected deletion order to respect foreign key constraints ---
         logger.info("Clearing existing data...")
+        
+        # --- FIXED: Import models only when needed ---
+        from .models.user import User, UserType
+        from .models.client import Client
+        from .models.message import Message, ScheduledMessage
+        from .models.resource import Resource, ContentResource
+        from .models.campaign import CampaignBriefing
+        from .models.faq import Faq
+        from .models.event import MarketEvent, PipelineRun
+        
         # Clear tables that depend on users or other primary tables first.
         # The order here is critical to avoid integrity errors.
         session.query(ScheduledMessage).delete()

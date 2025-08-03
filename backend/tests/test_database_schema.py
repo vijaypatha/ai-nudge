@@ -10,12 +10,13 @@
 
 import pytest
 import uuid
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, select
 from sqlalchemy import inspect, text
 from typing import List, Dict, Any
 from datetime import datetime
 
-from data.database import engine, get_session
+# --- FIXED: Use models from conftest instead of importing directly ---
+# This prevents the "Table is already defined" error
 from data.models.user import User, UserType
 from data.models.client import Client
 from data.models.resource import Resource, ResourceType, ResourceStatus

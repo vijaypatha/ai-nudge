@@ -9,16 +9,17 @@
 # When was it updated: 2025-01-27
 
 from fastapi.testclient import TestClient
-from data.models.user import User
+# --- FIXED: Remove direct model import to prevent table redefinition ---
+# Models are now imported centrally in conftest.py
 
-def test_get_current_user_profile_succeeds(authenticated_client: TestClient, test_user: User):
+def test_get_current_user_profile_succeeds(authenticated_client: TestClient, test_user):
     """Tests successful retrieval of the current user's profile."""
     response = authenticated_client.get("/api/users/me")
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == str(test_user.id)
 
-def test_update_user_profile_succeeds(authenticated_client: TestClient, test_user: User):
+def test_update_user_profile_succeeds(authenticated_client: TestClient, test_user):
     """Tests that a valid user profile update succeeds."""
     # Arrange
     payload = {"full_name": "Updated Test User"}

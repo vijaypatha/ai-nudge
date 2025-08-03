@@ -8,7 +8,6 @@ from contextlib import asynccontextmanager
 from starlette.types import ASGIApp, Scope, Receive, Send
 from datetime import datetime, timezone
 
-# --- CORRECTED: Using direct, absolute imports which are more robust in Docker ---
 from backend.api.rest.websockets import router as websockets_router
 from backend.api.rest.api_endpoints import api_router
 from backend.api.webhooks.router import webhooks_router
@@ -16,9 +15,7 @@ from backend.common.config import get_settings
 from backend.agent_core import semantic_service
 from sqlmodel import Session, select
 from backend.data.database import engine
-from backend.data.models.user import User
-# --- CORRECTED: Using the correct function name from your seed.py ---
-from backend.data.seed import seed_initial_data
+from backend.data.seed import seed_database
 
 class WebSocketOriginCheckMiddleware:
     def __init__(self, app: ASGIApp, allowed_origins: list[str]):
@@ -52,11 +49,13 @@ async def lifespan(app: FastAPI):
     
     print("Checking database for seed data...")
     with Session(engine) as session:
+        # Import User model only when needed to prevent redefinition errors
+        from backend.data.models.user import User
         first_user = session.exec(select(User)).first()
         if not first_user:
             print("Database is empty. Running full seed process...")
-            # --- CORRECTED: Calling the correct function name ---
-            seed_initial_data(session)
+            # --- FIXED: Call the async seed function correctly without asyncio.run() ---
+            await seed_database()
             print("Database seeding completed successfully.")
         else:
             print("Database already contains data. Skipping seed process.")

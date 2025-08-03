@@ -4,13 +4,8 @@ import os
 from sqlmodel import create_engine, SQLModel, Session
 from common.config import get_settings
 
-# This single, clean import statement uses the __init__.py file as the single
-# source of truth for all models. This is the fix that prevents the
-# "Table is already defined" error.
-from .models import (
-    User, Client, Resource, ContentResource, Message, ScheduledMessage,
-    CampaignBriefing, MarketEvent, PipelineRun, Faq, NegativePreference
-)
+# --- FIXED: Defer model imports to prevent table redefinition ---
+# Models are imported only when needed, not at module level
 
 def get_database_settings():
     """Get database-only settings for migrations."""
@@ -23,6 +18,11 @@ engine = create_engine(DATABASE_URL, echo=False)
 
 def create_db_and_tables():
     """Initializes the database by creating all tables."""
+    # Import models only when creating tables
+    from .models import (
+        User, Client, Resource, ContentResource, Message, ScheduledMessage,
+        CampaignBriefing, MarketEvent, PipelineRun, Faq, NegativePreference
+    )
     SQLModel.metadata.create_all(engine)
 
 def get_session():
