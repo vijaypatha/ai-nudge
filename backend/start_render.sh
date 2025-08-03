@@ -30,6 +30,8 @@ else:
 
 # If database is empty, run seeding
 if [ $? -eq 1 ]; then
+    echo "DEBUG: Entering seeding section..."
+    echo "DEBUG: Exit code from database check: $?"
     echo "=== DATABASE IS EMPTY - RUNNING SEED ==="
     echo "DEBUG: About to start seeding process..."
     echo "DEBUG: Current working directory: $(pwd)"
