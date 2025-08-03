@@ -36,12 +36,40 @@ if [ $? -eq 1 ]; then
     echo "Attempting to create super user..."
     python create_super_user.py || echo "⚠️  Super user creation failed, continuing with seed data..."
     
-    # Run seed database
+    # Test imports first
+    echo "Testing Python imports..."
+    python -c "
+import sys
+print('Python version:', sys.version)
+print('Testing imports...')
+try:
+    import asyncio
+    print('✓ asyncio imported')
+    from data.seed import seed_database
+    print('✓ seed_database imported')
+    print('✓ All imports successful')
+except Exception as e:
+    print('❌ Import error:', str(e))
+    import traceback
+    traceback.print_exc()
+    exit(1)
+"
+    
+    # Run seed database with error handling
     echo "Running database seeding..."
     python -c "
 import asyncio
-from data.seed import seed_database
-asyncio.run(seed_database())
+import sys
+try:
+    from data.seed import seed_database
+    print('Starting seed_database()...')
+    asyncio.run(seed_database())
+    print('✓ Seed database completed successfully')
+except Exception as e:
+    print('❌ Seed database error:', str(e))
+    import traceback
+    traceback.print_exc()
+    exit(1)
 "
     
     echo "=== SEEDING COMPLETED ==="
