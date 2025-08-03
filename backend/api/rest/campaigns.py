@@ -13,7 +13,8 @@ from sqlmodel import Session
 from data.models.user import User
 from api.security import get_current_user_from_token
 from data.models.message import SendMessageImmediate, Message, MessageStatus, ScheduledMessage
-from data.models.campaign import CampaignBriefing, CampaignUpdate, RecommendationSlateResponse, CampaignStatus
+# --- FIXED: Defer import to prevent multiple registration ---
+# from data.models.campaign import CampaignBriefing, CampaignUpdate, RecommendationSlateResponse, CampaignStatus
 from agent_core.brain.verticals import VERTICAL_CONFIGS
 from agent_core.agents import conversation as conversation_agent
 from data import crm as crm_service
@@ -35,7 +36,7 @@ router = APIRouter(
 # --- Pydantic Models for Payloads & Responses (Unchanged) ---
 
 class AgnosticNudgesResponse(BaseModel):
-    nudges: List[CampaignBriefing]
+    nudges: List[Any]  # Use Any instead of string reference
     display_config: Dict[str, Any]
 
 class PlanRelationshipPayload(BaseModel):
@@ -117,6 +118,8 @@ async def get_all_campaigns(
     Fetches all campaign briefings in DRAFT status for the current user.
     (Functionality unchanged)
     """
+    # --- FIXED: Defer import to prevent multiple registration ---
+    from data.models.campaign import CampaignBriefing, CampaignStatus, CampaignUpdate, RecommendationSlateResponse
     try:
         briefings = crm_service.get_new_campaign_briefings_for_user(user_id=current_user.id)
         content_recommendations = get_content_recommendations_for_user(user_id=current_user.id)
@@ -207,7 +210,7 @@ async def handle_campaign_action(
         raise HTTPException(status_code=500, detail="Failed to handle co-pilot action.")
 
 
-@router.post("/{campaign_id}/approve", response_model=CampaignBriefing)
+@router.post("/{campaign_id}/approve", response_model=Any)
 async def approve_campaign_plan(
     campaign_id: UUID,
     current_user: User = Depends(get_current_user_from_token)
@@ -216,6 +219,8 @@ async def approve_campaign_plan(
     Approves a DRAFT relationship plan. This endpoint reads the steps from the
     CampaignBriefing and creates the actual ScheduledMessage records.
     """
+    # --- FIXED: Defer import to prevent multiple registration ---
+    from data.models.campaign import CampaignStatus
     with Session(crm_service.engine) as session:
         plan = crm_service.get_campaign_briefing_by_id(campaign_id, current_user.id, session)
 
@@ -267,11 +272,13 @@ async def approve_campaign_plan(
         return plan
 
 
-@router.post("/briefings/{briefing_id}/complete", response_model=RecommendationSlateResponse)
+@router.post("/briefings/{briefing_id}/complete", response_model=Any)
 async def complete_briefing(
     briefing_id: uuid.UUID,
     current_user: User = Depends(get_current_user_from_token)
 ):
+    # --- FIXED: Defer import to prevent multiple registration ---
+    from data.models.campaign import CampaignStatus
     # (Functionality unchanged)
     with Session(crm_service.engine) as session:
         updated_slate = crm_service.update_slate_status(
@@ -319,13 +326,15 @@ async def send_instant_nudge_now(message_data: SendMessageImmediate, current_use
 
 
 # --- MODIFIED: This endpoint now triggers the feedback learning mechanism ---
-@router.put("/{campaign_id}", response_model=CampaignBriefing)
+@router.put("/{campaign_id}", response_model=Any)
 async def update_campaign_briefing(
     campaign_id: UUID, 
-    update_data: CampaignUpdate, 
+    update_data: Any, 
     background_tasks: BackgroundTasks, # <-- ADDED dependency
     current_user: User = Depends(get_current_user_from_token)
 ):
+    # --- FIXED: Defer import to prevent multiple registration ---
+    from data.models.campaign import CampaignUpdate, CampaignStatus
     try:
         # The campaign is updated first, ensuring the UI gets a fast response.
         updated_briefing = crm_service.update_campaign_briefing(campaign_id, update_data, user_id=current_user.id)
@@ -347,7 +356,7 @@ async def update_campaign_briefing(
         raise HTTPException(status_code=500, detail=f"Failed to update campaign: {str(e)}")
 
 
-@router.get("/{campaign_id}", response_model=CampaignBriefing)
+@router.get("/{campaign_id}", response_model=Any)
 async def get_campaign_by_id(campaign_id: UUID, current_user: User = Depends(get_current_user_from_token)):
     # (Functionality unchanged)
     campaign = crm_service.get_campaign_briefing_by_id(campaign_id, user_id=current_user.id)

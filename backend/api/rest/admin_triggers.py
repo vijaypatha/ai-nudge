@@ -11,7 +11,8 @@ from api.security import get_current_user_from_token
 from data import crm as crm_service
 from agent_core.brain import nudge_engine
 from integrations import twilio_incoming
-from data.models.campaign import CampaignBriefing, MatchedClient
+# --- FIXED: Defer import to prevent multiple registration ---
+# from data.models.campaign import CampaignBriefing, MatchedClient
 from data.models.event import MarketEvent
 # --- MODIFIED: Import Resource instead of Property ---
 from data.models.resource import Resource

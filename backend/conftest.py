@@ -23,9 +23,9 @@ engine = create_engine(
     poolclass=StaticPool,
 )
 
-# --- CRITICAL FIX: Ensure all models are imported ONCE before any tests run ---
-# This prevents the "Table is already defined" error by ensuring all models
-# are registered with SQLModel.metadata before any test execution
+# --- CRITICAL FIX: Import models ONCE to prevent multiple registration ---
+# Models are imported here to ensure they're registered only once
+# with SQLModel.metadata before any test execution
 from data.models import (
     User, Client, Resource, ContentResource, Message, ScheduledMessage,
     CampaignBriefing, MarketEvent, PipelineRun, Faq, NegativePreference
@@ -55,15 +55,7 @@ def session_fixture() -> Generator[Session, None, None]:
     for p in lifespan_patches:
         p.start()
     
-    # --- CRITICAL FIX: Clear metadata before creating tables ---
-    # This prevents "Table is already defined" errors
-    SQLModel.metadata.clear()
-    
-    # Re-import models to ensure they're registered with the cleared metadata
-    from data.models import (
-        User, Client, Resource, ContentResource, Message, ScheduledMessage,
-        CampaignBriefing, MarketEvent, PipelineRun, Faq, NegativePreference
-    )
+    # Models are already imported at module level, so we don't need to re-import them
     
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:

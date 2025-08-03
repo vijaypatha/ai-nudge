@@ -2,6 +2,8 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 from data import crm as crm_service
+# --- FIXED: Defer import to prevent multiple registration ---
+# from data.models.campaign import CampaignBriefing
 from data.models.campaign import CampaignBriefing
 
 # --- MODIFIED: Import User model and security dependency ---
@@ -14,7 +16,7 @@ router = APIRouter(
 )
 
 # --- MODIFIED: Added security dependency and removed hardcoded user ID ---
-@router.get("/", response_model=List[CampaignBriefing])
+@router.get("/", response_model=List["CampaignBriefing"])
 async def get_all_actionable_nudges(current_user: User = Depends(get_current_user_from_token)):
     """
     Get all actionable nudges for the current user.

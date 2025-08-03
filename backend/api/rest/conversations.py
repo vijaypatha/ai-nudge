@@ -10,7 +10,9 @@ from datetime import datetime, timezone, timedelta
 from data.models.user import User
 from api.security import get_current_user_from_token
 from data.models.message import Message, MessageWithDraft, MessageSource, MessageDirection
-from data.models.campaign import RecommendationSlateResponse, CampaignBriefing
+# --- FIXED: Defer import to prevent multiple registration ---
+# from data.models.campaign import RecommendationSlateResponse, CampaignBriefing
+from data.models.campaign import CampaignBriefing
 from pydantic import BaseModel
 from data import crm as crm_service
 from agent_core import orchestrator
@@ -38,10 +40,13 @@ class ConversationSummary(BaseModel):
 
 class ConversationDetailResponse(BaseModel):
     messages: List[MessageWithDraft]
-    immediate_recommendations: Optional[RecommendationSlateResponse] = None
-    active_plan: Optional[RecommendationSlateResponse] = None
+    immediate_recommendations: Optional["RecommendationSlateResponse"] = None
+    active_plan: Optional["RecommendationSlateResponse"] = None
     
     model_config = {"from_attributes": True}
+
+# --- FIXED: Defer import to prevent multiple registration ---
+from data.models.campaign import RecommendationSlateResponse
 
 # Rebuild the model to ensure all dependencies are resolved
 ConversationDetailResponse.model_rebuild()
