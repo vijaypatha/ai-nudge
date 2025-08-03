@@ -1,58 +1,87 @@
 #!/bin/bash
+
 set -e
 
 echo "=== STARTING RENDER DEPLOYMENT ==="
 
-# Run migrations
-echo "Running database migrations..."
-alembic upgrade head
+# Function to log with timestamp
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
 
-# Check database state
-echo "=== DATABASE STATE CHECK ==="
-python -c "
+# Function to run database migrations
+run_migrations() {
+    log "Running database migrations..."
+    alembic upgrade head
+    log "✅ Database migrations completed"
+}
+
+# Function to check if database needs seeding
+check_database_state() {
+    log "=== DATABASE STATE CHECK ==="
+    
+    # Use current directory instead of /tmp for better permissions
+    local db_check_file="./db_check_result"
+    
+    python -c "
 import sys
 try:
     from sqlmodel import Session, select
     from data.database import engine
     from data.models import User
     
-    session = Session(engine)
-    users = session.exec(select(User)).all()
-    print(f'Found {len(users)} users in database')
-    for user in users:
-        print(f'- {user.full_name} ({user.email})')
-    
-    if len(users) == 0:
-        print('Database is empty - will run seeding')
-        exit(1)
-    else:
-        print('Database has data - skipping seed')
-        exit(0)
+    with Session(engine) as session:
+        users = session.exec(select(User)).all()
+        user_count = len(users)
+        print(f'Found {user_count} users in database')
+        
+        if user_count == 0:
+            print('NEEDS_SEEDING=true')
+            print('Database is empty - will run seeding')
+        else:
+            print('NEEDS_SEEDING=false')
+            print('Database has data - skipping seed')
+            for user in users:
+                print(f'- {user.full_name} ({user.email})')
+                
 except Exception as e:
-    print(f'❌ Database check error: {str(e)}')
+    print(f'Database check error: {str(e)}')
     import traceback
     traceback.print_exc()
+    print('NEEDS_SEEDING=true')
     print('Database check failed - will run seeding')
-    exit(1)
-"
+" > "$db_check_file" 2>&1
 
-# If database is empty, run seeding
-if [ $? -eq 1 ]; then
-    echo "DEBUG: Entering seeding section..."
-    echo "DEBUG: Exit code from database check: $?"
-    echo "=== DATABASE IS EMPTY - RUNNING SEED ==="
-    echo "DEBUG: About to start seeding process..."
-    echo "DEBUG: Current working directory: $(pwd)"
-    echo "DEBUG: Python version: $(python --version)"
-    echo "DEBUG: Checking if create_super_user.py exists: $(ls -la create_super_user.py 2>/dev/null || echo 'File not found')"
-    
-    # Try to create super user (may fail if env vars missing)
-    echo "Attempting to create super user..."
-    echo "DEBUG: About to run create_super_user.py..."
-    python create_super_user.py || echo "⚠️  Super user creation failed, continuing with seed data..."
+    # Check if file was created and grep with error handling
+    if [ -f "$db_check_file" ] && grep -q "NEEDS_SEEDING=true" "$db_check_file" 2>/dev/null; then
+        # Cleanup temp file
+        rm -f "$db_check_file"
+        return 0  # Needs seeding (success for if condition)
+    else
+        # Cleanup temp file
+        rm -f "$db_check_file"
+        return 1  # Has data (failure for if condition)
+    fi
+}
+
+# Function to create superuser
+create_superuser() {
+    log "Attempting to create super user..."
+    if [ -f "create_super_user.py" ]; then
+        python create_super_user.py || {
+            log "⚠️ Super user creation failed or skipped (may already exist)"
+        }
+    else
+        log "⚠️ create_super_user.py not found, skipping"
+    fi
+}
+
+# Function to run database seeding
+run_database_seeding() {
+    log "=== DATABASE IS EMPTY - RUNNING SEED ==="
     
     # Test imports first
-    echo "Testing Python imports..."
+    log "Testing Python imports..."
     python -c "
 import sys
 print('Python version:', sys.version)
@@ -61,17 +90,17 @@ try:
     import asyncio
     print('✓ asyncio imported')
     from data.seed import seed_database
-    print('✓ seed_database imported')
+    print('✓ seed_database imported from data.seed')
     print('✓ All imports successful')
 except Exception as e:
     print('❌ Import error:', str(e))
     import traceback
     traceback.print_exc()
-    exit(1)
+    # Do not exit - let the server start anyway
 "
     
     # Run seed database with error handling
-    echo "Running database seeding..."
+    log "Running database seeding..."
     python -c "
 import asyncio
 import sys
@@ -84,14 +113,41 @@ except Exception as e:
     print('❌ Seed database error:', str(e))
     import traceback
     traceback.print_exc()
-    exit(1)
+    # Do not exit - let the server start anyway
 "
     
-    echo "=== SEEDING COMPLETED ==="
-else
-    echo "=== DATABASE HAS DATA - SKIPPING SEED ==="
-fi
+    log "=== SEEDING COMPLETED ==="
+}
 
-# Start the server
-echo "=== STARTING SERVER ==="
-exec uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000} 
+# Function to start the application server
+start_server() {
+    log "=== STARTING SERVER ==="
+    exec uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}
+}
+
+# Main execution flow
+main() {
+    log "Initializing production deployment..."
+    
+    # Step 1: Run migrations
+    run_migrations
+    
+    # Step 2: Check if database needs seeding
+    if check_database_state; then
+        log "Database is empty - proceeding with initialization"
+        
+        # Step 3a: Create superuser
+        create_superuser
+        
+        # Step 3b: Run database seeding
+        run_database_seeding
+    else
+        log "=== DATABASE HAS DATA - SKIPPING SEED ==="
+    fi
+    
+    # Step 4: Start the server (this should ALWAYS happen)
+    start_server
+}
+
+# Execute main function
+main "$@"

@@ -1,4 +1,4 @@
-# render.yaml (Updated with Auto-Deploy Disabled)
+# render.yaml (Only fix Celery paths)
 
 databases:
   - name: ai-nudge-db
@@ -15,7 +15,7 @@ services:
     dockerfilePath: ./backend/Dockerfile
     healthCheckPath: /test-db
     plan: starter
-    autoDeploy: false  # Add this line
+    autoDeploy: false
     dockerCommand: "./start_render.sh"
     envVars:
       - fromGroup: ainudge-env-group
@@ -36,11 +36,13 @@ services:
     repo: https://github.com/vijaypatha/ai-nudge
     dockerfilePath: ./backend/Dockerfile
     plan: starter
-    autoDeploy: false  # Add this line
-    dockerCommand: "celery -A backend.celery_worker.celery_app worker --loglevel=info --concurrency=2"
+    autoDeploy: false
+    dockerCommand: "celery -A celery_worker.celery_app worker --loglevel=info --concurrency=2"
     envVars:
       - key: RUNNING_IN_CELERY
         value: "true"
+      - key: PYTHONPATH
+        value: "/app"
       - fromGroup: ainudge-env-group
       - key: DATABASE_URL
         fromDatabase:
@@ -59,11 +61,13 @@ services:
     repo: https://github.com/vijaypatha/ai-nudge
     dockerfilePath: ./backend/Dockerfile
     plan: starter
-    autoDeploy: false  # Add this line
-    dockerCommand: "celery -A backend.celery_worker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule"
+    autoDeploy: false
+    dockerCommand: "celery -A celery_worker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule"
     envVars:
       - key: RUNNING_IN_CELERY
         value: "true"
+      - key: PYTHONPATH
+        value: "/app"
       - fromGroup: ainudge-env-group
       - key: DATABASE_URL
         fromDatabase:
