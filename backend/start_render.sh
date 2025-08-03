@@ -10,22 +10,30 @@ alembic upgrade head
 # Check database state
 echo "=== DATABASE STATE CHECK ==="
 python -c "
-from sqlmodel import Session, select
-from data.database import engine
-from data.models import User
-
-session = Session(engine)
-users = session.exec(select(User)).all()
-print(f'Found {len(users)} users in database')
-for user in users:
-    print(f'- {user.full_name} ({user.email})')
-
-if len(users) == 0:
-    print('Database is empty - will run seeding')
+import sys
+try:
+    from sqlmodel import Session, select
+    from data.database import engine
+    from data.models import User
+    
+    session = Session(engine)
+    users = session.exec(select(User)).all()
+    print(f'Found {len(users)} users in database')
+    for user in users:
+        print(f'- {user.full_name} ({user.email})')
+    
+    if len(users) == 0:
+        print('Database is empty - will run seeding')
+        exit(1)
+    else:
+        print('Database has data - skipping seed')
+        exit(0)
+except Exception as e:
+    print(f'❌ Database check error: {str(e)}')
+    import traceback
+    traceback.print_exc()
+    print('Database check failed - will run seeding')
     exit(1)
-else:
-    print('Database has data - skipping seed')
-    exit(0)
 "
 
 # If database is empty, run seeding
