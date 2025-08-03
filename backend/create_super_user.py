@@ -42,7 +42,7 @@ def create_all_access_user():
         "twilio_phone_number": admin_twilio_phone,
         "user_type": UserType.REALTOR,
         "vertical": None,  # This gives access to all verticals
-        "super_user": True,  # This marks as super user
+        "super_user": False,  # Keep as regular user - just with all-vertical access
         "onboarding_complete": True,
         "timezone": "UTC",
         "faq_auto_responder_enabled": True,
