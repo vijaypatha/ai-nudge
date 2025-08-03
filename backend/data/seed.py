@@ -20,7 +20,8 @@ from .database import engine
 # from .models.faq import Faq
 # from .models.event import MarketEvent, PipelineRun
 from common.config import get_settings
-from . import crm as crm_service
+# --- FIXED: Defer crm import to prevent table redefinition ---
+# from . import crm as crm_service
 settings = get_settings()
 
 logging.basicConfig(level=logging.INFO)
@@ -237,6 +238,8 @@ async def seed_database():
 
         # --- Step 6: Regenerate embeddings for all new clients ---
         logger.info("Generating initial embeddings for all seeded clients...")
+        # --- FIXED: Import crm_service only when needed ---
+        from . import crm as crm_service
         for client in realty_clients + therapy_clients:
             try:
                 await crm_service.regenerate_embedding_for_client(client, session=session)
