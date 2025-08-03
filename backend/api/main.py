@@ -1,5 +1,4 @@
 # File Path: backend/api/main.py
-# --- FINAL FIX v2: Separates the WebSocket router to match the URL requested by the frontend ---
 
 import json
 import logging
@@ -9,19 +8,31 @@ from contextlib import asynccontextmanager
 from starlette.types import ASGIApp, Scope, Receive, Send
 from datetime import datetime, timezone
 
+# --- MODIFIED: Imports updated to use the new seed.py script ---
 try:
-    # --- MODIFIED: Import the websocket router directly ---
     from api.rest.websockets import router as websockets_router
     from api.rest.api_endpoints import api_router
     from api.webhooks.router import webhooks_router
     from common.config import get_settings
     from agent_core import semantic_service
+    # --- MODIFIED FOR NEW SEEDER ---
+    from sqlmodel import Session, select
+    from data.database import engine
+    from data.models.user import User
+    from data.seed import seed_all # Using the new seed script
+    # --- END MODIFIED ---
 except ImportError:
     from .rest.websockets import router as websockets_router
     from .rest.api_endpoints import api_router
     from .webhooks.router import webhooks_router
     from ..common.config import get_settings
     from ..agent_core import semantic_service
+    # --- MODIFIED FOR NEW SEEDER (RELATIVE IMPORTS) ---
+    from ..data.database import engine
+    from ..data.models.user import User
+    from ..data.seed import seed_all # Using the new seed script
+    from sqlmodel import Session, select
+    # --- END MODIFIED ---
 
 class WebSocketOriginCheckMiddleware:
     def __init__(self, app: ASGIApp, allowed_origins: list[str]):
@@ -52,6 +63,20 @@ async def lifespan(app: FastAPI):
     print("--- Application Startup ---")
     print(f"--- HTTP Allowed CORS Origins: {settings.ALLOWED_CORS_ORIGINS.split(',')} ---")
     print(f"--- HTTP CORS Origin Regex: {settings.CORS_ORIGIN_REGEX} ---")
+    
+    # --- MODIFIED: Simplified seeding logic to use the new seed_all function ---
+    print("Checking database for seed data...")
+    with Session(engine) as session:
+        # Check if any user exists. If not, the DB is considered empty.
+        first_user = session.exec(select(User)).first()
+        if not first_user:
+            print("Database is empty. Running full seed process...")
+            seed_all(session) # A single call to your new seeder
+            print("Database seeding completed successfully.")
+        else:
+            print("Database already contains data. Skipping seed process.")
+    # --- END MODIFIED ---
+
     await semantic_service.initialize_vector_index()
     print("--- Semantic service vector index initialized. ---")
     print("--- Application startup complete. ---")
@@ -89,17 +114,15 @@ except json.JSONDecodeError:
 
 
 # 3. Include your application routers
-# --- MODIFIED: Include routers separately ---
-app.include_router(api_router, prefix="/api") # For all standard REST endpoints
-app.include_router(websockets_router)         # For WebSockets, at the root level
+app.include_router(api_router, prefix="/api") 
+app.include_router(websockets_router)         
 app.include_router(webhooks_router, prefix="/webhooks")
 
-# --- ADDED: Root-level Twilio webhook as backup ---
+# Root-level Twilio webhook as backup
 @app.post("/twilio/incoming-sms")
 async def root_twilio_webhook(request: Request):
     """
     Root-level webhook for Twilio incoming SMS.
-    This is a backup endpoint in case Twilio is configured to send to /twilio/incoming-sms
     """
     from urllib.parse import parse_qs
     from twilio.twiml.messaging_response import MessagingResponse
@@ -107,7 +130,6 @@ async def root_twilio_webhook(request: Request):
     
     logging.info("Received incoming SMS webhook from Twilio at root level.")
     try:
-        # Twilio sends data as application/x-www-form-urlencoded
         body = await request.body()
         form_data = parse_qs(body.decode('utf-8'))
 
@@ -121,10 +143,8 @@ async def root_twilio_webhook(request: Request):
 
         logging.info(f"Incoming SMS from {from_number} to {to_number}: '{message_body}'")
 
-        # Hand off to the core processing logic
         await twilio_incoming.process_incoming_sms(from_number=from_number, to_number=to_number, body=message_body)
-
-        # Return an empty TwiML response to Twilio to acknowledge receipt
+        
         return Response(content=str(MessagingResponse()), media_type="application/xml")
 
     except Exception as e:
@@ -139,7 +159,6 @@ async def read_root():
 async def test_db_health():
     """
     Health check endpoint for Render deployment.
-    Tests database connectivity and returns status.
     """
     try:
         from sqlmodel import Session, select
@@ -147,8 +166,7 @@ async def test_db_health():
         from data.models.user import User
         
         with Session(engine) as session:
-            # Test basic database query
-            user_count = session.exec(select(User)).first()
+            session.exec(select(User)).first()
             
         return {
             "status": "healthy",
