@@ -45,11 +45,10 @@ RUN useradd --create-home --shell /bin/bash app && \
     chown -R app:app /app && \
     chmod -R 755 /app
 
-# Create the start script that will run migrations and then the web server.
-# This script is owned by the 'app' user and has execute permissions.
-RUN echo '#!/bin/bash\nset -e\necho "Running migrations..."\nalembic upgrade head\necho "Starting server..."\nexec uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}' > /app/start.sh && \
-    chmod +x /app/start.sh && \
-    chown app:app /app/start.sh
+# Copy our custom startup script and set permissions
+COPY backend/start_render.sh /app/start_render.sh
+RUN chmod +x /app/start_render.sh && \
+    chown app:app /app/start_render.sh
 
 # This is the final critical fix: Set the WORKDIR to the backend directory.
 # This ensures all commands in the start script run from the correct location, fixing the Alembic error.
@@ -62,4 +61,4 @@ USER app
 EXPOSE 8000
 
 # Set the default command to run when the container starts.
-CMD ["/app/start.sh"]
+CMD ["/app/start_render.sh"]
