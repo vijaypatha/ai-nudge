@@ -205,7 +205,11 @@ export default function MarketActivityPage() {
   const [eventTypeFilter, setEventTypeFilter] = useState('all');
   const [priceFilter, setPriceFilter] = useState('all');
 
-  useEffect(() => { if (user && user.user_type !== 'realtor') router.push('/dashboard'); }, [user, router]);
+  useEffect(() => { 
+    if (user && user.user_type !== 'realtor' && !user.super_user) {
+      router.push('/dashboard');
+    }
+  }, [user, router]);
 
   const fetchMarketActivity = async () => {
     try {
@@ -239,7 +243,7 @@ export default function MarketActivityPage() {
   
   const clearFilters = () => { setEventTypeFilter('all'); setPriceFilter('all'); };
 
-  if (!user || user.user_type !== 'realtor') return null;
+  if (!user || (user.user_type !== 'realtor' && !user.super_user)) return null;
 
   return (
     <>

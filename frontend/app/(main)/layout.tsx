@@ -180,7 +180,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                         <Link href="/dashboard" className={clsx("flex items-center gap-3 p-2.5 rounded-lg transition-colors", pathname.startsWith('/conversations') || pathname === '/dashboard' ? 'bg-brand-accent/10 border border-brand-accent/30 text-brand-accent font-semibold' : 'text-brand-text-muted hover:bg-white/5')}>
                             <MessageCircleHeart className="w-5 h-5" /> All Conversations
                         </Link>
-                        {user?.user_type === 'realtor' && (
+                        {(user?.user_type === 'realtor' || user?.super_user) && (
                             <Link href="/market-activity" className={clsx("flex items-center gap-3 p-2.5 rounded-lg transition-colors", pathname === '/market-activity' ? 'bg-brand-accent/10 border border-brand-accent/30 text-brand-accent font-semibold' : 'text-brand-text-muted hover:bg-white/5')}>
                                 <TrendingUp className="w-5 h-5" /> Live Market Activity
                             </Link>
