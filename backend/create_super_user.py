@@ -41,8 +41,8 @@ def create_all_access_user():
         "phone_number": admin_phone,
         "twilio_phone_number": admin_twilio_phone,
         "user_type": UserType.REALTOR,
-        "vertical": None,
-        "super_user": False,
+        "vertical": None,  # This gives access to all verticals
+        "super_user": True,  # This marks as super user
         "onboarding_complete": True,
         "timezone": "UTC",
         "faq_auto_responder_enabled": True,
@@ -52,7 +52,8 @@ def create_all_access_user():
             "work_style_set": True,
             "contacts_imported": True,
             "first_nudges_seen": True,
-            "google_sync_complete": True
+            "google_sync_complete": True,
+            "mls_connected": True  # Add this for realtors
         }
     }
 
