@@ -30,9 +30,10 @@ def create_all_access_user():
 
     # --- Validate that all required environment variables are set ---
     if not all([admin_name, admin_email, admin_phone, admin_twilio_phone]):
-        print("❌ Error: One or more required ADMIN environment variables are not set.")
-        print("Please set ADMIN_FULL_NAME, ADMIN_EMAIL, ADMIN_PHONE_NUMBER, and ADMIN_TWILIO_PHONE_NUMBER.")
-        sys.exit(1)
+        print("⚠️  Warning: One or more required ADMIN environment variables are not set.")
+        print("ADMIN_FULL_NAME, ADMIN_EMAIL, ADMIN_PHONE_NUMBER, and ADMIN_TWILIO_PHONE_NUMBER are required.")
+        print("Skipping all-access user creation. Database will be seeded with test users only.")
+        return None
 
     all_access_user_data = {
         "full_name": admin_name,
@@ -80,6 +81,9 @@ if __name__ == "__main__":
         user = create_all_access_user()
         if user:
             print("\n🎉 All-Access account ready!")
+        else:
+            print("\n⚠️  All-Access account creation skipped (missing environment variables).")
     except Exception as e:
-        print(f"❌ An unexpected error occurred: {e}")
-        sys.exit(1)
+        print(f"⚠️  Warning: An unexpected error occurred during user creation: {e}")
+        print("Continuing with deployment...")
+        # Don't exit with error code - let deployment continue
