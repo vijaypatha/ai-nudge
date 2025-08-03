@@ -17,19 +17,30 @@ from datetime import datetime, timezone
 
 from data.models.message import Message, MessageDirection, MessageStatus, MessageSource
 
-# A fixed UUID for our test client for predictability
-TEST_CLIENT_ID = uuid.uuid4()
+@pytest.fixture
+def test_client_id(test_user, session):
+    """Create a test client for the test user."""
+    from data.models.client import Client
+    client = Client(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        full_name="Test Client",
+        phone="+15551234567"
+    )
+    session.add(client)
+    session.commit()
+    return client.id
 
 @pytest.fixture
 def mock_crm_service():
-    """Fixture to mock the entire crm_service module."""
+    """Fixture to mock the CRM service calls in the conversations module."""
     with patch("api.rest.conversations.crm_service") as mock_crm:
         # Create proper Message objects for the mock
         mock_messages = [
             Message(
                 id=uuid.uuid4(),
                 user_id=uuid.uuid4(),
-                client_id=TEST_CLIENT_ID,
+                client_id=uuid.uuid4(),  # Will be replaced by actual client_id
                 content="Hello there",
                 direction=MessageDirection.OUTBOUND,
                 status=MessageStatus.SENT,
@@ -40,7 +51,7 @@ def mock_crm_service():
             Message(
                 id=uuid.uuid4(),
                 user_id=uuid.uuid4(),
-                client_id=TEST_CLIENT_ID,
+                client_id=uuid.uuid4(),  # Will be replaced by actual client_id
                 content="Hi back!",
                 direction=MessageDirection.INBOUND,
                 status=MessageStatus.RECEIVED,
@@ -56,27 +67,54 @@ def mock_crm_service():
         yield mock_crm
 
 def test_get_conversation_history_by_client_id_succeeds(
-    authenticated_client: TestClient, mock_crm_service: MagicMock
+    authenticated_client: TestClient, test_user, test_client_id, session
 ):
     """
     Tests successfully fetching message history for a specific client.
     """
-    # Arrange: Fixtures provide the authenticated client and mocked CRM service.
+    # Arrange: Create actual messages in the database
+    from data.models.message import Message, MessageDirection, MessageStatus, MessageSource
+    
+    messages = [
+        Message(
+            id=uuid.uuid4(),
+            user_id=test_user.id,
+            client_id=test_client_id,
+            content="Hello there",
+            direction=MessageDirection.OUTBOUND,
+            status=MessageStatus.SENT,
+            source=MessageSource.MANUAL,
+            sender_type="user",
+            created_at=datetime.now(timezone.utc)
+        ),
+        Message(
+            id=uuid.uuid4(),
+            user_id=test_user.id,
+            client_id=test_client_id,
+            content="Hi back!",
+            direction=MessageDirection.INBOUND,
+            status=MessageStatus.RECEIVED,
+            source=MessageSource.MANUAL,
+            sender_type="user",
+            created_at=datetime.now(timezone.utc)
+        ),
+    ]
+    
+    for message in messages:
+        session.add(message)
+    session.commit()
     
     # Act: Make a GET request with the client_id as a query parameter.
-    response = authenticated_client.get(f"/api/conversations/messages/?client_id={TEST_CLIENT_ID}")
+    response = authenticated_client.get(f"/api/conversations/messages/?client_id={test_client_id}")
     
-    # Assert: Check for a 200 OK status and that the response is a list.
+    # Assert: Check for a 200 OK status and that the response contains the messages.
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, dict)  # Should be ConversationDetailResponse
     assert "messages" in data
     assert len(data["messages"]) == 2
     assert data["messages"][0]["content"] == "Hello there"
-    
-    # Assert that our mocks were called correctly
-    mock_crm_service.get_conversation_history.assert_called_once()
-    mock_crm_service.get_all_active_slates_for_client.assert_called_once()
+    assert data["messages"][1]["content"] == "Hi back!"
 
 def test_get_conversation_history_fails_for_nonexistent_client(
     authenticated_client: TestClient, mock_crm_service: MagicMock
