@@ -145,7 +145,8 @@ async def test_db_health():
     try:
         from sqlmodel import Session, select
         from backend.data.database import engine
-        from backend.data.models.user import User
+        # Use the already imported User model from the lifespan function
+        from data.models import User
         
         with Session(engine) as session:
             session.exec(select(User)).first()

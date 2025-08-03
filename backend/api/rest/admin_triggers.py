@@ -152,7 +152,8 @@ async def health_check() -> Dict[str, Any]:
     try:
         # Database connectivity
         with Session(engine) as session:
-            # Test basic query
+            # Test basic query - import User locally to prevent table redefinition
+            from data.models import User
             user_count = session.exec(select(User)).first()
             
             # Check recent message activity
@@ -204,7 +205,8 @@ async def get_metrics() -> Dict[str, Any]:
             pending_scheduled = [m for m in total_scheduled if m.status == MessageStatus.PENDING]
             sent_scheduled = [m for m in total_scheduled if m.status == MessageStatus.SENT]
             
-            # User metrics
+            # User metrics - import User locally to prevent table redefinition
+            from data.models import User
             total_users = session.exec(select(User)).all()
             
             return {

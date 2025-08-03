@@ -42,7 +42,7 @@ from celery_worker import celery_app
 from data.database import engine, get_session
 from data.models.message import (Message, MessageStatus, MessageDirection, 
                                  MessageSource, MessageSenderType, ScheduledMessage)
-from data.models.user import User
+# User model imported locally in health_check_task to prevent table redefinition
 from data.models.client import Client
 from data.models.event import PipelineRun, GlobalMlsEvent
 from data import crm as crm_service
@@ -68,6 +68,7 @@ def initial_data_fetch_for_user_task(self, user_id: str):
     logger.info(f"CELERY: Starting initial data fetch for new user {user_id}.")
     try:
         with Session(engine) as session:
+            from data.models import User
             user = session.get(User, UUID(user_id))
             if not user:
                 logger.error(f"CELERY: User {user_id} not found for initial data fetch.")
@@ -117,6 +118,7 @@ def process_new_contact_async(self, client_id: str, user_id: str) -> dict:
         # Get the client and user
         session = Session(engine)
         client = session.exec(select(Client).where(Client.id == client_uuid)).first()
+        from data.models import User
         user = session.exec(select(User).where(User.id == user_uuid)).first()
         
         if not client:
@@ -174,6 +176,7 @@ def send_scheduled_message_task(self, message_id: str) -> dict:
             return {"status": "skipped", "reason": "not_pending"}
         
         # 2. Validate user and client
+        from data.models import User
         user = session.exec(select(User).where(User.id == scheduled_message.user_id)).first()
         if not user or not user.twilio_phone_number:
             logger.error(f"CELERY: User {scheduled_message.user_id} not found or missing Twilio number")
@@ -349,7 +352,8 @@ def health_check_task() -> dict:
     """
     try:
         with Session(engine) as session:
-            # Test database connection
+            # Test database connection using the standard import pattern
+            from data.models import User
             session.exec(select(User).limit(1)).first()
         
         return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
