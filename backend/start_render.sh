@@ -31,9 +31,14 @@ else:
 # If database is empty, run seeding
 if [ $? -eq 1 ]; then
     echo "=== DATABASE IS EMPTY - RUNNING SEED ==="
+    echo "DEBUG: About to start seeding process..."
+    echo "DEBUG: Current working directory: $(pwd)"
+    echo "DEBUG: Python version: $(python --version)"
+    echo "DEBUG: Checking if create_super_user.py exists: $(ls -la create_super_user.py 2>/dev/null || echo 'File not found')"
     
     # Try to create super user (may fail if env vars missing)
     echo "Attempting to create super user..."
+    echo "DEBUG: About to run create_super_user.py..."
     python create_super_user.py || echo "⚠️  Super user creation failed, continuing with seed data..."
     
     # Test imports first
