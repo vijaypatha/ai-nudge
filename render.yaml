@@ -16,8 +16,8 @@ services:
     healthCheckPath: /test-db
     plan: starter
     autoDeploy: false  # Add this line
-    dockerCommand: >
-      sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port $PORT"
+    #dockerCommand: >
+      #sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port $PORT"
     envVars:
       - fromGroup: ainudge-env-group
       - key: DATABASE_URL
