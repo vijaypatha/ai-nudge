@@ -8,31 +8,17 @@ from contextlib import asynccontextmanager
 from starlette.types import ASGIApp, Scope, Receive, Send
 from datetime import datetime, timezone
 
-# --- MODIFIED: Imports updated to use the new seed.py script ---
-try:
-    from api.rest.websockets import router as websockets_router
-    from api.rest.api_endpoints import api_router
-    from api.webhooks.router import webhooks_router
-    from common.config import get_settings
-    from agent_core import semantic_service
-    # --- MODIFIED FOR NEW SEEDER ---
-    from sqlmodel import Session, select
-    from data.database import engine
-    from data.models.user import User
-    from data.seed import seed_all # Using the new seed script
-    # --- END MODIFIED ---
-except ImportError:
-    from .rest.websockets import router as websockets_router
-    from .rest.api_endpoints import api_router
-    from .webhooks.router import webhooks_router
-    from ..common.config import get_settings
-    from ..agent_core import semantic_service
-    # --- MODIFIED FOR NEW SEEDER (RELATIVE IMPORTS) ---
-    from ..data.database import engine
-    from ..data.models.user import User
-    from ..data.seed import seed_all # Using the new seed script
-    from sqlmodel import Session, select
-    # --- END MODIFIED ---
+# --- CORRECTED: Using direct, absolute imports which are more robust in Docker ---
+from backend.api.rest.websockets import router as websockets_router
+from backend.api.rest.api_endpoints import api_router
+from backend.api.webhooks.router import webhooks_router
+from backend.common.config import get_settings
+from backend.agent_core import semantic_service
+from sqlmodel import Session, select
+from backend.data.database import engine
+from backend.data.models.user import User
+# --- CORRECTED: Using the correct function name from your seed.py ---
+from backend.data.seed import seed_initial_data
 
 class WebSocketOriginCheckMiddleware:
     def __init__(self, app: ASGIApp, allowed_origins: list[str]):
@@ -64,18 +50,16 @@ async def lifespan(app: FastAPI):
     print(f"--- HTTP Allowed CORS Origins: {settings.ALLOWED_CORS_ORIGINS.split(',')} ---")
     print(f"--- HTTP CORS Origin Regex: {settings.CORS_ORIGIN_REGEX} ---")
     
-    # --- MODIFIED: Simplified seeding logic to use the new seed_all function ---
     print("Checking database for seed data...")
     with Session(engine) as session:
-        # Check if any user exists. If not, the DB is considered empty.
         first_user = session.exec(select(User)).first()
         if not first_user:
             print("Database is empty. Running full seed process...")
-            seed_all(session) # A single call to your new seeder
+            # --- CORRECTED: Calling the correct function name ---
+            seed_initial_data(session)
             print("Database seeding completed successfully.")
         else:
             print("Database already contains data. Skipping seed process.")
-    # --- END MODIFIED ---
 
     await semantic_service.initialize_vector_index()
     print("--- Semantic service vector index initialized. ---")
@@ -121,12 +105,9 @@ app.include_router(webhooks_router, prefix="/webhooks")
 # Root-level Twilio webhook as backup
 @app.post("/twilio/incoming-sms")
 async def root_twilio_webhook(request: Request):
-    """
-    Root-level webhook for Twilio incoming SMS.
-    """
     from urllib.parse import parse_qs
     from twilio.twiml.messaging_response import MessagingResponse
-    from integrations import twilio_incoming
+    from backend.integrations import twilio_incoming
     
     logging.info("Received incoming SMS webhook from Twilio at root level.")
     try:
@@ -157,13 +138,10 @@ async def read_root():
 
 @app.get("/test-db")
 async def test_db_health():
-    """
-    Health check endpoint for Render deployment.
-    """
     try:
         from sqlmodel import Session, select
-        from data.database import engine
-        from data.models.user import User
+        from backend.data.database import engine
+        from backend.data.models.user import User
         
         with Session(engine) as session:
             session.exec(select(User)).first()
