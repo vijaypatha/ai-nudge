@@ -2,14 +2,16 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, FC } from 'react';
-import { useAppContext, Client, User } from '@/context/AppContext';
+import { useAppContext, Client } from '@/context/AppContext';
 import { MagicSearchBar } from '@/components/ui/MagicSearchBar';
 import { TagFilter } from '@/components/ui/TagFilter';
 import { Avatar } from '@/components/ui/Avatar';
 import { Loader2, Bot, Send, Calendar, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
-// --- REMOVED: No longer need getFutureTimeInTimezone ---
+// --- FIX: Import the timezone detection utility ---
+import { detectUserTimezone } from '../../utils/timezone';
+
 
 interface InstantNudgeViewProps {
     clients: Client[];
@@ -134,7 +136,7 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
         }
     };
 
-    // --- MODIFIED: Use the new bulk endpoint ---
+    // --- DEFINITIVE FIX IS HERE ---
     const handleScheduleInstantNudge = async () => {
         if (selectedClients.size === 0 || !message.trim() || !scheduleDateTime.trim()) {
             alert("Please select recipients, write a message, and pick a future date and time.");
@@ -150,13 +152,19 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
         }
         
         try {
+            // FIX: Get the user's timezone from context, with a fallback to browser detection.
+            // The backend /bulk endpoint requires this field.
+            const userTimezone = user?.timezone || detectUserTimezone();
+
             await api.post('/api/scheduled-messages/bulk', {
                 client_ids: Array.from(selectedClients),
                 content: message,
                 scheduled_at_local: scheduledDateTimeObj,
+                timezone: userTimezone, // FIX: Added the required timezone field
             });
 
-            alert(`Successfully scheduled message for ${selectedClients.size} client(s). Each will be sent at the specified time in their respective local timezone.`);
+            // Changed alert to be more accurate based on backend logic.
+            alert(`Successfully scheduled message for ${selectedClients.size} client(s).`);
             setSelectedClients(new Set());
             setMessage('');
             setTopic('');
@@ -264,7 +272,7 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
                                     className="p-3 w-full bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
                                 />
                                 <p className="text-xs text-gray-400">
-                                    Each client will receive this message at the selected time in their own local timezone.
+                                    This message will be sent to clients at the specified time in your local timezone ({user?.timezone || detectUserTimezone()}).
                                 </p>
                                 <div className="grid grid-cols-2 gap-3">
                                     <button onClick={() => setScheduleDateTime('')} className="p-3 bg-white/10 rounded-lg font-semibold hover:bg-white/20 w-full">Cancel</button>
