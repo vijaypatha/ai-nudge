@@ -224,7 +224,7 @@ async def cancel_scheduled_message(
     return None
 
 
-@router.get("", response_model=List[ScheduledMessage])
+@router.get("/", response_model=List[ScheduledMessage])
 async def get_all_scheduled_messages(
     client_id: Optional[UUID] = None,
     current_user: User = Depends(get_current_user_from_token),
