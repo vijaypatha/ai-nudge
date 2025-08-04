@@ -58,7 +58,7 @@ class ConversationSearchQuery(BaseModel):
     natural_language_query: str
 
 
-@router.get("", response_model=List[ConversationSummary])
+@router.get("/", response_model=List[ConversationSummary])
 def get_conversations(
     db: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
