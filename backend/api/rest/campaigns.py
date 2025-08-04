@@ -23,6 +23,7 @@ from agent_core.brain import relationship_planner
 from workflow import campaigns as campaign_workflow
 from data.models.campaign import CampaignBriefing, CampaignUpdate, CampaignStatus
 from agent_core.content_resource_service import get_content_recommendations_for_user
+from data.database import get_session
 import pytz # NEW
 from datetime import datetime, timedelta # NEW
 
@@ -349,7 +350,7 @@ async def update_campaign_briefing(
 def update_campaign_audience(
     briefing_id: UUID,
     payload: UpdateAudiencePayload,
-    session: Session = Depends(crm_service.get_session),
+    session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token),
 ):
     from data.models.campaign import CampaignBriefing, MatchedClient
