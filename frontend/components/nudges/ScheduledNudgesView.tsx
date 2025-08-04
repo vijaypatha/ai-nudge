@@ -22,16 +22,31 @@ interface ScheduledNudgesViewProps {
     onAction: () => void;
 }
 
+/**
+ * Safely parses a "YYYY-MM-DD HH:mm:ss" UTC string from the database.
+ * Converts it to a valid ISO 8601 format ("YYYY-MM-DDTHH:mm:ssZ") before parsing
+ * to prevent JavaScript from incorrectly interpreting it as local time.
+ * @param utcString The UTC datetime string from the backend.
+ * @returns A valid Date object.
+ */
+const parseSafeUTCSring = (utcString: string | undefined | null): Date => {
+    if (!utcString) return new Date(NaN); // Return an invalid date for null/undefined input
+    return parseISO(utcString.replace(' ', 'T') + 'Z');
+};
+
 const groupMessagesByDate = (messages: ScheduledMessage[], localTimeZone: string) => {
     const groups: { [key: string]: ScheduledMessage[] } = { Today: [], Tomorrow: [], 'This Week': [], 'Later': [] };
     const todayStr = formatInTimeZone(new Date(), localTimeZone, 'yyyy-MM-dd');
 
     messages.forEach(msg => {
-        const scheduledDate = parseISO(msg.scheduled_at_utc);
+        const scheduledDate = parseSafeUTCSring(msg.scheduled_at_utc);
+        if (isNaN(scheduledDate.getTime())) return; // Skip messages with invalid dates
+
         const msgDateStr = formatInTimeZone(scheduledDate, localTimeZone, 'yyyy-MM-dd');
+        // Safely calculate day difference from date strings to avoid timezone shifts
         const diffDays = Math.round((new Date(msgDateStr).getTime() - new Date(todayStr).getTime()) / 86400000);
 
-        if (diffDays < 0) return;
+        if (diffDays < 0) return; // Ignore past-due messages in this view
         else if (diffDays === 0) groups.Today.push(msg);
         else if (diffDays === 1) groups.Tomorrow.push(msg);
         else if (diffDays > 1 && diffDays <= 7) groups['This Week'].push(msg);
@@ -42,11 +57,12 @@ const groupMessagesByDate = (messages: ScheduledMessage[], localTimeZone: string
 
 const formatDisplayDateTime = (utcDateString: string, timeZone: string) => {
     try {
-        const date = parseISO(utcDateString);
+        const date = parseSafeUTCSring(utcDateString);
+        if (isNaN(date.getTime())) return "Invalid date";
         return formatInTimeZone(date, timeZone, "MMM d, h:mm a (zzz)");
     } catch (e) {
         console.error("Timezone formatting failed:", e);
-        return utcDateString;
+        return utcDateString; // Fallback to original string on error
     }
 };
 
@@ -63,7 +79,7 @@ export const ScheduledNudgesView: FC<ScheduledNudgesViewProps> = ({ messages, is
     const pendingMessages = useMemo(() => 
         messages
             .filter(msg => msg.status === 'pending')
-            .sort((a, b) => parseISO(a.scheduled_at_utc).getTime() - parseISO(b.scheduled_at_utc).getTime()), 
+            .sort((a, b) => parseSafeUTCSring(a.scheduled_at_utc).getTime() - parseSafeUTCSring(b.scheduled_at_utc).getTime()), 
         [messages]
     );
 
@@ -85,7 +101,7 @@ export const ScheduledNudgesView: FC<ScheduledNudgesViewProps> = ({ messages, is
 
     const handleSaveSuccess = () => {
         setEditingMessage(null);
-        onAction(); // This function is now correctly passed to the updated modal
+        onAction();
     };
 
     if (isLoading) {
