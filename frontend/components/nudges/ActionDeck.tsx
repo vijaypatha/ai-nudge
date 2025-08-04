@@ -5,7 +5,8 @@
 import { useState, useEffect, useMemo, FC, ReactNode } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CampaignBriefing as CampaignBriefingType, Client, MatchedClient } from '@/context/AppContext';
+// --- FIX: Import useAppContext to get the 'api' object and Client type ---
+import { CampaignBriefing as CampaignBriefingType, Client, MatchedClient, useAppContext } from '@/context/AppContext';
 import { ManageAudienceModal } from '@/components/modals/ManageAudienceModal';
 import { DisplayConfig } from './OpportunityNudgesView';
 import {
@@ -67,8 +68,6 @@ const ContentPreview: FC<{ intel: any }> = ({ intel }) => {
     }
     const { content_type, url, image_url, title, description, details, photo_gallery, photo_count, has_photos } = previewData;
     
-    // Debug logging
-    console.log('ContentPreview data:', { content_type, url, image_url, title, photo_count, has_photos });
     const isYouTube = content_type === 'youtube';
     const isVideo = content_type === 'video';
     const isProperty = content_type === 'property';
@@ -96,9 +95,7 @@ const ContentPreview: FC<{ intel: any }> = ({ intel }) => {
                         objectFit="cover" 
                         className="bg-white/5"
                         unoptimized={true}
-                        onError={() => {
-                            console.log('Image failed to load:', image_url);
-                        }}
+                        onError={() => console.log('Image failed to load:', image_url)}
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center bg-brand-dark">
@@ -126,7 +123,6 @@ const ContentPreview: FC<{ intel: any }> = ({ intel }) => {
                     </a>
                 )}
 
-                {/* Photo Gallery Link */}
                 {has_photos && photo_count > 1 && (
                     <button 
                         onClick={() => setShowPhotoGallery(true)}
@@ -155,7 +151,6 @@ const ContentPreview: FC<{ intel: any }> = ({ intel }) => {
                 )}
             </div>
 
-            {/* Photo Gallery Modal */}
             {showPhotoGallery && photo_gallery && (
                 <PhotoGalleryModal 
                     photos={photo_gallery} 
@@ -207,6 +202,8 @@ interface PersuasiveCommandCardProps {
 }
 
 const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBriefingUpdate, onAction, displayConfig }) => {
+    // --- FIX: Get api from context to make backend calls ---
+    const { api } = useAppContext();
     const config = displayConfig[briefing.campaign_type] || { icon: 'Default', color: 'text-primary-action', title: 'Nudge' };
     const icon = ICONS[config.icon] || ICONS.Default;
     
@@ -230,14 +227,39 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
 
     const handleDraftChange = (newDraft: string) => { setDraft(newDraft); onBriefingUpdate({ ...briefing, edited_draft: newDraft }); };
     
+    // --- FIX: This function now calls the existing backend endpoint to persist audience changes ---
     const handleSaveAudience = async (newAudience: Client[]) => {
-        const updatedMatchedAudience: MatchedClient[] = newAudience.map(c => ({ client_id: c.id, client_name: c.full_name, match_score: 0, match_reasons: ['Manually Added'] }));
-        onBriefingUpdate({ ...briefing, matched_audience: updatedMatchedAudience });
+        // 1. Format the new audience list in the structure the backend expects.
+        const updatedMatchedAudience: MatchedClient[] = newAudience.map(c => ({
+            client_id: c.id,
+            client_name: c.full_name,
+            match_score: 0, // Score is irrelevant for manually added clients
+            match_reasons: ['Manually Added']
+        }));
+
+        try {
+            // 2. Call the generic update endpoint with only the 'matched_audience' field.
+            const updatedBriefing = await api.put(
+                `/api/campaigns/${briefing.id}`,
+                { matched_audience: updatedMatchedAudience }
+            );
+            // 3. Update the local state with the confirmed data from the server.
+            onBriefingUpdate(updatedBriefing);
+        } catch (error) {
+            console.error("Failed to save audience:", error);
+            // 4. Propagate the error so the modal can display it.
+            throw error; 
+        }
     };
 
     return (
         <>
-            <ManageAudienceModal isOpen={isAudienceModalOpen} onClose={() => setIsAudienceModalOpen(false)} onSave={handleSaveAudience} initialSelectedClientIds={new Set(matchedAudience.map(c => c.client_id))} />
+            <ManageAudienceModal 
+                isOpen={isAudienceModalOpen} 
+                onClose={() => setIsAudienceModalOpen(false)} 
+                onSave={handleSaveAudience} 
+                initialSelectedClientIds={new Set(matchedAudience.map(c => c.client_id))} 
+            />
             <div className="absolute w-full h-full bg-brand-primary border border-white/10 rounded-xl overflow-hidden flex flex-col shadow-2xl">
                 <div className="flex-shrink-0 p-4 bg-black/30 border-b border-white/10 flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -256,12 +278,10 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
                     {/* Left Panel - Strategic Context & Preview */}
                     <div className="p-5 space-y-6 border-r border-white/5">
                         <ContentPreview intel={intel} />
-                        
                         <div className="space-y-3">
                             <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><Target size={16}/> Strategic Context</h4>
                             <div className="space-y-2"><p className="text-brand-text-main text-base">{strategicContext}</p><p className="text-sm text-brand-text-muted">{timingRationale}</p></div>
                         </div>
-                        
                         <ToneMatchingIndicator intel={intel} />
                     </div>
                     
@@ -300,7 +320,7 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
                 
                 <div className="flex-shrink-0 p-3 bg-black/30 border-t border-white/10 grid grid-cols-2 gap-3">
                     <button onClick={() => onAction(briefing, 'dismiss')} className="p-3 bg-white/5 border border-white/10 text-brand-text-main rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-white/10 hover:border-white/20 transition-all duration-200"><X size={18} /> Dismiss Nudge</button>
-                    <button onClick={() => onAction(briefing, 'send')} className="p-3 text-brand-dark rounded-lg font-bold flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(32,213,179,0.4)] hover:scale-[1.03] transition-all duration-200" style={{ backgroundColor: BRAND_ACCENT_COLOR }}><Send size={18} /> Send to {matchedAudience.length} Client(s)</button>
+                    <button onClick={() => onAction(briefing, 'send')} disabled={matchedAudience.length === 0} className="p-3 text-brand-dark rounded-lg font-bold flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(32,213,179,0.4)] hover:scale-[1.03] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed" style={{ backgroundColor: BRAND_ACCENT_COLOR }}><Send size={18} /> Send to {matchedAudience.length} Client(s)</button>
                 </div>
             </div>
         </>
