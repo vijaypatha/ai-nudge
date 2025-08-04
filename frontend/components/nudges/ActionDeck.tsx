@@ -1,11 +1,11 @@
 // frontend/components/nudges/ActionDeck.tsx
+// --- THIS IS THE FINAL, CORRECTED VERSION ---
 
 'use client';
 
 import { useState, useEffect, useMemo, FC, ReactNode } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
-// --- FIX: Import useAppContext to get the 'api' object and Client type ---
 import { CampaignBriefing as CampaignBriefingType, Client, MatchedClient, useAppContext } from '@/context/AppContext';
 import { ManageAudienceModal } from '@/components/modals/ManageAudienceModal';
 import { DisplayConfig } from './OpportunityNudgesView';
@@ -202,7 +202,6 @@ interface PersuasiveCommandCardProps {
 }
 
 const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBriefingUpdate, onAction, displayConfig }) => {
-    // --- FIX: Get api from context to make backend calls ---
     const { api } = useAppContext();
     const config = displayConfig[briefing.campaign_type] || { icon: 'Default', color: 'text-primary-action', title: 'Nudge' };
     const icon = ICONS[config.icon] || ICONS.Default;
@@ -227,27 +226,24 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
 
     const handleDraftChange = (newDraft: string) => { setDraft(newDraft); onBriefingUpdate({ ...briefing, edited_draft: newDraft }); };
     
-    // --- FIX: This function now calls the existing backend endpoint to persist audience changes ---
+    // --- THIS IS THE FINAL, CORRECT VERSION OF THIS FUNCTION ---
     const handleSaveAudience = async (newAudience: Client[]) => {
-        // 1. Format the new audience list in the structure the backend expects.
-        const updatedMatchedAudience: MatchedClient[] = newAudience.map(c => ({
-            client_id: c.id,
-            client_name: c.full_name,
-            match_score: 0, // Score is irrelevant for manually added clients
-            match_reasons: ['Manually Added']
-        }));
+        // 1. Extract just the client IDs for the payload, which is what the
+        //    dedicated `/audience` endpoint expects.
+        const clientIds = newAudience.map(c => c.id);
 
         try {
-            // 2. Call the generic update endpoint with only the 'matched_audience' field.
+            // 2. Call the correct, specific endpoint for updating audiences.
             const updatedBriefing = await api.put(
-                `/api/campaigns/${briefing.id}`,
-                { matched_audience: updatedMatchedAudience }
+                `/api/campaigns/${briefing.id}/audience`,
+                { client_ids: clientIds }
             );
-            // 3. Update the local state with the confirmed data from the server.
+            
+            // 3. Update local state with the confirmed data from the server.
             onBriefingUpdate(updatedBriefing);
         } catch (error) {
             console.error("Failed to save audience:", error);
-            // 4. Propagate the error so the modal can display it.
+            // 4. Propagate the error so the modal can display it to the user.
             throw error; 
         }
     };
