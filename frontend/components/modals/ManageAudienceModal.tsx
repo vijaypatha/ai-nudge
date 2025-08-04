@@ -1,30 +1,21 @@
 // File Path: frontend/components/modals/ManageAudienceModal.tsx
-// Purpose: A reusable modal component for searching, filtering, and managing a client audience.
-// This component has been moved from the /nudges directory to be globally accessible.
 
 'use client'; 
 
-import { useState, useEffect, useMemo } from 'react';
-import { X, Search } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { X, Search, Loader2 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAppContext, Client } from '@/context/AppContext';
 
-// --- Helper Components ---
 const Avatar = ({ name, className }: { name: string; className?: string }) => {
   const initials = name?.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase() || '';
   return (
-    <div
-      className={clsx(
-        'flex items-center justify-center rounded-full bg-white/10 text-brand-text-muted font-bold select-none',
-        className
-      )}
-    >
+    <div className={clsx('flex items-center justify-center rounded-full bg-white/10 text-brand-text-muted font-bold select-none', className)}>
       {initials}
     </div>
   );
 };
 
-// --- Main Component ---
 interface ManageAudienceModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -32,13 +23,8 @@ interface ManageAudienceModalProps {
   initialSelectedClientIds: Set<string>;
 }
 
-export const ManageAudienceModal = ({
-  isOpen,
-  onClose,
-  onSave,
-  initialSelectedClientIds,
-}: ManageAudienceModalProps) => {
-  const { api, clients: allClients } = useAppContext(); // Use clients from context
+export const ManageAudienceModal = ({ isOpen, onClose, onSave, initialSelectedClientIds }: ManageAudienceModalProps) => {
+  const { api, clients: allClients } = useAppContext();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
   const [filteredClients, setFilteredClients] = useState<Client[]>([]);
@@ -50,64 +36,73 @@ export const ManageAudienceModal = ({
   const uniqueTags = useMemo(() => {
     const allTags = new Set<string>();
     allClients.forEach((client) => {
-      if (client.user_tags) client.user_tags.forEach((tag) => allTags.add(tag));
-      if (client.ai_tags) client.ai_tags.forEach((tag) => allTags.add(tag));
+      (client.user_tags || []).forEach((tag) => allTags.add(tag));
+      (client.ai_tags || []).forEach((tag) => allTags.add(tag));
     });
     return Array.from(allTags).sort();
   }, [allClients]);
+  
+  const performSearch = useCallback(async () => {
+    if (!isOpen) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const payload = {
+          natural_language_query: searchQuery || null,
+          tags: activeTags.size > 0 ? Array.from(activeTags) : null,
+      };
+      const results = (searchQuery || activeTags.size > 0) ? await api.post('/api/clients/search', payload) : allClients;
+      setFilteredClients(results);
+    } catch (err: any) {
+      setError(err.message || 'Failed to search clients.');
+      setFilteredClients([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [searchQuery, activeTags, isOpen, api, allClients]);
+
 
   useEffect(() => {
     if (isOpen) {
       setSelectedClientIds(initialSelectedClientIds);
-      setIsSaving(false);
-      setError(null);
+      performSearch();
     }
   }, [isOpen, initialSelectedClientIds]);
 
   useEffect(() => {
-    if (!isOpen) return;
-    const handler = setTimeout(async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        // Use the centralized API client from context
-        const data = await api.post('/api/clients/search', {
-          natural_language_query: searchQuery || null,
-          tags: activeTags.size > 0 ? Array.from(activeTags) : null,
-        });
-        setFilteredClients(data);
-      } catch (err: any) {
-        setError(err.message || 'Failed to fetch clients.');
-        setFilteredClients([]);
-      } finally {
-        setIsLoading(false);
-      }
-    }, 300); // Debounce search
+    const handler = setTimeout(performSearch, 300);
     return () => clearTimeout(handler);
-  }, [searchQuery, activeTags, isOpen, api]);
+  }, [performSearch]);
 
   const handleTagClick = (tag: string) => {
-    const newTags = new Set(activeTags);
-    newTags.has(tag) ? newTags.delete(tag) : newTags.add(tag);
-    setActiveTags(newTags);
+    setActiveTags(prev => {
+        const newTags = new Set(prev);
+        newTags.has(tag) ? newTags.delete(tag) : newTags.add(tag);
+        return newTags;
+    });
   };
 
   const handleSelectClient = (clientId: string) => {
-    const newSelection = new Set(selectedClientIds);
-    newSelection.has(clientId) ? newSelection.delete(clientId) : newSelection.add(clientId);
-    setSelectedClientIds(newSelection);
+    setSelectedClientIds(prev => {
+        const newSelection = new Set(prev);
+        newSelection.has(clientId) ? newSelection.delete(clientId) : newSelection.add(clientId);
+        return newSelection;
+    });
   };
   
   const handleSelectAllFiltered = () => {
-      const allFilteredIds = new Set(filteredClients.map(c => c.id));
-      const isAllSelected = filteredClients.length > 0 && filteredClients.every(c => selectedClientIds.has(c.id));
-      const newSelection = new Set(selectedClientIds);
-      if (isAllSelected) {
-          allFilteredIds.forEach(id => newSelection.delete(id));
-      } else {
-          allFilteredIds.forEach(id => newSelection.add(id));
-      }
-      setSelectedClientIds(newSelection);
+      const filteredIds = filteredClients.map(c => c.id);
+      const allVisibleSelected = filteredClients.length > 0 && filteredIds.every(id => selectedClientIds.has(id));
+      
+      setSelectedClientIds(prev => {
+          const newSelection = new Set(prev);
+          if (allVisibleSelected) {
+              filteredIds.forEach(id => newSelection.delete(id));
+          } else {
+              filteredIds.forEach(id => newSelection.add(id));
+          }
+          return newSelection;
+      });
   };
 
   const handleSave = async () => {
@@ -117,9 +112,9 @@ export const ManageAudienceModal = ({
     try {
       await onSave(selectedClientObjects);
       onClose();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to save audience:", err);
-      setError("Failed to save audience. Please try again.");
+      setError(err.detail || "Failed to save audience. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -129,7 +124,8 @@ export const ManageAudienceModal = ({
   const isAllFilteredSelected = filteredClients.length > 0 && filteredClients.every(c => selectedClientIds.has(c.id));
 
   return (
-    <div className="fixed inset-0 bg-brand-dark/90 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    // --- FIX: Changed bg-brand-dark/90 to bg-brand-dark/95 and increased backdrop-blur for better legibility ---
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-brand-dark-blue border border-white/10 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <header className="p-6 border-b border-white/10 flex justify-between items-center flex-shrink-0">
           <h2 className="text-2xl font-bold text-brand-text-main">Manage Audience</h2>
@@ -144,11 +140,35 @@ export const ManageAudienceModal = ({
         </div>
         <div className="px-6 pb-2 flex-grow overflow-y-auto">
           <div className="border border-white/10 rounded-lg">
-            <div className="p-3 border-b border-white/10 sticky top-0 bg-brand-dark-blue/80 backdrop-blur-sm"><label className="flex items-center gap-3 text-sm font-semibold cursor-pointer text-white"><input type="checkbox" className="h-4 w-4 rounded bg-white/10 border-white/20 text-brand-accent focus:ring-brand-accent focus:ring-offset-brand-dark-blue" checked={isAllFilteredSelected} onChange={handleSelectAllFiltered}/>Select All ({selectedClientIds.size} selected)</label></div>
-            <div className="max-h-64 overflow-y-auto">{isLoading ? (<p className="p-4 text-center text-brand-text-muted">Searching...</p>) : error && filteredClients.length === 0 ? (<p className="p-4 text-center text-red-400">{error}</p>) : !error && filteredClients.length === 0 ? (<p className="p-4 text-center text-brand-text-muted">No clients found.</p>) : (filteredClients.map((client) => (<div key={client.id} className="border-b border-white/10 last:border-b-0"><label className="flex items-center gap-3 p-3 hover:bg-white/5 cursor-pointer"><input type="checkbox" className="h-4 w-4 rounded bg-white/10 border-white/20 text-brand-accent focus:ring-brand-accent" checked={selectedClientIds.has(client.id)} onChange={() => handleSelectClient(client.id)}/><Avatar name={client.full_name} className="w-8 h-8 text-xs" /><span className="text-base text-brand-text-main">{client.full_name}</span></label></div>)))}</div>
+            <div className="p-3 border-b border-white/10 sticky top-0 bg-brand-dark-blue/80 backdrop-blur-sm"><label className="flex items-center gap-3 text-sm font-semibold cursor-pointer text-white"><input type="checkbox" className="h-4 w-4 rounded bg-white/10 border-white/20 text-brand-accent focus:ring-brand-accent focus:ring-offset-brand-dark-blue" checked={isAllFilteredSelected} onChange={handleSelectAllFiltered}/>Select All Filtered ({selectedClientIds.size} total selected)</label></div>
+            <div className="min-h-[256px] max-h-64 overflow-y-auto">
+                {isLoading ? (
+                    <div className="flex items-center justify-center h-full text-brand-text-muted gap-2"><Loader2 className="animate-spin" /><span>Searching...</span></div>
+                ) : error ? (
+                    <div className="p-4 text-center text-red-400">{error}</div>
+                ) : filteredClients.length === 0 ? (
+                    <div className="p-4 text-center text-brand-text-muted">No clients found for this search.</div>
+                ) : (
+                    filteredClients.map((client) => (
+                        <div key={client.id} className="border-b border-white/10 last:border-b-0">
+                            <label className="flex items-center gap-3 p-3 hover:bg-white/5 cursor-pointer">
+                                <input type="checkbox" className="h-4 w-4 rounded bg-white/10 border-white/20 text-brand-accent focus:ring-brand-accent" checked={selectedClientIds.has(client.id)} onChange={() => handleSelectClient(client.id)}/>
+                                <Avatar name={client.full_name} className="w-8 h-8 text-xs" />
+                                <span className="text-base text-brand-text-main">{client.full_name}</span>
+                            </label>
+                        </div>
+                    ))
+                )}
+            </div>
           </div>
         </div>
-        <footer className="p-6 border-t border-white/10 flex justify-end items-center gap-4 flex-shrink-0">{error && !isLoading && <p className="text-red-400 text-sm mr-auto">{error}</p>}<button onClick={onClose} className="px-5 py-2.5 font-semibold text-brand-text-muted hover:text-white">Cancel</button><button onClick={handleSave} disabled={selectedClientIds.size === 0 || isSaving} className="px-6 py-2.5 bg-primary-action text-brand-dark font-bold rounded-md hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed w-48 text-center">{isSaving ? 'Saving...' : `Save Audience (${selectedClientIds.size})`}</button></footer>
+        <footer className="p-6 border-t border-white/10 flex justify-end items-center gap-4 flex-shrink-0">
+            {error && <p className="text-red-400 text-sm mr-auto">{error}</p>}
+            <button onClick={onClose} className="px-5 py-2.5 font-semibold text-brand-text-muted hover:text-white">Cancel</button>
+            <button onClick={handleSave} disabled={isSaving} className="px-6 py-2.5 bg-primary-action text-brand-dark font-bold rounded-md hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed w-48 text-center">
+                {isSaving ? <Loader2 className="animate-spin mx-auto" /> : `Save Audience (${selectedClientIds.size})`}
+            </button>
+        </footer>
       </div>
     </div>
   );

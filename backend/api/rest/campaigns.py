@@ -21,6 +21,7 @@ from data import crm as crm_service
 from workflow import outbound as outbound_workflow
 from agent_core.brain import relationship_planner
 from workflow import campaigns as campaign_workflow
+from data.models.campaign import CampaignBriefing, CampaignUpdate, CampaignStatus
 from agent_core.content_resource_service import get_content_recommendations_for_user
 import pytz # NEW
 from datetime import datetime, timedelta # NEW
@@ -51,6 +52,10 @@ class DraftResponse(BaseModel):
 class CoPilotActionPayload(BaseModel):
     action_type: str
 
+# --- NEW: Pydantic model for the audience update payload ---
+class UpdateAudiencePayload(BaseModel):
+    client_ids: List[UUID]
+
 # --- NEW: Background task function for recording feedback ---
 async def record_dismissal_feedback_task(campaign_id: UUID, user_id: UUID):
     """
@@ -60,12 +65,13 @@ async def record_dismissal_feedback_task(campaign_id: UUID, user_id: UUID):
     logging.info(f"FEEDBACK_TASK: Starting dismissal feedback process for campaign {campaign_id}")
     with Session(crm_service.engine) as session:
         # 1. Fetch the campaign and its associated resource
+        from data.models.campaign import CampaignBriefing
         campaign = crm_service.get_campaign_briefing_by_id(campaign_id, user_id, session)
         if not campaign or not campaign.triggering_resource_id:
             logging.warning(f"FEEDBACK_TASK: Campaign {campaign_id} not found or has no resource. Cannot record feedback.")
             return
 
-        resource = crm_service.get_resource_by_id(campaign.triggering_resource_id, user_id)
+        resource = crm_service.get_resource_by_id(campaign.triggering_resource_id, user_id, session)
         if not resource:
             logging.warning(f"FEEDBACK_TASK: Resource {campaign.triggering_resource_id} not found for campaign {campaign_id}. Cannot record feedback.")
             return
@@ -118,8 +124,7 @@ async def get_all_campaigns(
     Fetches all campaign briefings in DRAFT status for the current user.
     (Functionality unchanged)
     """
-    # --- FIXED: Defer import to prevent multiple registration ---
-    from data.models.campaign import CampaignBriefing, CampaignStatus, CampaignUpdate, RecommendationSlateResponse
+    from data.models.campaign import CampaignBriefing, CampaignStatus
     try:
         briefings = crm_service.get_new_campaign_briefings_for_user(user_id=current_user.id)
         content_recommendations = get_content_recommendations_for_user(user_id=current_user.id)
@@ -143,7 +148,9 @@ async def get_all_campaigns(
                     'strategic_context': f"Share this {recommendation['resource']['content_type']} with your client",
                     'trigger_source': 'Content Library'
                 },
-                status=CampaignStatus.DRAFT
+                status=CampaignStatus.DRAFT,
+                created_at=datetime.now(pytz.utc),
+                updated_at=datetime.now(pytz.utc),
             )
             content_briefings.append(content_briefing)
         
@@ -175,7 +182,6 @@ async def draft_instant_nudge_endpoint(
     payload: DraftInstantNudgePayload,
     current_user: User = Depends(get_current_user_from_token)
 ):
-    # (Functionality unchanged)
     if not payload.topic or not payload.topic.strip():
         raise HTTPException(status_code=400, detail="Topic cannot be empty.")
     try:
@@ -195,7 +201,6 @@ async def handle_campaign_action(
     payload: CoPilotActionPayload,
     current_user: User = Depends(get_current_user_from_token)
 ):
-    # (Functionality unchanged)
     try:
         result = await campaign_workflow.handle_copilot_action(
             briefing_id=briefing_id,
@@ -215,11 +220,6 @@ async def approve_campaign_plan(
     campaign_id: UUID,
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """
-    Approves a DRAFT relationship plan. This endpoint reads the steps from the
-    CampaignBriefing and creates the actual ScheduledMessage records.
-    """
-    # --- FIXED: Defer import to prevent multiple registration ---
     from data.models.campaign import CampaignStatus
     with Session(crm_service.engine) as session:
         plan = crm_service.get_campaign_briefing_by_id(campaign_id, current_user.id, session)
@@ -243,11 +243,8 @@ async def approve_campaign_plan(
             if not content:
                 continue
 
-            # Calculate the target date and set the time to 10:30 AM
             target_date = now_in_user_tz + timedelta(days=delay_days)
             local_scheduled_time = target_date.replace(hour=10, minute=30, second=0, microsecond=0)
-
-            # Convert to UTC for storage
             utc_scheduled_time = local_scheduled_time.astimezone(pytz.utc)
 
             message = ScheduledMessage(
@@ -256,13 +253,12 @@ async def approve_campaign_plan(
                 parent_plan_id=plan.id,
                 content=content,
                 scheduled_at_utc=utc_scheduled_time,
-                timezone=user_timezone_str,  # <-- FIX: Save the correct timezone
+                timezone=user_timezone_str,
                 status=MessageStatus.PENDING,
                 playbook_touchpoint_id=touchpoint_id
             )
             session.add(message)
 
-        # Update the plan's status to ACTIVE
         plan.status = CampaignStatus.ACTIVE
         session.add(plan)
         session.commit()
@@ -277,9 +273,7 @@ async def complete_briefing(
     briefing_id: uuid.UUID,
     current_user: User = Depends(get_current_user_from_token)
 ):
-    # --- FIXED: Defer import to prevent multiple registration ---
     from data.models.campaign import CampaignStatus
-    # (Functionality unchanged)
     with Session(crm_service.engine) as session:
         updated_slate = crm_service.update_slate_status(
             slate_id=briefing_id,
@@ -298,7 +292,6 @@ async def complete_briefing(
 
 @router.post("/plan-relationship", status_code=202)
 async def plan_relationship_campaign_endpoint(payload: PlanRelationshipPayload, current_user: User = Depends(get_current_user_from_token)):
-    # (Functionality unchanged)
     client = crm_service.get_client_by_id(payload.client_id, user_id=current_user.id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found.")
@@ -308,7 +301,6 @@ async def plan_relationship_campaign_endpoint(payload: PlanRelationshipPayload, 
 
 @router.post("/messages/send-now", status_code=200, response_model=Message)
 async def send_instant_nudge_now(message_data: SendMessageImmediate, current_user: User = Depends(get_current_user_from_token)):
-    # (Functionality unchanged)
     from agent_core import orchestrator
     from data.models.message import MessageSource
 
@@ -325,24 +317,21 @@ async def send_instant_nudge_now(message_data: SendMessageImmediate, current_use
         raise HTTPException(status_code=500, detail="Failed to send instant nudge.")
 
 
-# --- MODIFIED: This endpoint now triggers the feedback learning mechanism ---
 @router.put("/{campaign_id}", response_model=Any)
 async def update_campaign_briefing(
     campaign_id: UUID, 
-    update_data: Any, 
-    background_tasks: BackgroundTasks, # <-- ADDED dependency
+    # --- FIX: Changed type from Any to the correct CampaignUpdate model ---
+    # This ensures FastAPI correctly parses the incoming JSON into an object
+    # that the rest of the function can work with, resolving the save error.
+    update_data: "CampaignUpdate", 
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user_from_token)
 ):
-    # --- FIXED: Defer import to prevent multiple registration ---
-    from data.models.campaign import CampaignUpdate, CampaignStatus
     try:
-        # The campaign is updated first, ensuring the UI gets a fast response.
         updated_briefing = crm_service.update_campaign_briefing(campaign_id, update_data, user_id=current_user.id)
         if not updated_briefing:
             raise HTTPException(status_code=404, detail="Campaign briefing not found.")
 
-        # --- NEW: Check if the campaign was dismissed ---
-        # If so, trigger the background task to record this feedback for the AI.
         if update_data.status == CampaignStatus.DISMISSED:
             logging.info(f"API: Campaign {campaign_id} was dismissed. Adding feedback task to background.")
             background_tasks.add_task(
@@ -356,9 +345,46 @@ async def update_campaign_briefing(
         raise HTTPException(status_code=500, detail=f"Failed to update campaign: {str(e)}")
 
 
+@router.put("/{briefing_id}/audience", response_model=Any)
+def update_campaign_audience(
+    briefing_id: UUID,
+    payload: UpdateAudiencePayload,
+    session: Session = Depends(crm_service.get_session),
+    current_user: User = Depends(get_current_user_from_token),
+):
+    from data.models.campaign import CampaignBriefing, MatchedClient
+    briefing = session.get(CampaignBriefing, briefing_id)
+    if not briefing or briefing.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Campaign briefing not found.")
+
+    clients = crm_service.get_clients_by_ids(payload.client_ids, user_id=current_user.id)
+    if len(clients) != len(payload.client_ids):
+         raise HTTPException(status_code=404, detail="One or more clients not found.")
+
+    new_audience = [
+        MatchedClient(
+            client_id=client.id,
+            client_name=client.full_name,
+            match_score=0,
+            match_reasons=["Manually Added"]
+        )
+        for client in clients
+    ]
+
+    briefing.matched_audience = new_audience
+    briefing.updated_at = datetime.now(pytz.utc)
+
+    session.add(briefing)
+    session.commit()
+    session.refresh(briefing)
+
+    logging.info(f"Updated audience for briefing {briefing_id} with {len(new_audience)} clients.")
+    return briefing
+
+
 @router.get("/{campaign_id}", response_model=Any)
 async def get_campaign_by_id(campaign_id: UUID, current_user: User = Depends(get_current_user_from_token)):
-    # (Functionality unchanged)
+    from data.models.campaign import CampaignBriefing
     campaign = crm_service.get_campaign_briefing_by_id(campaign_id, user_id=current_user.id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found.")
@@ -367,7 +393,7 @@ async def get_campaign_by_id(campaign_id: UUID, current_user: User = Depends(get
 
 @router.post("/{campaign_id}/send", status_code=202)
 async def trigger_send_campaign(campaign_id: UUID, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user_from_token)):
-    # (Functionality unchanged)
+    from data.models.campaign import CampaignBriefing
     campaign = crm_service.get_campaign_briefing_by_id(campaign_id, user_id=current_user.id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found.")
