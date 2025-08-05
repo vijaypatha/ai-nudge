@@ -2,11 +2,16 @@
 # --- DEFINITIVE FIX: The /intel endpoint no longer clears the recommendation slate, allowing multiple actions.
 
 import logging
+import json # Correctly placed import
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel
 from sqlmodel import Session
+
+# --- ADDED: Imports for Redis client and app settings ---
+import redis
+from common.config import get_settings
 
 from data.models.user import User, UserUpdate
 from api.security import get_current_user_from_token
@@ -19,6 +24,11 @@ from api.websocket_manager import manager as websocket_manager
 from celery_tasks import initial_data_fetch_for_user_task
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
+
+# --- ADDED: Initialize a Redis client for publishing messages ---
+settings = get_settings()
+redis_client = redis.from_url(settings.REDIS_URL)
+USER_NOTIFICATION_CHANNEL = "user-notifications" # Must match the channel in main.py
 
 class ClientSearchQuery(BaseModel):
     natural_language_query: Optional[str] = None
@@ -245,8 +255,8 @@ async def update_client_details(
     current_user: User = Depends(get_current_user_from_token)
 ):
     """
-    Updates a client's details and, if notes or preferences were changed,
-    automatically triggers the relationship planner and notifies the frontend.
+    MODIFIED: Updates a client's details and, if notes or preferences were changed,
+    triggers the relationship planner and PUBLISHES a notification to Redis.
     """
     logging.info(f"API: Received PUT request for client {client_id} with payload: {client_data.model_dump(exclude_unset=True)}")
 
@@ -265,16 +275,21 @@ async def update_client_details(
             logging.info(f"API: Notes updated, automatically triggering relationship planner for client {client_id}")
             await relationship_planner.plan_relationship_campaign(client=updated_client, user=current_user)
 
-            # --- ADDED: NOTIFY FRONTEND VIA WEBSOCKET ---
-            # After the plan is created, send a real-time notification to the user.
-            await websocket_manager.broadcast_to_user(
-                user_id=str(current_user.id),
-                data={"event": "PLAN_UPDATED", "clientId": str(client_id)}
-            )
-            logging.info(f"API: Broadcasted PLAN_UPDATED event for client {client_id} to user {current_user.id}")
+            # --- THIS IS THE FINAL FIX ---
+            # Instead of calling the old websocket manager, we publish to Redis.
+            # This ensures any process can notify the frontend.
+            notification_payload = {
+                "user_id": str(current_user.id),
+                "payload": {
+                    "event": "PLAN_UPDATED", 
+                    "clientId": str(client_id)
+                }
+            }
+            redis_client.publish(USER_NOTIFICATION_CHANNEL, json.dumps(notification_payload))
+            logging.info(f"API: Published PLAN_UPDATED event for client {client_id} to user {current_user.id}")
 
         except Exception as e:
-            logging.error(f"API: Failed to trigger relationship planner or broadcast for client {client_id}: {e}")
+            logging.error(f"API: Failed to trigger relationship planner or publish for client {client_id}: {e}", exc_info=True)
 
     return updated_client
 

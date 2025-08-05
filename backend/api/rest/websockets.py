@@ -49,7 +49,8 @@ async def user_websocket_endpoint(websocket: WebSocket, token: str = Query(...))
     if not user:
         await websocket.close(code=1008)
         return
-
+    
+    await websocket.accept()
     await manager.connect_user(websocket, str(user.id))
     try:
         while True:

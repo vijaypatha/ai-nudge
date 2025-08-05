@@ -1,5 +1,5 @@
 # backend/api/websocket_manager.py
-# --- PATCHED: Enforces a single connection per user ---
+# --- FINAL VERSION: Manages process-local connections for a Redis Pub/Sub architecture ---
 
 import logging
 from collections import defaultdict
@@ -10,16 +10,18 @@ import asyncio
 
 class ConnectionManager:
     """
-    Manages active WebSocket connections with a "last-one-in-wins" policy for users.
-    - `client_connections`: For client-specific rooms (e.g., a conversation page).
-    - `user_connections`: For user-specific notifications.
+    Manages active WebSocket connections FOR A SINGLE PROCESS.
+    This instance's state is not shared with other web or worker processes.
+    It is controlled by the Redis listener in `main.py`.
     """
     def __init__(self):
+        # These dictionaries are local to each process (web server or worker)
         self.client_connections: Dict[str, List[WebSocket]] = defaultdict(list)
+        # This dictionary holds user-specific connections *only for the process it runs in*.
         self.user_connections: Dict[str, Set[WebSocket]] = defaultdict(set)
-        logging.info("WebSocket ConnectionManager initialized with client and user scopes.")
+        logging.info("WebSocket ConnectionManager initialized for this process.")
 
-    # --- Client-specific methods (unchanged) ---
+    # --- Client-specific methods (for chat rooms, unchanged) ---
     async def connect_client(self, websocket: WebSocket, client_id: str):
         # This endpoint is for specific client views and can still allow multiple connections
         # if a user opens the same client conversation in multiple tabs.
@@ -41,58 +43,59 @@ class ConnectionManager:
         for connection in connections:
             await connection.send_text(message_to_send)
 
-    # --- User-specific methods (MODIFIED) ---
+    # --- User-specific methods (Now much simpler) ---
     async def connect_user(self, websocket: WebSocket, user_id: str):
         """
-        Accepts a new user connection and enforces a single-connection policy.
-        It closes any existing connections for the user before accepting the new one.
+        Accepts a new user connection and adds it to this process's local connection pool.
+        The "last-one-in-wins" logic is still included to handle browser tab refreshes gracefully.
         """
-        # --- BEGIN FIX: "Last one in wins" logic ---
+        # This check prevents having multiple connections for the same user in the *same process*.
         if user_id in self.user_connections and self.user_connections[user_id]:
             existing_connections = list(self.user_connections[user_id])
-            logging.warning(f"WS RECONCILE: User {user_id} already has {len(existing_connections)} connection(s). Closing them.")
-            
-            # Close all old connections for this user
+            logging.warning(f"WS RECONCILE: User {user_id} has old connections in this process. Closing them.")
             for conn in existing_connections:
                 try:
-                    # Send a specific code indicating the reason for closure.
-                    # 1012: Service Restart (a suitable code for a new session taking over)
+                    # Await the close operation to ensure it completes.
                     await conn.close(code=1012, reason="A new connection was established.")
                 except RuntimeError:
                     # This can happen if the connection is already dead.
                     logging.info(f"WS RECONCILE: Could not close an already dead connection for user {user_id}.")
                     pass
             self.user_connections[user_id].clear()
-        # --- END FIX ---
-        
-        # Accept the new connection now that old ones are closed.
-        await websocket.accept()
-        self.user_connections[user_id].add(websocket)
-        logging.info(f"WS CONNECT (USER): New, single connection for user_id: {user_id} accepted.")
 
+        # The websocket endpoint is responsible for `await websocket.accept()`.
+        # This method just tracks the accepted connection.
+        self.user_connections[user_id].add(websocket)
+        logging.info(f"WS CONNECT (USER): New connection for user_id: {user_id} added to local manager.")
 
     def disconnect_user(self, websocket: WebSocket, user_id: str):
-        """Removes a user's WebSocket connection."""
+        """Removes a user's WebSocket connection from this process's local pool."""
         self.user_connections[user_id].discard(websocket)
-        logging.info(f"WS DISCONNECT (USER): Connection closed for user_id: {user_id}. {len(self.user_connections[user_id])} connection(s) remain.")
+        logging.info(f"WS DISCONNECT (USER): Connection closed for user_id: {user_id}. {len(self.user_connections.get(user_id, set()))} connection(s) remain in this process.")
 
-    async def broadcast_to_user(self, user_id: str, data: dict):
-        """Broadcasts a JSON payload to all connections for a specific user_id."""
-        connections = self.user_connections.get(user_id)
-        if not connections:
-            logging.info(f"WS BROADCAST (USER): No active connections for user_id: {user_id}. Message not sent.")
+    # --- NEW METHOD: Sends messages to locally-managed connections ---
+    async def send_to_user_connections(self, user_id: str, data: dict):
+        """
+        Sends a message to all WebSockets connected for a specific user WITHIN THIS PROCESS.
+        This method is called by the central Redis listener in main.py.
+        """
+        # It's normal for a process to have no connections for a given user,
+        # as the user might be connected to a different server process on Render.
+        if user_id not in self.user_connections:
             return
 
+        connections = self.user_connections.get(user_id, set())
         message_to_send = json.dumps(data)
-        logging.info(f"WS BROADCAST (USER): Sending to {len(connections)} connection(s) for user_id: {user_id}: {message_to_send}")
-        
-        tasks = [connection.send_text(message_to_send) for connection in connections]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        for result in results:
-            if isinstance(result, Exception):
-                logging.error(f"WS BROADCAST ERROR (USER): Could not send message to a user. Error: {result}")
+        logging.info(f"WS SEND (from Pub/Sub): Sending to {len(connections)} local connection(s) for user_id: {user_id}: {message_to_send}")
 
+        # Use a copy of the connections set to avoid issues if it's modified during iteration (e.g., by a disconnect)
+        for connection in list(connections):
+            try:
+                await connection.send_text(message_to_send)
+            except Exception as e:
+                # If sending fails, the connection is likely dead. Log the error and remove it.
+                logging.error(f"WS SEND ERROR: Could not send message to a connection for user {user_id}. Removing it. Error: {e}")
+                self.disconnect_user(connection, user_id)
 
 # Create a single, globally accessible instance of the manager.
 manager = ConnectionManager()

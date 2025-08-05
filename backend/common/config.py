@@ -52,7 +52,11 @@ class Settings(BaseSettings):
     
     WEBSOCKET_ALLOWED_ORIGINS: str = '["https://www.ainudge.app", "https://ainudge.app"]' # Allow your domains
 
-    
+     # --- ADDED: Keys passed by Docker Compose for container management ---
+    # These are needed to prevent the Pydantic "extra inputs not permitted" error.
+    PYTHONUNBUFFERED: Optional[str] = None
+    RUNNING_IN_CELERY: Optional[str] = None
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         if not self._is_migration_mode():

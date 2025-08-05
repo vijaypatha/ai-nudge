@@ -5,11 +5,17 @@ import logging
 import asyncio
 import uuid
 import os
+import json # ADDED: For creating the Redis message payload
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from uuid import UUID
 from sqlmodel import Session, select
-from api.websocket_manager import manager
+# REMOVED: The websocket manager is no longer used in this file
+# from api.websocket_manager import manager
+
+# ADDED: Imports for Redis client and app settings
+import redis
+from common.config import get_settings
 
 
 # --- ADDED: Load dummy environment variables for direct execution ---
@@ -56,6 +62,12 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# --- ADDED: Initialize a Redis client for publishing messages. ---
+# This client will be used by Celery tasks to send notifications to a central channel.
+settings = get_settings()
+redis_client = redis.from_url(settings.REDIS_URL)
+USER_NOTIFICATION_CHANNEL = "user-notifications" # Define a consistent channel name
 
 
 # --- NEW TASK FOR INSTANT ONBOARDING ---
@@ -450,23 +462,43 @@ def check_for_recency_nudges_task():
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def rescore_client_against_recent_events_task(self, client_id: str, user_id: str):
     """
-    Asynchronously re-scores a client and then broadcasts a 'nudges_updated'
-    event to the user via WebSockets.
+    MODIFIED: Asynchronously re-scores a client and then publishes a 'nudges_updated'
+    event to a Redis channel for broadcasting by any connected web server process.
     """
     logger.info(f"CELERY: Starting client re-score task for client_id: {client_id}")
     try:
         client_uuid = uuid.UUID(client_id)
         user_uuid = uuid.UUID(user_id)
         
+        # This async function contains the original logic.
+        # It is now wrapped so we can run it synchronously within the Celery task.
         async def rescore_and_notify():
-            # Run the re-scoring logic
+            # Run the re-scoring logic (this part is unchanged)
             await nudge_engine.rescore_client_against_events(client_id=client_uuid, user_id=user_uuid)
             
-            # On success, broadcast the update to the user
-            await manager.broadcast_to_user(
-                user_id=user_id,
-                data={"event": "nudges_updated", "message": "Your nudges have been re-scored."}
-            )
+            # --- THIS IS THE CRITICAL FIX ---
+            # Instead of calling the websocket manager directly, which lives in a
+            # different process, we publish a message to a central Redis channel.
+            try:
+                # This is the message that will be sent over the Redis channel.
+                # It contains all the information the listener needs to route the message.
+                notification_payload = {
+                    "user_id": user_id,
+                    "payload": {
+                        "event": "nudges_updated",
+                        "message": "Your nudges have been re-scored."
+                    }
+                }
+                
+                # Publish the JSON-encoded payload to the central notification channel.
+                redis_client.publish(USER_NOTIFICATION_CHANNEL, json.dumps(notification_payload))
+                
+                # New log message to confirm the publish action.
+                logger.info(f"CELERY: Successfully published 'nudges_updated' event to Redis for user_id: {user_id}")
+            
+            except Exception as e:
+                # Log an error if publishing to Redis fails for any reason.
+                logger.error(f"CELERY: CRITICAL - Could not publish 'nudges_updated' to Redis. Error: {e}", exc_info=True)
 
         # Run the async wrapper function
         asyncio.run(rescore_and_notify())
