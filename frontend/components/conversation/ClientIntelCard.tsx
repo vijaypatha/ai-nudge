@@ -59,13 +59,19 @@ export const ClientIntelCard = ({ client, onUpdate, onReplan, displayConfig }: C
             const payload: ClientUpdatePayload = {};
             const originalClient = client;
 
+            // Define which keys should always be treated as numbers.
+            const numericKeys = new Set(['budget_max', 'budget_min', 'min_bedrooms', 'min_bathrooms']);
+
             // 1. Check if preferences have changed
             if (JSON.stringify(preferences) !== JSON.stringify(originalClient.preferences || {})) {
                 const sanitizedPrefs: { [key: string]: any; } = {};
+                
+                // This new loop is more robust for sanitizing data.
                 for (const [key, value] of Object.entries(preferences)) {
-                     // Convert string inputs from form back to numbers if original was a number
-                    if (typeof originalClient.preferences?.[key] === 'number') {
-                        sanitizedPrefs[key] = Number(value) || null;
+                    // If the key is known to be numeric, convert it to a number.
+                    // An empty string becomes null, preventing it from being saved as 0.
+                    if (numericKeys.has(key)) {
+                        sanitizedPrefs[key] = value ? Number(value) : null;
                     } else {
                         sanitizedPrefs[key] = value;
                     }
@@ -73,12 +79,12 @@ export const ClientIntelCard = ({ client, onUpdate, onReplan, displayConfig }: C
                 payload.preferences = sanitizedPrefs;
             }
             
-            // 2. Check if notes have changed
+            // 2. Check if notes have changed (this logic is unchanged)
             if (notes !== (originalClient.notes || '')) {
                 payload.notes = notes;
             }
 
-            // 3. Check if timezone has changed
+            // 3. Check if timezone has changed (this logic is unchanged)
             if (timezone !== (originalClient.timezone || '')) {
                 payload.timezone = timezone || null;
             }
