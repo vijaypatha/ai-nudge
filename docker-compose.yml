@@ -1,7 +1,7 @@
 # Local Development Configuration
 # This file defines the services and databases for the AI Nudge local application.
 # It is used to run the application locally.
-# Docker Compose (Dev): ENVIRONMENT: development → dev-login endpoint available 
+# Docker Compose (Dev): ENVIRONMENT: development → dev-login endpoint available
 services:
   # ---------- DATABASE ----------
   db:
@@ -41,10 +41,10 @@ services:
   # ---------- BACKEND (FastAPI) ----------
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
-    command: > 
-        sh -c "alembic upgrade head && python -c 'import asyncio; from data.seed import seed_database; asyncio.run(seed_database())' && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"
+      context: .
+      dockerfile: ./backend/Dockerfile
+    command: >
+        sh -c "alembic -c /app/backend/alembic.ini upgrade head && python -c 'import asyncio; from data.seed import seed_database; asyncio.run(seed_database())' && uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/backend"
     restart: unless-stopped
     ports:
       - "8001:8000"
@@ -58,7 +58,7 @@ services:
     env_file:
       - ./backend/.env
     volumes:
-      - ./backend:/app
+      - ./backend:/app/backend
     networks:
       - ai_nudge_net
     depends_on:
@@ -70,10 +70,10 @@ services:
   # ---------- CELERY WORKER ----------
   celery-worker:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./backend/Dockerfile
     restart: unless-stopped
-    command: celery -A celery_worker.celery_app worker --loglevel=info --concurrency=2
+    command: celery -A backend.celery_worker.celery_app worker --loglevel=info --concurrency=2
     environment:
       ENVIRONMENT: development
       PYTHONPATH: /app
@@ -83,7 +83,7 @@ services:
     env_file:
       - ./backend/.env
     volumes:
-      - ./backend:/app
+      - ./backend:/app/backend
     networks:
       - ai_nudge_net
     depends_on:
@@ -97,10 +97,10 @@ services:
   # ---------- CELERY BEAT SCHEDULER ----------
   celery-beat:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./backend/Dockerfile
     restart: unless-stopped
-    command: celery -A celery_worker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    command: celery -A backend.celery_worker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     environment:
       ENVIRONMENT: development
       PYTHONPATH: /app
@@ -110,7 +110,7 @@ services:
     env_file:
       - ./backend/.env
     volumes:
-      - ./backend:/app
+      - ./backend:/app/backend
       - celery_beat_data:/app/celery_beat_data
     networks:
       - ai_nudge_net

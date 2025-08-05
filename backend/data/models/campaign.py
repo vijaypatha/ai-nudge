@@ -20,6 +20,7 @@ class CampaignStatus(str, Enum):
     PAUSED = "paused"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+    DISMISSED = "dismissed"
 
 class CoPilotAction(BaseModel):
     """A Pydantic model for co-pilot actions in the UI."""
@@ -54,6 +55,8 @@ class CampaignBriefing(SQLModel, table=True):
     original_draft: str
     status: CampaignStatus = Field(default=CampaignStatus.DRAFT, index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    updated_at: Optional[datetime] = Field(default_factory=datetime.utcnow, sa_column_kwargs={"onupdate": datetime.utcnow})
 
     # Database relationships
     parent_message: Optional["Message"] = Relationship(back_populates="ai_drafts")

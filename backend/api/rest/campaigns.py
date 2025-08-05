@@ -208,6 +208,8 @@ async def handle_campaign_action(
             action_type=payload.action_type,
             user_id=current_user.id
         )
+        if result is None:
+            raise HTTPException(status_code=404, detail="Campaign action not found or not available.")
         return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -333,7 +335,7 @@ async def update_campaign_briefing(
         if not updated_briefing:
             raise HTTPException(status_code=404, detail="Campaign briefing not found.")
 
-        if update_data.status == CampaignStatus.DISMISSED:
+        if update_data.status == "dismissed" or update_data.status == CampaignStatus.DISMISSED:
             logging.info(f"API: Campaign {campaign_id} was dismissed. Adding feedback task to background.")
             background_tasks.add_task(
                 record_dismissal_feedback_task, 
@@ -346,41 +348,51 @@ async def update_campaign_briefing(
         raise HTTPException(status_code=500, detail=f"Failed to update campaign: {str(e)}")
 
 
-@router.put("/{briefing_id}/audience", response_model=Any)
+@router.put("/{briefing_id}/audience", response_model=CampaignBriefing)
 def update_campaign_audience(
     briefing_id: UUID,
     payload: UpdateAudiencePayload,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token),
 ):
-    from data.models.campaign import CampaignBriefing, MatchedClient
-    briefing = session.get(CampaignBriefing, briefing_id)
-    if not briefing or briefing.user_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Campaign briefing not found.")
+    from data.models.campaign import MatchedClient
+    
+    logging.info(f"[AUDIENCE_UPDATE] START: User {current_user.id} updating audience for briefing {briefing_id} with clients: {payload.client_ids}")
+    try:
+        briefing = session.get(CampaignBriefing, briefing_id)
+        if not briefing or briefing.user_id != current_user.id:
+            logging.error(f"[AUDIENCE_UPDATE] FAILED: Briefing {briefing_id} not found for user {current_user.id}.")
+            raise HTTPException(status_code=404, detail="Campaign briefing not found.")
+        
+        clients = crm_service.get_clients_by_ids(payload.client_ids, user_id=current_user.id)
+        if len(clients) != len(payload.client_ids):
+            logging.error(f"[AUDIENCE_UPDATE] FAILED: Mismatch in client IDs. Requested: {len(payload.client_ids)}, Found: {len(clients)}.")
+            raise HTTPException(status_code=404, detail="One or more clients not found.")
+        
+        new_audience_objects = [
+            MatchedClient(
+                client_id=client.id,
+                client_name=client.full_name,
+                match_score=0,
+                match_reasons=["Manually Added"]
+            )
+            for client in clients
+        ]
+        
+        # --- THIS IS THE FIX ---
+        # Convert the list of MatchedClient objects into a list of dictionaries
+        # before saving to the JSON field to resolve the serialization error.
+        briefing.matched_audience = [mc.model_dump(mode='json') for mc in new_audience_objects]
+        session.add(briefing)
+        session.commit()
+        session.refresh(briefing)
+        
+        logging.info(f"[AUDIENCE_UPDATE] SUCCESS: Audience for briefing {briefing.id} updated.")
+        return briefing
 
-    clients = crm_service.get_clients_by_ids(payload.client_ids, user_id=current_user.id)
-    if len(clients) != len(payload.client_ids):
-         raise HTTPException(status_code=404, detail="One or more clients not found.")
-
-    new_audience = [
-        MatchedClient(
-            client_id=client.id,
-            client_name=client.full_name,
-            match_score=0,
-            match_reasons=["Manually Added"]
-        )
-        for client in clients
-    ]
-
-    briefing.matched_audience = new_audience
-    briefing.updated_at = datetime.now(pytz.utc)
-
-    session.add(briefing)
-    session.commit()
-    session.refresh(briefing)
-
-    logging.info(f"Updated audience for briefing {briefing_id} with {len(new_audience)} clients.")
-    return briefing
+    except Exception as e:
+        logging.error(f"[AUDIENCE_UPDATE] UNEXPECTED ERROR for briefing {briefing_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An internal server error occurred while updating the audience.")
 
 
 @router.get("/{campaign_id}", response_model=Any)

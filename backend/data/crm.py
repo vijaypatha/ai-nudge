@@ -454,11 +454,20 @@ def get_negative_preferences(client_id: UUID, session: Session) -> List[List[flo
 
 # --- Resource Functions ---
 
-def get_resource_by_id(resource_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Resource]:
-    """Retrieves a single resource by its unique ID, ensuring it belongs to the user."""
-    with Session(engine) as session:
+def get_resource_by_id(resource_id: uuid.UUID, user_id: uuid.UUID, session: Optional[Session] = None) -> Optional[Resource]:
+    """
+    Retrieves a single resource by its unique ID, ensuring it belongs to the user.
+    Can optionally use a provided database session to participate in a larger transaction.
+    """
+    def _get(db_session: Session) -> Optional[Resource]:
         statement = select(Resource).where(Resource.id == resource_id, Resource.user_id == user_id)
-        return session.exec(statement).first()
+        return db_session.exec(statement).first()
+
+    if session:
+        return _get(session)
+    else:
+        with Session(engine) as new_session:
+            return _get(new_session)
 
 def get_all_resources_for_user(user_id: uuid.UUID) -> List[Resource]:
     """Retrieves all resources from the database for a specific user."""

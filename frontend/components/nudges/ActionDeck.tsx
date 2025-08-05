@@ -206,44 +206,52 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
     const config = displayConfig[briefing.campaign_type] || { icon: 'Default', color: 'text-primary-action', title: 'Nudge' };
     const icon = ICONS[config.icon] || ICONS.Default;
     
-    const [draft, setDraft] = useState(briefing.edited_draft || briefing.original_draft || '');
+    // --- FIX #1: Add local state to manage the current briefing ---
+    // This ensures the component can update itself immediately after a successful save.
+    const [localBriefing, setLocalBriefing] = useState(briefing);
+
     const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
-    const matchedAudience = useMemo(() => briefing.matched_audience ?? [], [briefing.matched_audience]);
+    
+    // --- FIX #2: Use localBriefing for all data rendering ---
+    const draft = useMemo(() => localBriefing.edited_draft || localBriefing.original_draft || '', [localBriefing]);
+    const matchedAudience = useMemo(() => localBriefing.matched_audience ?? [], [localBriefing.matched_audience]);
+    const intel = useMemo(() => localBriefing.key_intel || {}, [localBriefing.key_intel]);
 
-    useEffect(() => { setDraft(briefing.edited_draft || briefing.original_draft || ''); }, [briefing.id, briefing.original_draft, briefing.edited_draft]);
+    // --- FIX #3: Sync local state if the parent component passes a new briefing (e.g., when navigating between nudges) ---
+    useEffect(() => {
+        setLocalBriefing(briefing);
+    }, [briefing]);
 
-    const intel = briefing.key_intel || {};
     const strategicContext = intel['strategic_context'] || 'This is a key market event relevant to your clients.';
     const timingRationale = intel['timing_rationale'] || 'Optimal timing for client engagement.';
     const triggerSource = intel['trigger_source'] || 'AI Analysis';
 
     const wasRescored = useMemo(() => {
-        if (!briefing.created_at || !briefing.updated_at) return false;
-        const created = new Date(briefing.created_at).getTime();
-        const updated = new Date(briefing.updated_at).getTime();
+        if (!localBriefing.created_at || !localBriefing.updated_at) return false;
+        const created = new Date(localBriefing.created_at).getTime();
+        const updated = new Date(localBriefing.updated_at).getTime();
         return (updated - created) > 60000; 
-    }, [briefing.created_at, briefing.updated_at]);
+    }, [localBriefing.created_at, localBriefing.updated_at]);
 
-    const handleDraftChange = (newDraft: string) => { setDraft(newDraft); onBriefingUpdate({ ...briefing, edited_draft: newDraft }); };
+    const handleDraftChange = (newDraft: string) => {
+        const updated = { ...localBriefing, edited_draft: newDraft };
+        setLocalBriefing(updated);
+        onBriefingUpdate(updated);
+    };
     
-    // --- THIS IS THE FINAL, CORRECT VERSION OF THIS FUNCTION ---
     const handleSaveAudience = async (newAudience: Client[]) => {
-        // 1. Extract just the client IDs for the payload, which is what the
-        //    dedicated `/audience` endpoint expects.
         const clientIds = newAudience.map(c => c.id);
-
         try {
-            // 2. Call the correct, specific endpoint for updating audiences.
-            const updatedBriefing = await api.put(
-                `/api/campaigns/${briefing.id}/audience`,
+            const updatedBriefingFromServer = await api.put(
+                `/api/campaigns/${localBriefing.id}/audience`,
                 { client_ids: clientIds }
             );
             
-            // 3. Update local state with the confirmed data from the server.
-            onBriefingUpdate(updatedBriefing);
+            // --- FIX #4: Update both local and parent state with the new data from the server ---
+            setLocalBriefing(updatedBriefingFromServer); // Updates this component immediately
+            onBriefingUpdate(updatedBriefingFromServer); // Updates the main list in the parent component
         } catch (error) {
             console.error("Failed to save audience:", error);
-            // 4. Propagate the error so the modal can display it to the user.
             throw error; 
         }
     };
@@ -260,7 +268,7 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
                 <div className="flex-shrink-0 p-4 bg-black/30 border-b border-white/10 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                         <span className={config.color}>{icon}</span>
-                        <h3 className="font-bold text-lg text-brand-text-main">{briefing.headline}</h3>
+                        <h3 className="font-bold text-lg text-brand-text-main">{localBriefing.headline}</h3>
                         {wasRescored && (
                             <span className="flex items-center gap-1.5 bg-primary-action/20 text-primary-action text-xs font-bold px-2 py-1 rounded-full animate-in fade-in-0 zoom-in-95">
                                 <Sparkles size={12}/> Re-scored
@@ -315,8 +323,8 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onBri
                 </div>
                 
                 <div className="flex-shrink-0 p-3 bg-black/30 border-t border-white/10 grid grid-cols-2 gap-3">
-                    <button onClick={() => onAction(briefing, 'dismiss')} className="p-3 bg-white/5 border border-white/10 text-brand-text-main rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-white/10 hover:border-white/20 transition-all duration-200"><X size={18} /> Dismiss Nudge</button>
-                    <button onClick={() => onAction(briefing, 'send')} disabled={matchedAudience.length === 0} className="p-3 text-brand-dark rounded-lg font-bold flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(32,213,179,0.4)] hover:scale-[1.03] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed" style={{ backgroundColor: BRAND_ACCENT_COLOR }}><Send size={18} /> Send to {matchedAudience.length} Client(s)</button>
+                    <button onClick={() => onAction(localBriefing, 'dismiss')} className="p-3 bg-white/5 border border-white/10 text-brand-text-main rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-white/10 hover:border-white/20 transition-all duration-200"><X size={18} /> Dismiss Nudge</button>
+                    <button onClick={() => onAction(localBriefing, 'send')} disabled={matchedAudience.length === 0} className="p-3 text-brand-dark rounded-lg font-bold flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(32,213,179,0.4)] hover:scale-[1.03] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed" style={{ backgroundColor: BRAND_ACCENT_COLOR }}><Send size={18} /> Send to {matchedAudience.length} Client(s)</button>
                 </div>
             </div>
         </>
