@@ -13,7 +13,6 @@ import uuid
 from fastapi.testclient import TestClient
 from unittest.mock import patch
 from sqlmodel import Session
-# FIX: Correctly import models from their specific locations
 from data.models import User, Client, CampaignBriefing, Resource
 from data.models.campaign import CampaignStatus
 
@@ -114,7 +113,7 @@ def test_update_campaign_audience_fails_briefing_not_found(authenticated_client:
     # Act
     response = authenticated_client.put(f"/api/campaigns/{fake_briefing_id}/audience", json=payload)
     
-    # Assert
+    # Assert - The endpoint should now correctly return 404
     assert response.status_code == 404
 
 def test_update_campaign_audience_fails_client_not_found(authenticated_client: TestClient, test_campaign: CampaignBriefing):
@@ -125,7 +124,7 @@ def test_update_campaign_audience_fails_client_not_found(authenticated_client: T
     payload = {"client_ids": [str(uuid.uuid4())]}  # Non-existent client ID
     response = authenticated_client.put(f"/api/campaigns/{test_campaign.id}/audience", json=payload)
     
-    # Assert
+    # Assert - The endpoint should now correctly return 404
     assert response.status_code == 404
 
 def test_update_campaign_audience_fails_unauthenticated(client: TestClient):
@@ -195,7 +194,7 @@ def test_update_campaign_fails_not_found(authenticated_client: TestClient):
     # Act
     response = authenticated_client.put(f"/api/campaigns/{fake_campaign_id}", json=payload)
     
-    # Assert
+    # Assert - The endpoint should now correctly return 404
     assert response.status_code == 404
 
 def test_get_campaign_by_id_succeeds(authenticated_client: TestClient, test_campaign: CampaignBriefing):
@@ -267,7 +266,7 @@ def test_handle_campaign_action_fails_briefing_not_found(authenticated_client: T
     # Act
     response = authenticated_client.post(f"/api/campaigns/{fake_briefing_id}/action", json=payload)
     
-    # Assert
+    # Assert - The endpoint should now correctly return 404
     assert response.status_code == 404
 
 def test_approve_campaign_plan_succeeds(authenticated_client: TestClient, test_user: User, test_client: Client, session: Session):
@@ -281,6 +280,8 @@ def test_approve_campaign_plan_succeeds(authenticated_client: TestClient, test_u
         client_id=test_client.id,
         campaign_type="relationship_plan",
         headline="Test Plan",
+        # FIX: Add non-null original_draft
+        original_draft="Initial plan content.",
         is_plan=True,
         status=CampaignStatus.DRAFT,
         key_intel={
@@ -323,6 +324,8 @@ def test_approve_campaign_plan_fails_no_steps(authenticated_client: TestClient, 
         client_id=test_client.id,
         campaign_type="relationship_plan",
         headline="Test Plan",
+        # FIX: Add non-null original_draft
+        original_draft="Initial plan content with no steps.",
         key_intel={},  # No steps
         is_plan=True,
         status=CampaignStatus.DRAFT
@@ -444,7 +447,7 @@ def test_trigger_send_campaign_succeeds(authenticated_client: TestClient, test_c
     """
     Tests successful triggering of campaign send.
     """
-    # Mock the background task
+    # FIX: Mock the .delay method for Celery tasks
     with patch("workflow.outbound.send_campaign_to_audience.delay") as mock_send:
         # Act
         response = authenticated_client.post(f"/api/campaigns/{test_campaign.id}/send")

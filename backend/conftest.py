@@ -50,7 +50,6 @@ from data.models import (
     User, Client, Resource, ContentResource, Message, ScheduledMessage,
     CampaignBriefing, MarketEvent, PipelineRun, Faq, NegativePreference
 )
-# FIX: Import CampaignStatus from its correct submodule
 from data.models.campaign import CampaignStatus
 
 # App import and DB setup
@@ -123,10 +122,14 @@ def test_user(session: Session) -> User:
 
 @pytest.fixture(name="client")
 def client_fixture(session: Session) -> Generator[TestClient, None, None]:
-    """Creates a base TestClient that uses our isolated test database."""
-    def get_session_override():
-        return session
-
+    """
+    Creates a base TestClient that uses our isolated test database.
+    This uses a more robust generator-based dependency override to ensure
+    the API endpoints see the data created within the test's transaction.
+    """
+    def get_session_override() -> Generator[Session, None, None]:
+        yield session
+    
     app.dependency_overrides[get_session] = get_session_override
     with TestClient(app) as client:
         yield client
