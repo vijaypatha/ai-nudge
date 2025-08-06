@@ -280,7 +280,6 @@ def test_approve_campaign_plan_succeeds(authenticated_client: TestClient, test_u
         client_id=test_client.id,
         campaign_type="relationship_plan",
         headline="Test Plan",
-        # FIX: Add non-null original_draft
         original_draft="Initial plan content.",
         is_plan=True,
         status=CampaignStatus.DRAFT,
@@ -324,8 +323,7 @@ def test_approve_campaign_plan_fails_no_steps(authenticated_client: TestClient, 
         client_id=test_client.id,
         campaign_type="relationship_plan",
         headline="Test Plan",
-        # FIX: Add non-null original_draft
-        original_draft="Initial plan content with no steps.",
+        original_draft="Initial plan with no steps.",
         key_intel={},  # No steps
         is_plan=True,
         status=CampaignStatus.DRAFT

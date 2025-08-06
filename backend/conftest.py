@@ -43,9 +43,7 @@ def get_engine():
         _engine = get_test_engine()
     return _engine
 
-# --- CRITICAL FIX: Import models ONCE to prevent multiple registration ---
-# Models are imported here to ensure they're registered only once
-# with SQLModel.metadata before any test execution
+# --- Import models to ensure they're registered ---
 from data.models import (
     User, Client, Resource, ContentResource, Message, ScheduledMessage,
     CampaignBriefing, MarketEvent, PipelineRun, Faq, NegativePreference
@@ -62,14 +60,11 @@ import data.database
 @pytest.fixture(scope='session', autouse=True)
 def setup_test_environment():
     """
-    Sets up the test environment. In CI, we use the actual database.
-    In local development, we use SQLite.
+    Sets up the test environment.
     """
     import os
     if os.getenv('GITHUB_ACTIONS') == 'true':
         print(f"Running tests in CI environment with PostgreSQL")
-        # In CI, we need to patch the engine so that API code uses the same engine
-        # that has the tables created by migrations
         import data.database
         data.database.engine = get_engine()
     else:
@@ -79,36 +74,22 @@ def setup_test_environment():
 @pytest.fixture(name="session", scope="function")
 def session_fixture() -> Generator[Session, None, None]:
     """
-    Creates a new database session for each test, wrapped in a transaction that is
-    rolled back after the test completes. This ensures test isolation.
+    Provides a clean database for every test.
+    This fixture drops all tables and recreates them before each test,
+    ensuring complete test isolation.
     """
-    for p in lifespan_patches:
-        p.start()
-
     engine = get_engine()
-    connection = engine.connect()
-    transaction = connection.begin()
-    session = Session(bind=connection)
-
-    # For local SQLite tests, we still need to create the tables.
-    # The transaction will ensure they are clean for each test.
-    import os
-    if os.getenv('GITHUB_ACTIONS') != 'true':
-        SQLModel.metadata.create_all(connection)
-
-    yield session
-
-    # The transaction is rolled back, undoing any data changes made during the test.
-    session.close()
-    transaction.rollback()
-    connection.close()
-
-    for p in lifespan_patches:
-        p.stop()
+    
+    # Start with a clean slate for every test
+    SQLModel.metadata.drop_all(engine)
+    SQLModel.metadata.create_all(engine)
+    
+    with Session(engine) as session:
+        yield session
 
 @pytest.fixture
 def test_user(session: Session) -> User:
-    """Creates a test user and saves it to the in-memory test database."""
+    """Creates a test user and saves it to the database."""
     user = User(
         id=uuid.uuid4(),
         full_name="Test User",
@@ -122,11 +103,7 @@ def test_user(session: Session) -> User:
 
 @pytest.fixture(name="client")
 def client_fixture(session: Session) -> Generator[TestClient, None, None]:
-    """
-    Creates a base TestClient that uses our isolated test database.
-    This uses a more robust generator-based dependency override to ensure
-    the API endpoints see the data created within the test's transaction.
-    """
+    """Creates a TestClient that uses the clean test database."""
     def get_session_override() -> Generator[Session, None, None]:
         yield session
     
