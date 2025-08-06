@@ -77,25 +77,30 @@ def setup_test_environment():
 
 @pytest.fixture(name="session", scope="function")
 def session_fixture() -> Generator[Session, None, None]:
-    """Creates a new, empty database session for each test."""
+    """
+    Creates a new database session for each test, wrapped in a transaction that is
+    rolled back after the test completes. This ensures test isolation.
+    """
     for p in lifespan_patches:
         p.start()
-    
-    # Models are already imported at module level, so we don't need to re-import them
-    
-    # In CI, we use the actual database with migrations, so don't create/drop tables
-    # In local development, we use SQLite and create/drop tables for each test
+
+    engine = get_engine()
+    connection = engine.connect()
+    transaction = connection.begin()
+    session = Session(bind=connection)
+
+    # For local SQLite tests, we still need to create the tables.
+    # The transaction will ensure they are clean for each test.
     import os
     if os.getenv('GITHUB_ACTIONS') != 'true':
-        # Create all tables in the test database for local development
-        SQLModel.metadata.create_all(get_engine())
-    
-    with Session(get_engine()) as session:
-        yield session
-    
-    # Only drop tables if not in CI (where we use migrations)
-    if os.getenv('GITHUB_ACTIONS') != 'true':
-        SQLModel.metadata.drop_all(get_engine())
+        SQLModel.metadata.create_all(connection)
+
+    yield session
+
+    # The transaction is rolled back, undoing any data changes made during the test.
+    session.close()
+    transaction.rollback()
+    connection.close()
 
     for p in lifespan_patches:
         p.stop()
@@ -107,7 +112,7 @@ def test_user(session: Session) -> User:
         id=uuid.uuid4(),
         full_name="Test User",
         email="test@example.com",
-        phone_number="+15551234567" 
+        phone_number="+15551234567"
     )
     session.add(user)
     session.commit()
@@ -119,7 +124,7 @@ def client_fixture(session: Session) -> Generator[TestClient, None, None]:
     """Creates a base TestClient that uses our isolated test database."""
     def get_session_override():
         return session
-    
+
     app.dependency_overrides[get_session] = get_session_override
     with TestClient(app) as client:
         yield client
