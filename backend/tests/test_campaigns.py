@@ -13,7 +13,9 @@ import uuid
 from fastapi.testclient import TestClient
 from unittest.mock import patch
 from sqlmodel import Session
-from data.models import User, Client, CampaignBriefing, CampaignStatus, Resource
+# FIX: Correctly import models from their specific locations
+from data.models import User, Client, CampaignBriefing, Resource
+from data.models.campaign import CampaignStatus
 
 def test_draft_instant_nudge_succeeds(authenticated_client: TestClient):
     """
