@@ -96,7 +96,7 @@ def session_fixture() -> Generator[Session, None, None]:
 def test_user(session: Session) -> User:
     """Creates a test user and saves it to the in-memory test database."""
     user = User(
-        id=uuid.UUID("a8c6f1d7-8f7a-4b6e-8b0f-9e5a7d6c5b4a"),
+        id=uuid.uuid4(),
         full_name="Test User",
         email="test@example.com",
         phone_number="+15551234567" 

@@ -74,7 +74,7 @@ async def test_mls_new_listing_event_creates_campaign(session: Session):
             id=entity_id, 
             user_id=realtor.id,
             resource_type="property", # Specify the vertical type
-            status="Active",
+            status="ACTIVE",
             attributes=property_attributes # Store all specific data here
         )
         session.add(resource_to_save)
