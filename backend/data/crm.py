@@ -192,11 +192,17 @@ def get_client_by_phone(phone_number: str, user_id: uuid.UUID) -> Optional[Clien
         statement = select(Client).where(Client.phone == phone_number, Client.user_id == user_id)
         return session.exec(statement).first()
 
-def get_all_clients(user_id: uuid.UUID) -> List[Client]:
+def get_all_clients(user_id: uuid.UUID, session: Optional[Session] = None) -> List[Client]:
     """Retrieves all clients from the database for a specific user."""
-    with Session(engine) as session:
+    def _get(db_session: Session):
         statement = select(Client).where(Client.user_id == user_id)
-        return session.exec(statement).all()
+        return db_session.exec(statement).all()
+    
+    if session:
+        return _get(session)
+    else:
+        with Session(engine) as new_session:
+            return _get(new_session)
 
 def get_client_nudge_summaries(user_id: uuid.UUID, session: Session) -> List[Dict[str, Any]]:
     """

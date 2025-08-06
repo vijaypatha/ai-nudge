@@ -71,23 +71,35 @@ def test_campaignbriefing_table_structure(session: Session):
 
 def test_database_connection_info(session: Session):
     """Test to log database connection information for debugging."""
-    # Get database info
-    result = session.exec(text("SELECT current_database(), current_user"))
-    db_info = result.first()
-    print(f"Connected to database: {db_info[0]} as user: {db_info[1]}")
+    import os
     
-    # List all tables
-    result = session.exec(text("""
-        SELECT table_name 
-        FROM information_schema.tables 
-        WHERE table_schema = 'public'
-        ORDER BY table_name
-    """))
-    tables = [row[0] for row in result.all()]
-    print(f"Available tables: {tables}")
-    
-    # Check if campaignbriefing table exists
-    assert "campaignbriefing" in tables, f"campaignbriefing table not found. Available tables: {tables}" 
+    # Get database info - use database-specific queries
+    if os.getenv('GITHUB_ACTIONS') == 'true':
+        # PostgreSQL in CI
+        result = session.exec(text("SELECT current_database(), current_user"))
+        db_info = result.first()
+        print(f"Connected to database: {db_info[0]} as user: {db_info[1]}")
+        
+        # List all tables
+        result = session.exec(text("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public'
+            ORDER BY table_name
+        """))
+        tables = [row[0] for row in result.all()]
+        print(f"Available tables: {tables}")
+        
+        # Check if campaignbriefing table exists
+        assert "campaignbriefing" in tables, f"campaignbriefing table not found. Available tables: {tables}"
+    else:
+        # SQLite in local development
+        result = session.exec(text("SELECT name FROM sqlite_master WHERE type='table'"))
+        tables = [row[0] for row in result.all()]
+        print(f"Available tables: {tables}")
+        
+        # Check if campaignbriefing table exists
+        assert "campaignbriefing" in tables, f"campaignbriefing table not found. Available tables: {tables}" 
 
 def test_campaignbriefing_table_exists_in_ci(session: Session):
     """Test that the campaignbriefing table exists in CI environment."""

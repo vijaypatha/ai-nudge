@@ -203,7 +203,7 @@ async def process_market_event(event: MarketEvent, user: User, db_session: Sessi
     elif resource.resource_type == "property" and resource.attributes.get('PublicRemarks'):
         resource_embedding = await llm_client.generate_embedding(resource.attributes['PublicRemarks'])
 
-    all_clients = crm_service.get_all_clients(user_id=user.id)
+    all_clients = crm_service.get_all_clients(user_id=user.id, session=db_session)
     logging.info(f"NUDGE_ENGINE: Found {len(all_clients)} clients to score against event {event.id}.")
 
     matched_audience = []

@@ -33,7 +33,15 @@ def get_test_engine():
             poolclass=StaticPool,
         )
 
-engine = get_test_engine()
+# Initialize engine lazily to avoid import-time issues
+_engine = None
+
+def get_engine():
+    """Get the test engine, initializing it if needed."""
+    global _engine
+    if _engine is None:
+        _engine = get_test_engine()
+    return _engine
 
 # --- CRITICAL FIX: Import models ONCE to prevent multiple registration ---
 # Models are imported here to ensure they're registered only once
@@ -62,7 +70,7 @@ def setup_test_environment():
         # In CI, we need to patch the engine so that API code uses the same engine
         # that has the tables created by migrations
         import data.database
-        data.database.engine = engine
+        data.database.engine = get_engine()
     else:
         print(f"Running tests in local environment with SQLite")
     yield
@@ -80,14 +88,14 @@ def session_fixture() -> Generator[Session, None, None]:
     import os
     if os.getenv('GITHUB_ACTIONS') != 'true':
         # Create all tables in the test database for local development
-        SQLModel.metadata.create_all(engine)
+        SQLModel.metadata.create_all(get_engine())
     
-    with Session(engine) as session:
+    with Session(get_engine()) as session:
         yield session
     
     # Only drop tables if not in CI (where we use migrations)
     if os.getenv('GITHUB_ACTIONS') != 'true':
-        SQLModel.metadata.drop_all(engine)
+        SQLModel.metadata.drop_all(get_engine())
 
     for p in lifespan_patches:
         p.stop()
