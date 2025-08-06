@@ -47,7 +47,19 @@ async def send_campaign_to_audience(campaign_id: uuid.UUID, user_id: uuid.UUID):
             continue
         
         personalized_message = final_draft.replace("[Client Name]", client.full_name.split(" ")[0])
-        was_sent = twilio_outgoing.send_sms(to_number=client.phone, body=personalized_message)
+        
+        # Get the user's Twilio number
+        user = crm_service.get_user_by_id(user_id)
+        if not user or not user.twilio_phone_number:
+            print(f"OUTBOUND WORKFLOW ERROR: User {user_id} has no Twilio number configured.")
+            failure_count += 1
+            continue
+            
+        was_sent = twilio_outgoing.send_sms(
+            from_number=user.twilio_phone_number,
+            to_number=client.phone, 
+            body=personalized_message
+        )
         
         if was_sent:
             # --- MODIFIED: Use secure CRM function ---

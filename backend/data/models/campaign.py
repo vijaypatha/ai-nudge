@@ -53,6 +53,7 @@ class CampaignBriefing(SQLModel, table=True):
     key_intel: Dict[str, Any] = Field(sa_column=Column(JSON))
     matched_audience: List[Dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     original_draft: str
+    edited_draft: Optional[str] = Field(default=None)
     status: CampaignStatus = Field(default=CampaignStatus.DRAFT, index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

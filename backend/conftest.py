@@ -5,6 +5,7 @@ import pytest
 from typing import Generator
 import uuid
 from datetime import datetime, timezone
+import os
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
@@ -16,12 +17,23 @@ lifespan_patches = [
     patch('api.main.semantic_service.initialize_vector_index', return_value=None)
 ]
 
-# Test database engine setup - SINGLE ENGINE FOR ALL TESTS
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
+# Test database engine setup - USE ENVIRONMENT DATABASE IN CI
+def get_test_engine():
+    """Get the appropriate test database engine based on environment."""
+    # Check if we're in CI (GitHub Actions)
+    if os.getenv('GITHUB_ACTIONS') == 'true':
+        # Use the actual database URL from environment in CI
+        from data.database import engine
+        return engine
+    else:
+        # Use SQLite for local development tests
+        return create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+
+engine = get_test_engine()
 
 # --- CRITICAL FIX: Import models ONCE to prevent multiple registration ---
 # Models are imported here to ensure they're registered only once
@@ -35,19 +47,25 @@ from data.models import (
 from api.main import app
 from api.security import get_current_user_from_token
 from data.database import get_session
+import data.database
 
-# --- NEW: This fixture ensures all modules use the same test engine ---
+# --- SIMPLIFIED: No complex patching needed in CI ---
 @pytest.fixture(scope='session', autouse=True)
-def patch_db_engine():
+def setup_test_environment():
     """
-    Patches the engine used by service modules to ensure they use the
-    test database engine for all operations. This is critical for
-    integration tests that call service-layer code directly.
+    Sets up the test environment. In CI, we use the actual database.
+    In local development, we use SQLite.
     """
-    # We patch the engine in any module that might import it directly
-    with patch('data.crm.engine', new=engine), \
-         patch('data.database.engine', new=engine):
-        yield
+    import os
+    if os.getenv('GITHUB_ACTIONS') == 'true':
+        print(f"Running tests in CI environment with PostgreSQL")
+        # In CI, we need to patch the engine so that API code uses the same engine
+        # that has the tables created by migrations
+        import data.database
+        data.database.engine = engine
+    else:
+        print(f"Running tests in local environment with SQLite")
+    yield
 
 @pytest.fixture(name="session", scope="function")
 def session_fixture() -> Generator[Session, None, None]:
@@ -57,10 +75,19 @@ def session_fixture() -> Generator[Session, None, None]:
     
     # Models are already imported at module level, so we don't need to re-import them
     
-    SQLModel.metadata.create_all(engine)
+    # In CI, we use the actual database with migrations, so don't create/drop tables
+    # In local development, we use SQLite and create/drop tables for each test
+    import os
+    if os.getenv('GITHUB_ACTIONS') != 'true':
+        # Create all tables in the test database for local development
+        SQLModel.metadata.create_all(engine)
+    
     with Session(engine) as session:
         yield session
-    SQLModel.metadata.drop_all(engine)
+    
+    # Only drop tables if not in CI (where we use migrations)
+    if os.getenv('GITHUB_ACTIONS') != 'true':
+        SQLModel.metadata.drop_all(engine)
 
     for p in lifespan_patches:
         p.stop()

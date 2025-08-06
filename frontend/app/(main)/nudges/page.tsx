@@ -118,10 +118,23 @@ export default function NudgesPage() {
     const handleAction = async (briefing: CampaignBriefing, action: 'dismiss' | 'send') => {
         try {
             if (action === 'send') {
-                await api.put(`/api/campaigns/${briefing.id}`, { edited_draft: briefing.edited_draft, matched_audience: briefing.matched_audience, status: 'approved' });
+                // Only send the fields that CampaignUpdate expects
+                const updatePayload = {
+                    edited_draft: briefing.edited_draft || "",
+                    matched_audience: briefing.matched_audience,
+                    status: 'active' as const  // Changed from 'approved' to 'active'
+                };
+                
+                console.log('Sending payload:', updatePayload);
+                console.log('Payload JSON:', JSON.stringify(updatePayload));
+                
+                // Test the debug endpoint first
+                await api.put(`/api/campaigns/test-debug/${briefing.id}`, updatePayload);
+                
+                await api.put(`/api/campaigns/${briefing.id}`, updatePayload);
                 await api.post(`/api/campaigns/${briefing.id}/send`, {});
             } else {
-                await api.put(`/api/campaigns/${briefing.id}`, { status: 'dismissed' });
+                await api.put(`/api/campaigns/${briefing.id}`, { status: 'dismissed' as const });
             }
             // After an action, refetch the summaries to update the client grid
             fetchClientSummaries();

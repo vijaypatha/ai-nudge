@@ -3,7 +3,7 @@
 
 import logging
 import asyncio
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body, Query
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body, Query, Request
 from typing import List, Dict, Any, Optional
 from uuid import UUID
 import uuid
@@ -372,20 +372,35 @@ async def send_instant_nudge_now(message_data: SendMessageImmediate, current_use
 @router.put("/{campaign_id}", response_model=Any)
 async def update_campaign_briefing(
     campaign_id: UUID, 
-    # --- FIX: Changed type from Any to the correct CampaignUpdate model ---
-    # This ensures FastAPI correctly parses the incoming JSON into an object
-    # that the rest of the function can work with, resolving the save error.
-    update_data: "CampaignUpdate", 
+    request: Request,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user_from_token)
 ):
+    print(f"API: Received PUT request for campaign {campaign_id}")
+    
+    # Parse the request body manually
+    body = await request.body()
+    print(f"API: Raw request body: {body}")
+    
+    try:
+        import json
+        update_data_dict = json.loads(body)
+        print(f"API: Parsed update_data: {update_data_dict}")
+        
+        # Convert dictionary to CampaignUpdate object
+        from data.models.campaign import CampaignUpdate
+        update_data = CampaignUpdate(**update_data_dict)
+        print(f"API: Converted to CampaignUpdate: {update_data}")
+    except Exception as e:
+        print(f"API: JSON parsing error: {e}")
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    
     try:
         updated_briefing = crm_service.update_campaign_briefing(campaign_id, update_data, user_id=current_user.id)
         if not updated_briefing:
             raise HTTPException(status_code=404, detail="Campaign briefing not found.")
 
         if update_data.status == "dismissed" or update_data.status == CampaignStatus.DISMISSED:
-            logging.info(f"API: Campaign {campaign_id} was dismissed. Adding feedback task to background.")
             background_tasks.add_task(
                 record_dismissal_feedback_task, 
                 campaign_id=campaign_id,
@@ -394,7 +409,33 @@ async def update_campaign_briefing(
 
         return updated_briefing
     except Exception as e:
+        print(f"API: Error updating campaign {campaign_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to update campaign: {str(e)}")
+
+
+# Test endpoint to debug the 422 issue
+@router.put("/test-debug/{campaign_id}", response_model=Any)
+async def test_debug_endpoint(
+    campaign_id: UUID,
+    request: Request,
+    current_user: User = Depends(get_current_user_from_token)
+):
+    print(f"TEST-DEBUG: Function called with campaign_id: {campaign_id}")
+    
+    # Log the raw request body
+    body = await request.body()
+    print(f"TEST-DEBUG: Raw request body: {body}")
+    print(f"TEST-DEBUG: Content-Type: {request.headers.get('content-type')}")
+    
+    try:
+        # Try to parse as JSON
+        import json
+        json_data = json.loads(body)
+        print(f"TEST-DEBUG: Parsed JSON: {json_data}")
+    except Exception as e:
+        print(f"TEST-DEBUG: JSON parsing error: {e}")
+    
+    return {"message": "Test debug endpoint works", "campaign_id": str(campaign_id)}
 
 
 @router.put("/{briefing_id}/audience", response_model=CampaignBriefing)

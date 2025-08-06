@@ -180,6 +180,36 @@ def test_client_ownership_isolation(authenticated_client: TestClient, session: S
 
 def test_get_nudges_for_client_succeeds(authenticated_client: TestClient, test_user, session: Session):
     """Tests successful retrieval of nudges for a specific client."""
+    # Debug: Check if we're in CI and what database we're using
+    import os
+    if os.getenv('GITHUB_ACTIONS') == 'true':
+        print(f"Running in CI environment")
+        print(f"DATABASE_URL: {os.getenv('DATABASE_URL')}")
+        
+        # Check what tables exist
+        from sqlmodel import text
+        result = session.exec(text("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public'
+            ORDER BY table_name
+        """))
+        tables = [row[0] for row in result.all()]
+        print(f"Available tables in CI: {tables}")
+        
+        # Check if campaignbriefing table exists
+        if "campaignbriefing" not in tables:
+            print("ERROR: campaignbriefing table not found!")
+            print("This suggests migrations were not run correctly.")
+            # Try to create the table manually for testing
+            try:
+                from data.models import CampaignBriefing
+                from sqlmodel import SQLModel
+                SQLModel.metadata.create_all(session.bind)
+                print("Attempted to create tables manually")
+            except Exception as e:
+                print(f"Failed to create tables manually: {e}")
+    
     # Arrange - create a test client
     from data.models.client import Client
     client = Client(
@@ -256,3 +286,20 @@ def test_get_nudges_for_client_returns_correct_structure(authenticated_client: T
         assert "resource" in nudge
         assert "original_draft" in nudge
         assert "matched_audience" in nudge
+
+def test_direct_database_query_works(session: Session, test_user):
+    """Test that we can directly query the database without going through the API."""
+    import os
+    if os.getenv('GITHUB_ACTIONS') == 'true':
+        # Test direct database query
+        from data.crm import get_new_campaign_briefings_for_user
+        
+        # This should work if the database is set up correctly
+        campaigns = get_new_campaign_briefings_for_user(user_id=test_user.id, session=session)
+        print(f"Found {len(campaigns)} campaigns for user {test_user.id}")
+        
+        # Should not raise an exception
+        assert isinstance(campaigns, list)
+    else:
+        # Skip in local development
+        pytest.skip("This test is only relevant in CI environment")

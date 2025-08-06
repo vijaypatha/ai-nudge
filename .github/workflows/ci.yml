@@ -45,6 +45,40 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
       
+      - name: Run database migrations
+        env:
+          DATABASE_URL: postgresql://testuser:testpassword@localhost:${{ job.services.postgres.ports['5432'] }}/testdb
+          REDIS_URL: redis://localhost:${{ job.services.redis.ports['6379'] }}/0
+          ENVIRONMENT: development
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_PHONE_NUMBER: ${{ secrets.TWILIO_PHONE_NUMBER }}
+          TWILIO_VERIFY_SERVICE_SID: ${{ secrets.TWILIO_VERIFY_SERVICE_SID }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          MLS_PROVIDER: ${{ secrets.MLS_PROVIDER }}
+          SPARK_API_DEMO_TOKEN: ${{ secrets.SPARK_API_DEMO_TOKEN }}
+          RESO_API_BASE_URL: ${{ secrets.RESO_API_BASE_URL }}
+          RESO_API_TOKEN: ${{ secrets.RESO_API_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
+          FRONTEND_APP_URL: ${{ secrets.FRONTEND_APP_URL }}
+          FAQ_AUTO_REPLY_ENABLED: true
+          LLM_PROVIDER: "openai"
+        run: |
+          cd backend
+          echo "Running database migrations..."
+          echo "DATABASE_URL: $DATABASE_URL"
+          alembic current
+          alembic upgrade head
+          echo "Migrations completed. Current revision:"
+          alembic current
+          echo "Verifying tables were created:"
+          psql $DATABASE_URL -c "\dt"
+      
       - name: Run Pytest
         # Add this env block to provide all necessary settings
         env:

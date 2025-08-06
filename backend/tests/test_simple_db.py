@@ -1,54 +1,52 @@
-# Simple test to verify database setup works without table redefinition errors
+# File: backend/tests/test_simple_db.py
+# 
+# What does this file test:
+# This file contains simple tests to verify that the database setup is working correctly.
+# 
+# When was it updated: 2025-01-27
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine
-from sqlmodel.pool import StaticPool
-from sqlalchemy import text
+from sqlmodel import Session, text
+import os
 
-def test_database_setup_works():
-    """Test that database setup works without table redefinition errors."""
-    # Create a test engine
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    
-    # Import models - this should not cause table redefinition errors
-    from data.models import (
-        User, Client, Resource, ContentResource, Message, ScheduledMessage,
-        CampaignBriefing, MarketEvent, PipelineRun, Faq, NegativePreference
-    )
-    
-    # Create tables
-    SQLModel.metadata.create_all(engine)
-    
-    # Test that we can create a session and query
-    with Session(engine) as session:
-        # Test that we can query the User table
-        from data.models.user import User
-        users = session.exec(text("SELECT name FROM sqlite_master WHERE type='table' AND name='user'")).all()
-        assert len(users) == 1, "User table should exist"
-        
-        # Test that we can create a user
-        user = User(
-            full_name="Test User",
-            phone_number="+15551234567"
-        )
-        session.add(user)
-        session.commit()
-        session.refresh(user)
-        
-        assert user.id is not None
-        assert user.full_name == "Test User"
-    
-    print("✅ Database setup test passed - no table redefinition errors!")
+def test_database_connection(session: Session):
+    """Test that we can connect to the database."""
+    result = session.exec(text("SELECT 1"))
+    assert result.first()[0] == 1
 
-def test_conftest_fixtures_work():
-    """Test that conftest.py fixtures work correctly."""
-    # This test will use the fixtures from conftest.py
-    from data.models import User
+def test_database_tables_exist(session: Session):
+    """Test that all required tables exist in the database."""
+    # Get list of all tables
+    result = session.exec(text("""
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public'
+        ORDER BY table_name
+    """))
+    tables = [row[0] for row in result.all()]
     
-    # The conftest.py should handle the database setup
-    # If this test runs without errors, the fix is working
-    assert True, "Conftest fixtures should work without table redefinition errors" 
+    # Check for required tables
+    required_tables = [
+        'user', 'client', 'resource', 'contentresource',
+        'message', 'scheduledmessage', 'campaignbriefing',
+        'marketevent', 'pipelinerun', 'faq', 'negativepreference'
+    ]
+    
+    missing_tables = [table for table in required_tables if table not in tables]
+    assert not missing_tables, f"Missing tables: {missing_tables}. Available tables: {tables}"
+
+def test_campaignbriefing_table_works(session: Session):
+    """Test that we can query the campaignbriefing table."""
+    # Try to query the campaignbriefing table
+    result = session.exec(text("SELECT COUNT(*) FROM campaignbriefing"))
+    count = result.first()[0]
+    print(f"campaignbriefing table has {count} rows")
+    assert count >= 0  # Should not fail
+
+def test_ci_environment_detection():
+    """Test that we can detect the CI environment correctly."""
+    is_ci = os.getenv('GITHUB_ACTIONS') == 'true'
+    print(f"Running in CI: {is_ci}")
+    if is_ci:
+        print(f"DATABASE_URL: {os.getenv('DATABASE_URL')}")
+    assert True  # Just a placeholder test 

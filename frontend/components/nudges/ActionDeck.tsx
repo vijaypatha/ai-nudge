@@ -13,7 +13,7 @@ import { PhotoGalleryModal } from '@/components/modals/PhotoGalleryModal';
 import {
     User as UserIcon, Sparkles, Send, X, Users, Home, TrendingUp, RotateCcw,
     TimerOff, CalendarPlus, Archive, Edit, BedDouble, Bath, ArrowLeftCircle,
-    ArrowRightCircle, Brain, Mic, ChevronsRight, ImageIcon, Building, BrainCircuit
+    ArrowRightCircle, Brain, Mic, ChevronsRight, ImageIcon, Building, BrainCircuit, BookOpen
 } from 'lucide-react';
 
 // The full briefing type returned by the /clients/{id}/nudges endpoint
@@ -54,10 +54,46 @@ const MatchReasonTag: FC<{ reason: string }> = ({ reason }) => {
     return (<div className={`flex items-center gap-1.5 text-xs font-medium bg-white/5 py-1 px-2.5 rounded-full`}><span className="text-primary-action">{icon}</span><span className="text-brand-text-muted">{text}</span></div>);
 };
 
-const PropertyCard: FC<{ resource: ClientNudge['resource'] }> = ({ resource }) => {
+const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudge }> = ({ resource, briefing }) => {
     const { attributes } = resource;
     const [showPhotoGallery, setShowPhotoGallery] = useState(false);
     
+    // Check if this is a content-based nudge
+    const isContentNudge = briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation';
+    const contentData = briefing.resource?.attributes;
+    
+    if (isContentNudge && contentData) {
+        // Content-based resource display
+        const { title, description, url, content_type } = contentData;
+        
+        return (
+            <div className="space-y-3">
+                <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><BookOpen size={16} /> Content Resource</h4>
+                <div className="relative w-full h-48 rounded-lg overflow-hidden bg-white/5 border border-white/10 group">
+                    <div className="w-full h-full flex items-center justify-center bg-brand-dark">
+                        <BookOpen size={48} className="text-brand-text-muted" />
+                    </div>
+                    <div className="absolute bottom-3 left-3 right-3">
+                        <h5 className="font-bold text-white text-base drop-shadow-md">{title}</h5>
+                        {description && <p className="text-white/80 text-sm drop-shadow-md">{description}</p>}
+                    </div>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs">
+                    <span className="bg-white/10 text-brand-text-muted px-2 py-1 rounded flex items-center gap-1.5">📄 Type: {content_type}</span>
+                    {url && (
+                        <button 
+                            onClick={() => window.open(url, '_blank')}
+                            className="bg-white/10 text-brand-text-muted px-2 py-1 rounded flex items-center gap-1.5 hover:bg-white/20 hover:text-brand-text-main transition-colors cursor-pointer"
+                        >
+                            🔗 Preview Content
+                        </button>
+                    )}
+                </div>
+            </div>
+        );
+    }
+    
+    // Market-based resource display (property photos)
     const mediaItems = attributes?.Media || [];
     const imageUrl = mediaItems?.[0]?.MediaURL;
     const photoCount = mediaItems.length;
@@ -112,9 +148,21 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDra
     const draft = briefing.edited_draft ?? briefing.original_draft ?? '';
     const matchedAudience = briefing.matched_audience ?? [];
 
-    // Generate photo links for the message
-    const generatePhotoLinks = () => {
-        const mediaItems = briefing.resource.attributes?.Media || [];
+    // Generate links for the message based on nudge type
+    const generateLinks = () => {
+        // Check if this is a content-based nudge
+        if ((briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation') && briefing.resource?.attributes) {
+            const contentData = briefing.resource.attributes;
+            const contentUrl = contentData.url;
+            const contentType = contentData.content_type;
+            
+            if (contentUrl) {
+                return `\n\n🔗 View ${contentType}: ${contentUrl}`;
+            }
+        }
+        
+        // Check if this is a market-based nudge (property photos)
+        const mediaItems = briefing.resource?.attributes?.Media || [];
         const photoUrls = mediaItems.map((item: { MediaURL: string }) => item.MediaURL).filter(Boolean);
         
         if (photoUrls.length === 0) return '';
@@ -137,12 +185,12 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDra
 
     // Get the display text for the textarea
     const getDisplayText = () => {
-        const photoLinks = generatePhotoLinks();
-        const hasPhotoLinks = draft.includes('📸') || draft.includes('View photos');
+        const links = generateLinks();
+        const hasLinks = draft.includes('📸') || draft.includes('🔗') || draft.includes('View photos') || draft.includes('View ');
         
-        // Only add photo links if they don't already exist
-        if (photoLinks && !hasPhotoLinks) {
-            return draft + photoLinks;
+        // Only add links if they don't already exist
+        if (links && !hasLinks) {
+            return draft + links;
         }
         return draft;
     };
@@ -160,8 +208,16 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDra
                 <div className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-x-6 overflow-y-auto">
                     {/* Left Column */}
                     <div className="p-5 space-y-6 border-r border-white/5">
-                        <PropertyCard resource={briefing.resource} />
-                        <div className="space-y-3"><h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><ChevronsRight size={16}/> Strategic Context</h4><p className="text-brand-text-main text-base">This is a key market event relevant to your clients.</p></div>
+                        <ResourceCard resource={briefing.resource} briefing={briefing} />
+                        <div className="space-y-3">
+                            <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><ChevronsRight size={16}/> Strategic Context</h4>
+                            <p className="text-brand-text-main text-base">
+                                {(briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation')
+                                    ? "This content resource matches your client's interests and needs."
+                                    : "This is a key market event relevant to your clients."
+                                }
+                            </p>
+                        </div>
                         <ToneMatchingIndicator />
                     </div>
                     {/* Right Column */}
@@ -170,7 +226,20 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDra
                             <button onClick={() => setIsAudienceModalOpen(true)} className="w-full flex items-center justify-center gap-2 p-2 text-sm font-semibold text-brand-text-muted bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 hover:text-brand-text-main transition-colors mb-4"><Users size={16}/> Manage Audience ({matchedAudience.length})</button>
                             <div className="space-y-3 max-h-48 overflow-y-auto pr-2">{matchedAudience.map((client) => (<div key={client.client_id} className="p-3 bg-white/[.03] border border-white/5 rounded-lg"><div className="flex items-center justify-between"><div className="flex items-center gap-3"><ScoreCircle score={client.match_score} /><div><p className="font-semibold text-brand-text-main text-base">{client.client_name}</p></div></div></div>{client.match_reasons && client.match_reasons.length > 0 && (<div className="flex flex-wrap items-center gap-2 mt-2 pl-[60px]"><MatchReasonTag reason={client.match_reasons[0]} /></div>)}</div>))}</div>
                         </div>
-                        <div className="flex-grow flex flex-col mt-4"><h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2 mb-2"><Edit size={16}/> Draft Message</h4><textarea value={getDisplayText()} onChange={(e) => onDraftChange(e.target.value)} className="w-full flex-grow bg-brand-dark border border-white/10 rounded-md focus:ring-2 focus:ring-primary-action text-brand-text-main text-base p-3 resize-none" placeholder="Your personalized message will appear here..."/></div>
+                        <div className="flex-grow flex flex-col mt-4">
+                            <div className="flex items-center justify-between mb-2">
+                                <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><Edit size={16}/> Draft Message</h4>
+                                {briefing.campaign_type === 'content_suggestion' && briefing.resource?.attributes?.url && (
+                                    <button 
+                                        onClick={() => window.open(briefing.resource.attributes.url, '_blank')}
+                                        className="text-xs bg-white/10 text-brand-text-muted px-2 py-1 rounded hover:bg-white/20 hover:text-brand-text-main transition-colors"
+                                    >
+                                        🔗 Preview Content
+                                    </button>
+                                )}
+                            </div>
+                            <textarea value={getDisplayText()} onChange={(e) => onDraftChange(e.target.value)} className="w-full flex-grow bg-brand-dark border border-white/10 rounded-md focus:ring-2 focus:ring-primary-action text-brand-text-main text-base p-3 resize-none" placeholder="Your personalized message will appear here..."/>
+                        </div>
                     </div>
                 </div>
                 <footer className="flex-shrink-0 p-3 bg-black/30 border-t border-white/10 grid grid-cols-2 gap-3"><button onClick={() => onAction('dismiss')} className="p-3 bg-white/5 border border-white/10 text-brand-text-main rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-white/10 hover:border-white/20 transition-all duration-200"><X size={18} /> Dismiss Nudge</button><button onClick={() => onAction('send')} disabled={matchedAudience.length === 0} className="p-3 text-brand-dark rounded-lg font-bold flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(32,213,179,0.4)] hover:scale-[1.03] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed" style={{ backgroundColor: BRAND_ACCENT_COLOR }}><Send size={18} /> Send to {matchedAudience.length} Client(s)</button></footer>
@@ -205,11 +274,54 @@ export const ActionDeck: FC<ActionDeckProps> = ({ initialBriefings, initialClien
                 match_reasons: ["Primary client for this context"]
             }];
             
+            // Initialize edited_draft with content that includes links
+            const baseDraft = briefing.edited_draft || briefing.original_draft;
+            const links = generateLinksForBriefing(briefing);
+            const initialDraft = links && !baseDraft.includes('📸') && !baseDraft.includes('🔗') 
+                ? baseDraft + links 
+                : baseDraft;
+            
             return { 
                 ...briefing, 
-                matched_audience: audience
+                matched_audience: audience,
+                edited_draft: initialDraft
             };
         });
+    };
+    
+    // Helper function to generate links for a briefing
+    const generateLinksForBriefing = (briefing: ClientNudge) => {
+        // Check if this is a content-based nudge
+        if ((briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation') && briefing.resource?.attributes) {
+            const contentData = briefing.resource.attributes;
+            const contentUrl = contentData.url;
+            const contentType = contentData.content_type;
+            
+            if (contentUrl) {
+                return `\n\n🔗 View ${contentType}: ${contentUrl}`;
+            }
+        }
+        
+        // Check if this is a market-based nudge (property photos)
+        const mediaItems = briefing.resource?.attributes?.Media || [];
+        const photoUrls = mediaItems.map((item: { MediaURL: string }) => item.MediaURL).filter(Boolean);
+        
+        if (photoUrls.length === 0) return '';
+        
+        if (photoUrls.length === 1) {
+            return `\n\n📸 View photos: ${photoUrls[0]}`;
+        } else {
+            // Show only the first 3 photos to avoid overwhelming the message
+            const maxPhotos = 3;
+            const photosToShow = photoUrls.slice(0, maxPhotos);
+            const photoLinks = photosToShow.map((url: string, index: number) => `📸 Photo ${index + 1}: ${url}`).join('\n');
+            
+            if (photoUrls.length <= maxPhotos) {
+                return `\n\n📸 View all ${photoUrls.length} photos:\n${photoLinks}`;
+            } else {
+                return `\n\n📸 View first 3 of ${photoUrls.length} photos:\n${photoLinks}`;
+            }
+        }
     };
     
     const [displayBriefings, setDisplayBriefings] = useState(getInitialState);
