@@ -197,6 +197,47 @@ def get_all_clients(user_id: uuid.UUID) -> List[Client]:
     with Session(engine) as session:
         statement = select(Client).where(Client.user_id == user_id)
         return session.exec(statement).all()
+
+def get_client_nudge_summaries(user_id: uuid.UUID, session: Session) -> List[Dict[str, Any]]:
+    """
+    Generates a summary for each client that has active nudges.
+    The summary includes the client's name, total nudge count, and a
+    breakdown of nudges by campaign type.
+    """
+    clients = get_all_clients(user_id=user_id)
+    client_map = {str(client.id): {"client_name": client.full_name, "nudges": []} for client in clients}
+
+    # Fetch all draft campaigns (active nudges) for the user at once
+    draft_campaigns = get_new_campaign_briefings_for_user(user_id=user_id, session=session)
+
+    # Distribute the campaigns to the clients they are matched with
+    for campaign in draft_campaigns:
+        for audience_member in campaign.matched_audience:
+            client_id_str = str(audience_member.get("client_id"))
+            if client_id_str in client_map:
+                client_map[client_id_str]["nudges"].append(campaign)
+
+    # Process the map to create the final summary list
+    summaries = []
+    for client_id, data in client_map.items():
+        if not data["nudges"]:
+            continue  # Skip clients with no active nudges
+
+        nudge_type_counts = {}
+        for nudge in data["nudges"]:
+            nudge_type = nudge.campaign_type
+            nudge_type_counts[nudge_type] = nudge_type_counts.get(nudge_type, 0) + 1
+        
+        summaries.append({
+            "client_id": client_id,
+            "client_name": data["client_name"],
+            "total_nudges": len(data["nudges"]),
+            "nudge_type_counts": nudge_type_counts
+        })
+
+    # Sort by the total number of nudges, descending
+    summaries.sort(key=lambda x: x["total_nudges"], reverse=True)
+    return summaries
     
 async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUID) -> tuple[Optional[Client], bool]:
     """

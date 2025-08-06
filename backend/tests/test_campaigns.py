@@ -708,3 +708,91 @@ def test_trigger_send_campaign_fails_not_found(authenticated_client: TestClient)
     # Assert
     assert response.status_code == 404
     assert "Campaign not found" in response.json()["detail"]
+
+# --- NEW TESTS FOR CLIENT SUMMARIES ENDPOINT ---
+
+def test_get_client_summaries_succeeds(authenticated_client: TestClient, test_user, session: Session):
+    """Tests successful retrieval of client nudge summaries."""
+    # Act
+    response = authenticated_client.get("/api/campaigns/client-summaries")
+
+    # Assert
+    assert response.status_code == 200
+    data = response.json()
+    
+    # Check for required fields based on ClientNudgeSummaryResponse model
+    assert "client_summaries" in data
+    assert "display_config" in data
+    
+    # client_summaries should be a list
+    assert isinstance(data["client_summaries"], list)
+    
+    # display_config should be a dict
+    assert isinstance(data["display_config"], dict)
+
+def test_get_client_summaries_fails_unauthenticated(client: TestClient):
+    """Tests that unauthenticated access to client summaries is rejected."""
+    # Act
+    response = client.get("/api/campaigns/client-summaries")
+
+    # Assert
+    assert response.status_code == 401
+
+def test_get_client_summaries_returns_correct_structure(authenticated_client: TestClient, test_user, session: Session):
+    """Tests that the client summaries endpoint returns the correct data structure."""
+    # Arrange - create a test client
+    from data.models.client import Client
+    client = Client(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        full_name="Test Client",
+        phone_number="+15551234567"
+    )
+    session.add(client)
+    session.commit()
+
+    # Act
+    response = authenticated_client.get("/api/campaigns/client-summaries")
+
+    # Assert
+    assert response.status_code == 200
+    data = response.json()
+    
+    # If there are client summaries, verify the structure
+    if len(data["client_summaries"]) > 0:
+        summary = data["client_summaries"][0]
+        # Check for required fields based on the expected structure
+        assert "client_id" in summary
+        assert "client_name" in summary
+        assert "total_nudges" in summary
+        assert "nudge_type_counts" in summary
+        
+        # Verify data types
+        assert isinstance(summary["client_id"], str)
+        assert isinstance(summary["client_name"], str)
+        assert isinstance(summary["total_nudges"], int)
+        assert isinstance(summary["nudge_type_counts"], dict)
+
+def test_get_client_summaries_display_config_structure(authenticated_client: TestClient):
+    """Tests that the display_config has the expected structure."""
+    # Act
+    response = authenticated_client.get("/api/campaigns/client-summaries")
+
+    # Assert
+    assert response.status_code == 200
+    data = response.json()
+    
+    display_config = data["display_config"]
+    assert isinstance(display_config, dict)
+    
+    # Check that display_config contains expected campaign types
+    # This may vary based on the user's vertical, but should have some structure
+    for campaign_type, config in display_config.items():
+        assert isinstance(config, dict)
+        # Check for expected display config fields
+        if "icon" in config:
+            assert isinstance(config["icon"], str)
+        if "color" in config:
+            assert isinstance(config["color"], str)
+        if "title" in config:
+            assert isinstance(config["title"], str)

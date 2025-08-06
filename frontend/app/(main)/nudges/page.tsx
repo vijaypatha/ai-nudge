@@ -1,5 +1,5 @@
 // frontend/app/(main)/nudges/page.tsx
-// --- FINAL VERSION: Uses WebSockets for real-time updates ---
+// --- FINAL VERSION: Fetches client summaries for the new client-centric view ---
 
 'use client';
 
@@ -13,19 +13,22 @@ import { OpportunityNudgesView, DisplayConfig } from '@/components/nudges/Opport
 import { ScheduledNudgesView } from '@/components/nudges/ScheduledNudgesView';
 import { InstantNudgeView } from '@/components/nudges/InstantNudgeView';
 
-// Define the extended CampaignBriefing type to include timestamps for our logic.
-interface CampaignBriefing extends Omit<import('@/context/AppContext').CampaignBriefing, 'created_at' | 'updated_at'> {
-    id: string;
-    created_at: string;
-    updated_at: string;
+// Define the structure for the client summary data from the new API endpoint
+interface ClientNudgeSummary {
+    client_id: string;
+    client_name: string;
+    total_nudges: number;
+    nudge_type_counts: Record<string, number>;
 }
 
+// Import the CampaignBriefing type from AppContext
+import { CampaignBriefing } from '@/context/AppContext';
+
 export default function NudgesPage() {
-    // Destructure the 'socket' instance from the AppContext.
-    // This assumes your AppContext provides a connected websocket for the user.
     const { user, api, loading, socket } = useAppContext();
 
-    const [nudges, setNudges] = useState<CampaignBriefing[]>([]);
+    // State now holds client summaries instead of individual nudges
+    const [clientSummaries, setClientSummaries] = useState<ClientNudgeSummary[]>([]);
     const [displayConfig, setDisplayConfig] = useState<DisplayConfig>({});
     const [isNudgesLoading, setIsNudgesLoading] = useState(true);
 
@@ -43,15 +46,14 @@ export default function NudgesPage() {
         { id: 'scheduled', label: 'Scheduled' },
     ];
 
-    const fetchNudgesAndConfig = useCallback(() => {
-        // No need to set loading to true here for refetches,
-        // as it would cause a flicker. The initial load is handled below.
-        api.get('/api/campaigns?status=DRAFT')
+    const fetchClientSummaries = useCallback(() => {
+        // Use the new, more efficient client-summary endpoint
+        api.get('/api/campaigns/client-summaries')
             .then(data => {
-                setNudges(data.nudges || []);
+                setClientSummaries(data.client_summaries || []);
                 setDisplayConfig(data.display_config || {});
             })
-            .catch(err => console.error("Failed to fetch nudges and config:", err))
+            .catch(err => console.error("Failed to fetch client nudge summaries:", err))
             .finally(() => {
                 if (isNudgesLoading) setIsNudgesLoading(false);
             });
@@ -79,22 +81,20 @@ export default function NudgesPage() {
 
     // Initial data fetch on component mount
     useEffect(() => {
-        fetchNudgesAndConfig();
+        fetchClientSummaries();
         fetchClients();
-    }, [fetchNudgesAndConfig, fetchClients]);
+    }, [fetchClientSummaries, fetchClients]);
     
-    // --- REAL-TIME UPDATE LOGIC ---
-    // Listen for messages on the user's websocket connection.
+    // Real-time update logic
     useEffect(() => {
         if (!socket) return;
 
         const handleNudgeUpdate = (event: MessageEvent) => {
             try {
                 const data = JSON.parse(event.data);
-                // Check for the specific event broadcasted by our Celery task
-                if (data.event === 'nudges_updated') {
-                    console.log("WebSocket: Received 'nudges_updated' event. Refetching data.");
-                    fetchNudgesAndConfig();
+                if (data.event === 'nudges_updated' || data.event === 'PLAN_UPDATED') {
+                    console.log(`WebSocket: Received '${data.event}' event. Refetching client summaries.`);
+                    fetchClientSummaries();
                 }
             } catch (error) {
                 console.error("WebSocket: Failed to parse message data", error);
@@ -103,17 +103,13 @@ export default function NudgesPage() {
 
         socket.addEventListener('message', handleNudgeUpdate);
 
-        // Cleanup function to prevent memory leaks.
-        // This removes the event listener when the component unmounts.
         return () => {
             socket.removeEventListener('message', handleNudgeUpdate);
         };
-    }, [socket, fetchNudgesAndConfig]); // Rerun if socket or fetch function changes
+    }, [socket, fetchClientSummaries]);
 
-    // Fetch scheduled messages only when that tab is active
     useEffect(() => {
         if (activeTab === 'scheduled') {
-            // Fetch both in parallel to ensure data consistency
             refetchScheduled();
             fetchClients();
         }
@@ -127,15 +123,12 @@ export default function NudgesPage() {
             } else {
                 await api.put(`/api/campaigns/${briefing.id}`, { status: 'dismissed' });
             }
-            fetchNudgesAndConfig();
+            // After an action, refetch the summaries to update the client grid
+            fetchClientSummaries();
         } catch (error) {
             console.error(`Failed to ${action} nudge:`, error);
             alert(`Error: Could not ${action} the nudge.`);
         }
-    };
-
-    const handleBriefingUpdate = (updatedBriefing: CampaignBriefing) => {
-        setNudges(prevNudges => prevNudges.map(n => n.id === updatedBriefing.id ? updatedBriefing : n));
     };
 
     return (
@@ -158,10 +151,11 @@ export default function NudgesPage() {
                 >
                     {activeTab === 'ai_suggestions' && (
                         <OpportunityNudgesView
-                            nudges={nudges}
+                            clientSummaries={clientSummaries}
                             isLoading={isNudgesLoading}
                             onAction={handleAction}
-                            onBriefingUpdate={handleBriefingUpdate}
+                            // onBriefingUpdate is now managed inside the ActionDeck
+                            onBriefingUpdate={() => {}}
                             displayConfig={displayConfig}
                         />
                     )}

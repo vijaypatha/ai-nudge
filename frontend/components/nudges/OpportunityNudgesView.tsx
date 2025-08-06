@@ -1,21 +1,20 @@
 // frontend/components/nudges/OpportunityNudgesView.tsx
+// --- FINAL VERSION: Displays client summaries and passes context to the ActionDeck ---
 
 'use client';
 
-import { useState, useMemo, FC, ReactNode } from 'react';
+import { useState, FC, ReactNode, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { CampaignBriefing as CampaignBriefingType } from '@/context/AppContext';
+import { CampaignBriefing as CampaignBriefingType, useAppContext } from '@/context/AppContext';
 import { ActionDeck } from './ActionDeck';
 import { BrainCircuit, Sparkles, Home, TrendingUp, RotateCcw, TimerOff, CalendarPlus, Archive, User as UserIcon, BookOpen } from 'lucide-react';
 
-// --- NEW: Define the shape of the config object we expect from the API ---
 export type DisplayConfig = Record<string, {
-    icon: string; // Icon name (e.g., "Home", "Sparkles")
+    icon: string;
     color: string;
     title: string;
 }>;
 
-// --- NEW: A helper to map string names to actual icon components ---
 const ICONS: Record<string, ReactNode> = {
     Home: <Home size={16} />,
     Sparkles: <Sparkles size={16} />,
@@ -29,35 +28,32 @@ const ICONS: Record<string, ReactNode> = {
     Default: <Sparkles size={16} />,
 };
 
-interface CampaignBriefing extends CampaignBriefingType {
+// This is the full briefing type that the ActionDeck will use
+interface ClientNudge extends CampaignBriefingType {
+    campaign_id: string;
+    headline: string;
+    campaign_type: string;
+    resource: {
+        address?: string;
+        price?: number;
+        beds?: number;
+        baths?: number;
+        attributes: Record<string, any>;
+    };
     created_at: string;
     updated_at: string;
 }
 
 interface ClientOpportunitiesCardProps {
     clientName: string;
-    opportunities: CampaignBriefing[];
+    opportunityCounts: Record<string, number>;
+    totalOpportunities: number;
     onClick: () => void;
     displayConfig: DisplayConfig;
 }
 
-const ClientOpportunitiesCard: FC<ClientOpportunitiesCardProps> = ({ clientName, opportunities, onClick, displayConfig }) => {
-    const opportunityCounts = useMemo(() => {
-        return opportunities.reduce((acc, nudge) => {
-            acc[nudge.campaign_type] = (acc[nudge.campaign_type] || 0) + 1;
-            return acc;
-        }, {} as Record<string, number>);
-    }, [opportunities]);
-
-    const hasRescoredNudges = useMemo(() => {
-        return opportunities.some(nudge => {
-            if (!nudge.created_at || !nudge.updated_at) return false;
-            const created = new Date(nudge.created_at).getTime();
-            const updated = new Date(nudge.updated_at).getTime();
-            return (updated - created) > 60000; // Updated >1min after creation
-        });
-    }, [opportunities]);
-
+// Renders a single card for a client in the main grid view.
+const ClientOpportunitiesCard: FC<ClientOpportunitiesCardProps> = ({ clientName, opportunityCounts, totalOpportunities, onClick, displayConfig }) => {
     return (
         <motion.button
             initial={{ opacity: 0, scale: 0.95 }}
@@ -69,18 +65,14 @@ const ClientOpportunitiesCard: FC<ClientOpportunitiesCardProps> = ({ clientName,
             <div className="flex justify-between items-start">
                  <div className="flex items-center gap-3">
                      <h3 className="font-bold text-lg text-brand-white">{clientName}</h3>
-                     {hasRescoredNudges && (
-                        <span className="flex items-center gap-1 bg-primary-action/20 text-primary-action text-xs font-bold px-2 py-0.5 rounded-full animate-in fade-in-0">
-                            <Sparkles size={12}/> Updated
-                        </span>
-                     )}
                 </div>
-                <div className="flex-shrink-0 bg-primary-action text-white text-xs font-bold px-2.5 py-1 rounded-full">{opportunities.length} Total</div>
+                <div className="flex-shrink-0 bg-primary-action text-white text-xs font-bold px-2.5 py-1 rounded-full">{totalOpportunities} Total</div>
             </div>
             <div className="flex flex-wrap gap-2">
                 {Object.entries(opportunityCounts).map(([type, count]) => {
                     const config = displayConfig[type];
                     if (!config) return null;
+                    // Renders the count for each nudge type using the backend-provided display config
                     return (
                         <div key={type} className={`flex items-center gap-1.5 text-xs font-medium ${config.color} bg-black/20 px-2 py-1 rounded-md`}>
                             {ICONS[config.icon] || ICONS.Default}
@@ -93,38 +85,56 @@ const ClientOpportunitiesCard: FC<ClientOpportunitiesCardProps> = ({ clientName,
     );
 };
 
+interface ClientNudgeSummary {
+    client_id: string;
+    client_name: string;
+    total_nudges: number;
+    nudge_type_counts: Record<string, number>;
+}
+
 interface OpportunityNudgesViewProps {
-    nudges: CampaignBriefing[];
+    clientSummaries: ClientNudgeSummary[];
     isLoading: boolean;
-    onAction: (briefing: CampaignBriefing, action: 'dismiss' | 'send') => Promise<void>;
-    onBriefingUpdate: (updatedBriefing: CampaignBriefing) => void;
+    onAction: (briefing: CampaignBriefingType, action: 'dismiss' | 'send') => Promise<void>;
+    onBriefingUpdate: (updatedBriefing: CampaignBriefingType) => void;
     displayConfig: DisplayConfig;
 }
 
-export const OpportunityNudgesView: FC<OpportunityNudgesViewProps> = ({ nudges, isLoading, onAction, onBriefingUpdate, displayConfig }) => {
-    const [activeDeck, setActiveDeck] = useState<CampaignBriefing[] | null>(null);
-
-    const groupedByClient = useMemo(() => {
-        return nudges.reduce((acc, nudge) => {
-            nudge.matched_audience.forEach(client => {
-                if (!acc[client.client_id]) {
-                    acc[client.client_id] = { clientName: client.client_name, opportunities: [] };
-                }
-                if (!acc[client.client_id].opportunities.some(o => o.id === nudge.id)) {
-                    acc[client.client_id].opportunities.push(nudge);
-                }
-            });
-            return acc;
-        }, {} as Record<string, { clientName: string; opportunities: CampaignBriefing[] }>);
-    }, [nudges]);
+export const OpportunityNudgesView: FC<OpportunityNudgesViewProps> = ({ clientSummaries, isLoading, onAction, onBriefingUpdate, displayConfig }) => {
+    const { api } = useAppContext();
+    const [activeClient, setActiveClient] = useState<{ id: string, name: string } | null>(null);
+    const [activeNudges, setActiveNudges] = useState<ClientNudge[] | null>(null);
+    const [isDeckLoading, setIsDeckLoading] = useState(false);
 
     const containerVariants = { hidden: {}, visible: { transition: { staggerChildren: 0.05 } } };
+
+    // This function is called when a client card is clicked.
+    const handleClientSelect = useCallback(async (clientId: string, clientName: string) => {
+        setIsDeckLoading(true);
+        setActiveClient({ id: clientId, name: clientName });
+        try {
+            // It fetches all nudges specifically for the selected client.
+            const clientNudgesData = await api.get(`/api/clients/${clientId}/nudges`);
+            setActiveNudges(clientNudgesData);
+        } catch (err) {
+            console.error(`Failed to fetch nudges for client ${clientId}:`, err);
+            alert("Could not load the opportunities for this client.");
+            setActiveClient(null);
+        } finally {
+            setIsDeckLoading(false);
+        }
+    }, [api]);
+
+    const handleCloseDeck = () => {
+        setActiveNudges(null);
+        setActiveClient(null);
+    };
 
     if (isLoading) {
         return <div className="text-center py-20 text-brand-text-muted">Loading Opportunities...</div>;
     }
 
-    if (nudges.length === 0) {
+    if (clientSummaries.length === 0) {
         return (
             <div className="text-center py-20 border-2 border-dashed border-white/10 rounded-xl">
                 <BrainCircuit className="mx-auto h-16 w-16 text-brand-text-muted" />
@@ -133,10 +143,22 @@ export const OpportunityNudgesView: FC<OpportunityNudgesViewProps> = ({ nudges, 
             </div>
         );
     }
-
+    
+    // A loading spinner could be displayed here based on `isDeckLoading`
     return (
         <>
-            {activeDeck && <ActionDeck briefings={activeDeck} onClose={() => setActiveDeck(null)} onAction={onAction} onBriefingUpdate={onBriefingUpdate} displayConfig={displayConfig} />}
+            {/* The ActionDeck is only rendered when a client has been selected and their nudges are loaded. */}
+            {activeNudges && activeClient && (
+                <ActionDeck
+                    key={activeClient.id} 
+                    initialClientId={activeClient.id}
+                    initialClientName={activeClient.name}
+                    initialBriefings={activeNudges}
+                    onClose={handleCloseDeck}
+                    onAction={onAction}
+                    displayConfig={displayConfig}
+                />
+            )}
             
             <motion.div 
                 variants={containerVariants} 
@@ -144,12 +166,13 @@ export const OpportunityNudgesView: FC<OpportunityNudgesViewProps> = ({ nudges, 
                 animate="visible" 
                 className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
             >
-                {Object.entries(groupedByClient).map(([clientId, clientData]) => (
+                {clientSummaries.map((summary) => (
                     <ClientOpportunitiesCard
-                        key={clientId}
-                        clientName={clientData.clientName}
-                        opportunities={clientData.opportunities}
-                        onClick={() => setActiveDeck(clientData.opportunities)}
+                        key={summary.client_id}
+                        clientName={summary.client_name}
+                        opportunityCounts={summary.nudge_type_counts}
+                        totalOpportunities={summary.total_nudges}
+                        onClick={() => handleClientSelect(summary.client_id, summary.client_name)}
                         displayConfig={displayConfig}
                     />
                 ))}

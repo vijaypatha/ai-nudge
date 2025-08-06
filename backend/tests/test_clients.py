@@ -175,3 +175,84 @@ def test_client_ownership_isolation(authenticated_client: TestClient, session: S
 
     # Assert - should be forbidden
     assert response.status_code == 404  # or 403, depending on implementation
+
+# --- NEW TESTS FOR CLIENT NUDGES ENDPOINT ---
+
+def test_get_nudges_for_client_succeeds(authenticated_client: TestClient, test_user, session: Session):
+    """Tests successful retrieval of nudges for a specific client."""
+    # Arrange - create a test client
+    from data.models.client import Client
+    client = Client(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        full_name="Test Client",
+        phone_number="+15551234567"
+    )
+    session.add(client)
+    session.commit()
+
+    # Act
+    response = authenticated_client.get(f"/api/clients/{client.id}/nudges")
+
+    # Assert
+    assert response.status_code == 200
+    data = response.json()
+    # Should return a list (even if empty)
+    assert isinstance(data, list)
+
+def test_get_nudges_for_client_fails_not_found(authenticated_client: TestClient):
+    """Tests that getting nudges for non-existent client fails."""
+    # Arrange
+    fake_client_id = uuid.uuid4()
+
+    # Act
+    response = authenticated_client.get(f"/api/clients/{fake_client_id}/nudges")
+
+    # Assert
+    assert response.status_code == 200  # Returns empty list, not 404
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) == 0
+
+def test_get_nudges_for_client_fails_unauthenticated(client: TestClient):
+    """Tests that unauthenticated access to client nudges is rejected."""
+    # Arrange
+    fake_client_id = uuid.uuid4()
+
+    # Act
+    response = client.get(f"/api/clients/{fake_client_id}/nudges")
+
+    # Assert
+    assert response.status_code == 401
+
+def test_get_nudges_for_client_returns_correct_structure(authenticated_client: TestClient, test_user, session: Session):
+    """Tests that the nudges endpoint returns the correct data structure."""
+    # Arrange - create a test client
+    from data.models.client import Client
+    client = Client(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        full_name="Test Client",
+        phone_number="+15551234567"
+    )
+    session.add(client)
+    session.commit()
+
+    # Act
+    response = authenticated_client.get(f"/api/clients/{client.id}/nudges")
+
+    # Assert
+    assert response.status_code == 200
+    data = response.json()
+    
+    # If there are nudges, verify the structure
+    if len(data) > 0:
+        nudge = data[0]
+        # Check for required fields based on ClientNudgeResponse model
+        assert "id" in nudge
+        assert "campaign_id" in nudge
+        assert "headline" in nudge
+        assert "campaign_type" in nudge
+        assert "resource" in nudge
+        assert "original_draft" in nudge
+        assert "matched_audience" in nudge

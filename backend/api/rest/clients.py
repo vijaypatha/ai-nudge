@@ -4,7 +4,7 @@
 import logging
 import json # Correctly placed import
 from fastapi import APIRouter, HTTPException, status, Depends
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from pydantic import BaseModel
 from sqlmodel import Session
@@ -19,9 +19,11 @@ from api.security import get_current_user_from_token
 from data.models.client import Client, ClientCreate, ClientUpdate, ClientTagUpdate
 from data.models.message import ScheduledMessage
 from data import crm as crm_service
+from data.database import engine
 from agent_core import audience_builder
 from api.websocket_manager import manager as websocket_manager
 from celery_tasks import initial_data_fetch_for_user_task
+from data.models.campaign import MatchedClient
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
 
@@ -46,6 +48,26 @@ class UpdateIntelPayload(BaseModel):
 # --- NEW: Pydantic model for the manual notes update payload ---
 class UpdateNotesPayload(BaseModel):
     notes: str
+
+# --- NEW: Pydantic models for the client-centric nudge response ---
+class NudgeResource(BaseModel):
+    address: Optional[str] = None
+    price: Optional[int] = None
+    beds: Optional[int] = None
+    baths: Optional[int] = None
+    attributes: Dict[str, Any] = {}
+
+class ClientNudgeResponse(BaseModel):
+    # This model now mirrors the structure expected by ActionDeck.tsx
+    id: UUID # Use 'id' to match the frontend's CampaignBriefingType
+    campaign_id: UUID
+    headline: str
+    campaign_type: str
+    resource: NudgeResource
+    original_draft: str
+    edited_draft: Optional[str] = None
+    matched_audience: List[MatchedClient]
+
 
 @router.post("/manual", response_model=Client)
 async def add_manual_client(
@@ -247,6 +269,59 @@ async def get_client_by_id_endpoint(client_id: UUID, current_user: User = Depend
 async def get_client_scheduled_messages(client_id: UUID, current_user: User = Depends(get_current_user_from_token)):
     messages = crm_service.get_scheduled_messages_for_client(client_id=client_id, user_id=current_user.id)
     return messages
+
+# --- NEW ENDPOINT FOR CLIENT-CENTRIC NUDGE VIEW ---
+# --- MODIFIED ENDPOINT FOR CLIENT-CENTRIC NUDGE VIEW ---
+@router.get("/{client_id}/nudges", response_model=List[ClientNudgeResponse])
+async def get_nudges_for_client(
+    client_id: UUID,
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Retrieves all active nudges (CampaignBriefings in DRAFT status)
+    for a single, specified client, now including all required fields for the ActionDeck.
+    """
+    client_nudges = []
+
+    with Session(engine) as session:
+        all_draft_campaigns = crm_service.get_new_campaign_briefings_for_user(user_id=current_user.id, session=session)
+
+        for campaign in all_draft_campaigns:
+            is_match = any(
+                str(audience_member.get("client_id")) == str(client_id)
+                for audience_member in campaign.matched_audience
+            )
+
+            if is_match and campaign.triggering_resource_id:
+                resource = crm_service.get_resource_by_id(
+                    resource_id=campaign.triggering_resource_id,
+                    user_id=current_user.id,
+                    session=session
+                )
+
+                if resource and resource.attributes:
+                    nudge_resource = NudgeResource(
+                        address=resource.attributes.get("UnparsedAddress"),
+                        price=resource.attributes.get("ListPrice"),
+                        beds=resource.attributes.get("BedroomsTotal"),
+                        baths=resource.attributes.get("BathroomsTotalInteger"),
+                        attributes=resource.attributes
+                    )
+
+                    # --- FIX: Populate the full response model with all required fields ---
+                    client_nudge = ClientNudgeResponse(
+                        id=campaign.id,
+                        campaign_id=campaign.id,
+                        headline=campaign.headline,
+                        campaign_type=campaign.campaign_type,
+                        resource=nudge_resource,
+                        original_draft=campaign.original_draft,
+                        edited_draft=None,  # edited_draft is not a field in CampaignBriefing model
+                        matched_audience=campaign.matched_audience
+                    )
+                    client_nudges.append(client_nudge)
+
+    return client_nudges
 
 @router.put("/{client_id}", response_model=Client)
 async def update_client_details(

@@ -53,6 +53,17 @@ class DraftResponse(BaseModel):
 class CoPilotActionPayload(BaseModel):
     action_type: str
 
+# --- NEW: Pydantic models for the client nudge summary list ---
+class ClientNudgeSummary(BaseModel):
+    client_id: UUID
+    client_name: str
+    total_nudges: int
+    nudge_type_counts: Dict[str, int]
+
+class ClientNudgeSummaryResponse(BaseModel):
+    client_summaries: List[ClientNudgeSummary]
+    display_config: Dict[str, Any]
+
 # --- NEW: Pydantic model for the audience update payload ---
 class UpdateAudiencePayload(BaseModel):
     client_ids: List[UUID]
@@ -116,6 +127,44 @@ async def record_dismissal_feedback_task(campaign_id: UUID, user_id: UUID):
 
 
 # --- API Endpoints ---
+
+# --- NEW ENDPOINT FOR THE CLIENT-CENTRIC GRID VIEW ---
+@router.get("/client-summaries", response_model=ClientNudgeSummaryResponse)
+def get_client_nudge_summary_list(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user_from_token),
+):
+    """
+    Retrieves a list of all clients who have active nudges, along with
+    a count of those nudges and a display configuration for the UI.
+    """
+    try:
+        # 1. Get the summary data from our new CRM function
+        client_summaries = crm_service.get_client_nudge_summaries(user_id=current_user.id, session=session)
+
+        # 2. Get the vertical-specific display configuration
+        vertical_config = VERTICAL_CONFIGS.get(current_user.vertical, {})
+        campaign_configs = vertical_config.get("campaign_configs", {})
+        
+        display_config = {
+            campaign_type: config.get("display", {})
+            for campaign_type, config in campaign_configs.items()
+        }
+        
+        # 3. Add the generic content recommendation display config
+        display_config['content_recommendation'] = {
+            'icon': 'BookOpen',
+            'color': 'text-blue-400',
+            'title': 'Content'
+        }
+
+        return ClientNudgeSummaryResponse(
+            client_summaries=client_summaries,
+            display_config=display_config
+        )
+    except Exception as e:
+        logging.error(f"Error fetching client nudge summaries for user {current_user.id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred.")
 
 @router.get("", response_model=AgnosticNudgesResponse)
 async def get_all_campaigns(
