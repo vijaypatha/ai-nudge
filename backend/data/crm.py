@@ -108,7 +108,8 @@ def format_phone_number(phone: str) -> str:
 
 async def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tuple[Client, bool]:
     """
-    Creates a new client or updates an existing one, then calls the semantic_service
+    MODIFIED: Creates a new client or updates an existing one, ensuring new clients
+    always have a non-null preferences object. It then calls the semantic_service
     to generate the initial composite embedding for the client.
     """
     with Session(engine) as session:
@@ -126,7 +127,13 @@ async def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate)
                     setattr(existing_client, key, value)
             target_client, is_new = existing_client, False
         else:
-            new_client = Client(id=uuid.uuid4(), user_id=user_id, **client_data.model_dump())
+            client_dict = client_data.model_dump()
+            # --- THIS IS THE FIX ---
+            # Ensure the preferences field is an empty dictionary by default for new clients.
+            if 'preferences' not in client_dict or client_dict['preferences'] is None:
+                client_dict['preferences'] = {}
+            
+            new_client = Client(id=uuid.uuid4(), user_id=user_id, **client_dict)
             target_client, is_new = new_client, True
 
         session.add(target_client)
@@ -193,43 +200,72 @@ def get_all_clients(user_id: uuid.UUID) -> List[Client]:
     
 async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUID) -> tuple[Optional[Client], bool]:
     """
-    Generically updates a client record and calls semantic_service to regenerate
-    the embedding if any relevant data changes.
+    MODIFIED: Generically updates a client, but now ALSO runs the profiler agent
+    to extract structured preferences if the notes were updated, ensuring consistency.
     """
-    embedding_updated = False
-    fields_that_trigger_embedding = {'notes', 'user_tags', 'preferences'}
-
+    notes_were_updated = False
+    
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client:
             return None, False
 
         update_dict = update_data.model_dump(exclude_unset=True)
-        if any(field in update_dict for field in fields_that_trigger_embedding):
-            embedding_updated = True
+        
+        # Check if notes are part of this update
+        if 'notes' in update_dict:
+            notes_were_updated = True
 
         for key, value in update_dict.items():
             if key == 'phone' and value:
                 value = format_phone_number(value)
-            setattr(client, key, value)
+            # If preferences are being updated, merge them with existing ones
+            if key == 'preferences' and isinstance(value, dict):
+                current_prefs = client.preferences or {}
+                current_prefs.update(value)
+                setattr(client, key, current_prefs)
+                flag_modified(client, 'preferences')
+            else:
+                setattr(client, key, value)
         
         session.add(client)
 
-        if embedding_updated:
-            logging.info(f"CRM: Calling semantic_service to regenerate embedding for client {client.id}.")
+        # If notes were changed, run the profiler to extract/update structured preferences
+        if notes_were_updated:
+            logging.info(f"CRM: Notes updated for client {client.id}, running profiler agent.")
+            user = session.get(User, user_id)
+            user_vertical = user.vertical if user else "general"
+            
+            # Use all available text to get the best extraction
+            all_text_to_analyze = f"Notes: {client.notes}\nTags: {', '.join(client.user_tags or [])} {', '.join(client.ai_tags or [])}"
+            extracted_prefs = await profiler_agent.extract_preferences_from_text(all_text_to_analyze, user_vertical)
+
+            if extracted_prefs:
+                logging.info(f"CRM: Profiler extracted preferences from notes: {extracted_prefs}")
+                if client.preferences is None:
+                    client.preferences = {}
+                client.preferences.update(extracted_prefs)
+                flag_modified(client, "preferences")
+        
+        # Commit all changes (notes, preferences, etc.) to the database
+        session.commit()
+        session.refresh(client)
+
+        # Now that data is saved, regenerate embedding and trigger re-score
+        if notes_were_updated or 'preferences' in update_dict or 'user_tags' in update_dict:
+            logging.info(f"CRM: Client data changed. Updating embedding and queuing re-score for client {client.id}.")
             await semantic_service.update_client_embedding(client, session)
-            # --- ADD TRIGGER HERE ---
+            session.commit() # Commit the new embedding
+            session.refresh(client)
+
             try:
                 from celery_tasks import rescore_client_against_recent_events_task
                 rescore_client_against_recent_events_task.delay(client_id=str(client.id), user_id=str(user_id))
                 logging.info(f"CRM: Queued re-score task for client {client.id}")
             except Exception as e:
                 logging.error(f"CRM: Failed to trigger re-score task for client {client.id}: {e}")
-            # --- END TRIGGER ---
 
-        session.commit()
-        session.refresh(client)
-        return client, embedding_updated
+        return client, notes_were_updated
 
 async def delete_client(client_id: UUID, user_id: UUID) -> bool:
     """

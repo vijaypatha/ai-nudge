@@ -3,6 +3,7 @@
 # MODIFIED: Implemented "Knockout Criteria" for more intelligent buyer matching.
 
 import logging
+import re
 from typing import Dict, Any, List, Optional
 
 from data.models.event import MarketEvent
@@ -26,7 +27,10 @@ def _build_status_intel(event: MarketEvent, resource: Resource, status: str) -> 
 # --- Real Estate Specific Scoring Function ---
 
 def score_real_estate_event(client: Client, event: MarketEvent, resource_embedding: Optional[List[float]], config: Dict) -> tuple[int, list[str]]:
-    """Contains all scoring logic specific to real estate."""
+    """
+    MODIFIED: Contains all scoring logic, now robustly checks for budget in
+    both structured preferences and unstructured notes.
+    """
     total_score = 0
     reasons = []
     weights = config["scoring_weights"]
@@ -34,64 +38,55 @@ def score_real_estate_event(client: Client, event: MarketEvent, resource_embeddi
     resource_payload = event.payload
     event_type = event.event_type
 
-    client_role = "buyer" 
+    client_role = "buyer"
     if config["roles"]["investor"]["identifier_tag"] in client.user_tags:
         client_role = "investor"
     elif config["roles"]["seller"]["identifier_tag"] in client.user_tags:
         client_role = "seller"
 
-    # --- DEFINITIVE FIX: Strict Knockout Criteria ---
-    # This block now correctly handles data types and applies strict, non-negotiable rules.
+    # --- FINAL FIX: Robust Knockout Criteria with Notes Parsing ---
     if client_role in ["buyer", "investor"]:
         max_budget = None
-        min_beds = None
-        min_baths = None
-        list_price = None
-        resource_beds = None
-        resource_baths = None
-
-        try:
-            # Safely get and cast budget from preferences.
-            budget_pref = client_prefs.get('budget_max')
-            if budget_pref is not None and budget_pref != '':
+        
+        # Step 1: Try to get budget from structured preferences first.
+        budget_pref = client_prefs.get('budget_max')
+        if budget_pref is not None and str(budget_pref).strip():
+            try:
                 max_budget = int(float(budget_pref))
+            except (ValueError, TypeError):
+                logging.warning(f"NUDGE_ENGINE (VALIDATION): Could not parse budget from preferences for client {client.id}. Value: {budget_pref}")
+        
+        # Step 2: If no budget in preferences, try to parse it from notes.
+        if max_budget is None and client.notes:
+            try:
+                # This regex looks for "max budget", "budget", etc., followed by a number.
+                match = re.search(r'(?:max budget|budget|price)\s*[:\$]?\s*(\d{4,})', client.notes, re.IGNORECASE)
+                if match:
+                    max_budget = int(match.group(1))
+                    logging.info(f"NUDGE_ENGINE (NOTES PARSE): Extracted max budget ${max_budget:,} from notes for client {client.id}.")
+            except (ValueError, TypeError) as e:
+                logging.error(f"NUDGE_ENGINE (NOTES PARSE): Failed to parse budget from notes for client {client.id}. Error: {e}")
 
-            # Safely get and cast other preferences.
-            beds_pref = client_prefs.get('min_bedrooms')
-            if beds_pref is not None and beds_pref != '':
-                min_beds = int(float(beds_pref))
-
-            baths_pref = client_prefs.get('min_bathrooms')
-            if baths_pref is not None and baths_pref != '':
-                min_baths = int(float(baths_pref))
-            
-            # Safely get and cast resource attributes.
-            price_payload = resource_payload.get('ListPrice')
-            if price_payload is not None:
-                list_price = int(float(price_payload))
-            
-            beds_payload = resource_payload.get('BedroomsTotal')
-            if beds_payload is not None:
-                resource_beds = int(float(beds_payload))
-                
-            baths_payload = resource_payload.get('BathroomsTotalInteger')
-            if baths_payload is not None:
-                resource_baths = int(float(baths_payload))
-
+        # Step 3: Now, perform the knockout check with whatever budget was found.
+        try:
+            list_price = int(float(resource_payload.get('ListPrice'))) if resource_payload.get('ListPrice') is not None else None
+            min_beds = int(float(client_prefs.get('min_bedrooms'))) if client_prefs.get('min_bedrooms') else None
+            resource_beds = int(float(resource_payload.get('BedroomsTotal'))) if resource_payload.get('BedroomsTotal') is not None else None
+            min_baths = int(float(client_prefs.get('min_bathrooms'))) if client_prefs.get('min_bathrooms') else None
+            resource_baths = int(float(resource_payload.get('BathroomsTotalInteger'))) if resource_payload.get('BathroomsTotalInteger') is not None else None
         except (ValueError, TypeError) as e:
-            logging.error(f"NUDGE_ENGINE (VALIDATION): Could not parse preferences for scoring. Client: {client.id}. Error: {e}")
+            logging.error(f"NUDGE_ENGINE (VALIDATION): Could not parse data for scoring. Client: {client.id}. Error: {e}")
             return 0, ["Data Error"]
 
-        # Apply strict knockout rules.
         if max_budget is not None and list_price is not None and list_price > max_budget:
             logging.info(f"NUDGE_ENGINE (KNOCKOUT): Disqualified for client {client.id} - Over budget (${list_price:,} > ${max_budget:,})")
             return 0, ["Deal-Breaker: Over Budget"]
 
-        if min_beds is not None and resource_beds is not None and resource_beds < min_beds:
+        if min_beds and resource_beds is not None and resource_beds < min_beds:
             logging.info(f"NUDGE_ENGINE (KNOCKOUT): Disqualified for client {client.id} - Not enough beds ({resource_beds} < {min_beds})")
             return 0, ["Deal-Breaker: Not Enough Bedrooms"]
             
-        if min_baths is not None and resource_baths is not None and resource_baths < min_baths:
+        if min_baths and resource_baths is not None and resource_baths < min_baths:
             logging.info(f"NUDGE_ENGINE (KNOCKOUT): Disqualified for client {client.id} - Not enough baths ({resource_baths} < {min_baths})")
             return 0, ["Deal-Breaker: Not Enough Bathrooms"]
     # --- END OF FIX ---
@@ -135,7 +130,6 @@ def score_real_estate_event(client: Client, event: MarketEvent, resource_embeddi
 
     # C) Buyer Scoring Logic
     elif client_role == "buyer" and event_type in config["roles"]["buyer"]["event_types"]:
-        # The knockout criteria now handle the strict checks, so we just award points here.
         if client.notes_embedding and resource_embedding:
             similarity = calculate_cosine_similarity(client.notes_embedding, resource_embedding)
             if similarity > 0.45:
@@ -143,7 +137,6 @@ def score_real_estate_event(client: Client, event: MarketEvent, resource_embeddi
                 total_score += score_from_similarity
                 reasons.append(f"🔥 Conceptual Match ({int(similarity*100)}%)")
         
-        # The budget check is now implicitly passed, so we can always award points.
         total_score += weights.get("buyer_price", 30)
         reasons.append("✅ Within Budget")
         
@@ -153,7 +146,7 @@ def score_real_estate_event(client: Client, event: MarketEvent, resource_embeddi
             total_score += weights.get("buyer_location", 25)
             reasons.append("✅ Location Match")
         
-        min_beds = int(client_prefs.get('min_bedrooms', 0)) # Using default 0 if not present
+        min_beds = int(client_prefs.get('min_bedrooms', 0))
         resource_beds = int(resource_payload.get('BedroomsTotal', 0))
         if min_beds and resource_beds and resource_beds >= min_beds:
             total_score += weights.get("buyer_features", 15)
