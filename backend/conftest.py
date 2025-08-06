@@ -48,8 +48,10 @@ def get_engine():
 # with SQLModel.metadata before any test execution
 from data.models import (
     User, Client, Resource, ContentResource, Message, ScheduledMessage,
-    CampaignBriefing, MarketEvent, PipelineRun, Faq, NegativePreference, CampaignStatus
+    CampaignBriefing, MarketEvent, PipelineRun, Faq, NegativePreference
 )
+# FIX: Import CampaignStatus from its correct submodule
+from data.models.campaign import CampaignStatus
 
 # App import and DB setup
 from api.main import app
