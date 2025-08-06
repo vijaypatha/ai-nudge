@@ -59,12 +59,21 @@ const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudg
     const [showPhotoGallery, setShowPhotoGallery] = useState(false);
     
     // Check if this is a content-based nudge
+<<<<<<< HEAD
     const isContentNudge = briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation';
     const contentData = briefing.resource?.attributes;
     
     if (isContentNudge && contentData) {
         // Content-based resource display
         const { title, description, url, content_type } = contentData;
+=======
+    const isContentNudge = briefing.campaign_type === 'content_recommendation';
+    const contentPreview = briefing.key_intel?.content_preview;
+    
+    if (isContentNudge && contentPreview) {
+        // Content-based resource display
+        const { title, description, url, content_type } = contentPreview;
+>>>>>>> a08b91d01d05252adae19e5162265e69d316a20b
         
         return (
             <div className="space-y-3">
@@ -80,6 +89,7 @@ const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudg
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs">
                     <span className="bg-white/10 text-brand-text-muted px-2 py-1 rounded flex items-center gap-1.5">📄 Type: {content_type}</span>
+<<<<<<< HEAD
                     {url && (
                         <button 
                             onClick={() => window.open(url, '_blank')}
@@ -88,6 +98,9 @@ const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudg
                             🔗 Preview Content
                         </button>
                     )}
+=======
+                    {url && <span className="bg-white/10 text-brand-text-muted px-2 py-1 rounded flex items-center gap-1.5">🔗 Resource Link</span>}
+>>>>>>> a08b91d01d05252adae19e5162265e69d316a20b
                 </div>
             </div>
         );
@@ -151,10 +164,17 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDra
     // Generate links for the message based on nudge type
     const generateLinks = () => {
         // Check if this is a content-based nudge
+<<<<<<< HEAD
         if ((briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation') && briefing.resource?.attributes) {
             const contentData = briefing.resource.attributes;
             const contentUrl = contentData.url;
             const contentType = contentData.content_type;
+=======
+        if (briefing.campaign_type === 'content_recommendation' && briefing.key_intel?.content_preview) {
+            const contentPreview = briefing.key_intel.content_preview;
+            const contentUrl = contentPreview.url;
+            const contentType = contentPreview.content_type;
+>>>>>>> a08b91d01d05252adae19e5162265e69d316a20b
             
             if (contentUrl) {
                 return `\n\n🔗 View ${contentType}: ${contentUrl}`;
@@ -212,7 +232,11 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDra
                         <div className="space-y-3">
                             <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><ChevronsRight size={16}/> Strategic Context</h4>
                             <p className="text-brand-text-main text-base">
+<<<<<<< HEAD
                                 {(briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation')
+=======
+                                {briefing.campaign_type === 'content_recommendation' 
+>>>>>>> a08b91d01d05252adae19e5162265e69d316a20b
                                     ? "This content resource matches your client's interests and needs."
                                     : "This is a key market event relevant to your clients."
                                 }
