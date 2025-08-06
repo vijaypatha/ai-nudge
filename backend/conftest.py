@@ -48,7 +48,7 @@ def get_engine():
 # with SQLModel.metadata before any test execution
 from data.models import (
     User, Client, Resource, ContentResource, Message, ScheduledMessage,
-    CampaignBriefing, MarketEvent, PipelineRun, Faq, NegativePreference
+    CampaignBriefing, MarketEvent, PipelineRun, Faq, NegativePreference, CampaignStatus
 )
 
 # App import and DB setup
@@ -140,3 +140,50 @@ def authenticated_client(client: TestClient, test_user: User) -> Generator[TestC
     client.headers["Authorization"] = "Bearer fake-test-token"
     yield client
     app.dependency_overrides.clear()
+
+@pytest.fixture
+def test_client(session: Session, test_user: User) -> Client:
+    """Creates a test client linked to the test user."""
+    client = Client(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        full_name="Test Client",
+        phone_number="+15559876543"
+    )
+    session.add(client)
+    session.commit()
+    session.refresh(client)
+    return client
+
+@pytest.fixture
+def test_campaign(session: Session, test_user: User) -> CampaignBriefing:
+    """Creates a test campaign briefing linked to the test user."""
+    briefing = CampaignBriefing(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        campaign_type="market_opportunity",
+        headline="Test Campaign",
+        original_draft="Test draft content",
+        key_intel={"test": "data"},
+        matched_audience=[],
+        status=CampaignStatus.DRAFT
+    )
+    session.add(briefing)
+    session.commit()
+    session.refresh(briefing)
+    return briefing
+
+@pytest.fixture
+def test_resource(session: Session, test_user: User) -> Resource:
+    """Creates a test resource linked to the test user."""
+    resource = Resource(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        resource_type="property",
+        title="Test Property",
+        attributes={"PublicRemarks": "Test property description"}
+    )
+    session.add(resource)
+    session.commit()
+    session.refresh(resource)
+    return resource

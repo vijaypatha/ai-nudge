@@ -10,12 +10,10 @@
 import pytest
 import uuid
 from fastapi.testclient import TestClient
-from sqlmodel import Session, select
+from sqlmodel import Session
+from data.models import User, Client
 
-# --- FIXED: Remove direct model imports to prevent table redefinition ---
-# Models are now imported centrally in conftest.py
-
-def test_create_client_succeeds(authenticated_client: TestClient, test_user, session: Session):
+def test_create_client_succeeds(authenticated_client: TestClient, test_user: User):
     """Tests successful client creation."""
     # Arrange
     payload = {
@@ -35,19 +33,8 @@ def test_create_client_succeeds(authenticated_client: TestClient, test_user, ses
     assert data["email"] == "client@example.com"
     assert data["user_id"] == str(test_user.id)
 
-def test_get_clients_succeeds(authenticated_client: TestClient, test_user, session: Session):
+def test_get_clients_succeeds(authenticated_client: TestClient, test_client: Client):
     """Tests successful retrieval of user's clients."""
-    # Arrange - create a test client
-    from data.models.client import Client
-    client = Client(
-        id=uuid.uuid4(),
-        user_id=test_user.id,
-        full_name="Test Client",
-        phone_number="+15551234567"
-    )
-    session.add(client)
-    session.commit()
-
     # Act
     response = authenticated_client.get("/api/clients")
 
@@ -55,77 +42,44 @@ def test_get_clients_succeeds(authenticated_client: TestClient, test_user, sessi
     assert response.status_code == 200
     data = response.json()
     assert len(data) >= 1
-    assert any(client["full_name"] == "Test Client" for client in data)
+    assert any(c["id"] == str(test_client.id) for c in data)
 
-def test_get_client_by_id_succeeds(authenticated_client: TestClient, test_user, session: Session):
+def test_get_client_by_id_succeeds(authenticated_client: TestClient, test_client: Client):
     """Tests successful retrieval of a specific client."""
-    # Arrange - create a test client
-    from data.models.client import Client
-    client = Client(
-        id=uuid.uuid4(),
-        user_id=test_user.id,
-        full_name="Test Client",
-        phone_number="+15551234567"
-    )
-    session.add(client)
-    session.commit()
-
     # Act
-    response = authenticated_client.get(f"/api/clients/{client.id}")
+    response = authenticated_client.get(f"/api/clients/{test_client.id}")
 
     # Assert
     assert response.status_code == 200
     data = response.json()
-    assert data["id"] == str(client.id)
+    assert data["id"] == str(test_client.id)
     assert data["full_name"] == "Test Client"
 
-def test_update_client_succeeds(authenticated_client: TestClient, test_user, session: Session):
+def test_update_client_succeeds(authenticated_client: TestClient, test_client: Client):
     """Tests successful client update."""
-    # Arrange - create a test client
-    from data.models.client import Client
-    client = Client(
-        id=uuid.uuid4(),
-        user_id=test_user.id,
-        full_name="Original Name",
-        phone_number="+15551234567"
-    )
-    session.add(client)
-    session.commit()
-
     # Act
     payload = {"full_name": "Updated Name"}
-    response = authenticated_client.put(f"/api/clients/{client.id}", json=payload)
+    response = authenticated_client.put(f"/api/clients/{test_client.id}", json=payload)
 
     # Assert
     assert response.status_code == 200
     data = response.json()
     assert data["full_name"] == "Updated Name"
 
-def test_delete_client_succeeds(authenticated_client: TestClient, test_user, session: Session):
+def test_delete_client_succeeds(authenticated_client: TestClient, test_client: Client):
     """Tests successful client deletion."""
-    # Arrange - create a test client
-    from data.models.client import Client
-    client = Client(
-        id=uuid.uuid4(),
-        user_id=test_user.id,
-        full_name="Test Client",
-        phone_number="+15551234567"
-    )
-    session.add(client)
-    session.commit()
-
     # Act
-    response = authenticated_client.delete(f"/api/clients/{client.id}")
+    response = authenticated_client.delete(f"/api/clients/{test_client.id}")
 
     # Assert
     assert response.status_code == 200
 
     # Verify client was actually deleted
-    response = authenticated_client.get(f"/api/clients/{client.id}")
+    response = authenticated_client.get(f"/api/clients/{test_client.id}")
     assert response.status_code == 404
 
-def test_create_client_fails_invalid_data(authenticated_client: TestClient):
-    """Tests that client creation fails with invalid data."""
+def test_create_client_fails_invalid_data(authenticated_client: TestClient, test_user: User):
+    """Tests that client creation handles invalid data without crashing."""
     # Arrange
     payload = {
         "full_name": "",  # Invalid: empty name
@@ -136,8 +90,8 @@ def test_create_client_fails_invalid_data(authenticated_client: TestClient):
     response = authenticated_client.post("/api/clients/manual", json=payload)
 
     # Assert
-    # Note: The current ClientCreate model doesn't have validation constraints,
-    # so this test now verifies that the API accepts the data as-is
+    # This now passes because the user exists, preventing the ForeignKeyViolation.
+    # We assert that the API accepted the data as the Pydantic model currently allows it.
     assert response.status_code == 200
     data = response.json()
     assert data["full_name"] == ""
@@ -148,10 +102,9 @@ def test_get_clients_fails_unauthenticated(client: TestClient):
     response = client.get("/api/clients")
     assert response.status_code == 401
 
-def test_client_ownership_isolation(authenticated_client: TestClient, session: Session):
+def test_client_ownership_isolation(authenticated_client: TestClient, session: Session, test_user: User):
     """Tests that users can only access their own clients."""
     # Arrange - create another user and client
-    from data.models.user import User
     other_user = User(
         id=uuid.uuid4(),
         full_name="Other User",
@@ -160,7 +113,6 @@ def test_client_ownership_isolation(authenticated_client: TestClient, session: S
     session.add(other_user)
     session.commit()
 
-    from data.models.client import Client
     other_client = Client(
         id=uuid.uuid4(),
         user_id=other_user.id,
@@ -173,56 +125,15 @@ def test_client_ownership_isolation(authenticated_client: TestClient, session: S
     # Act - try to access other user's client
     response = authenticated_client.get(f"/api/clients/{other_client.id}")
 
-    # Assert - should be forbidden
-    assert response.status_code == 404  # or 403, depending on implementation
+    # Assert - should not be found
+    assert response.status_code == 404
 
 # --- NEW TESTS FOR CLIENT NUDGES ENDPOINT ---
 
-def test_get_nudges_for_client_succeeds(authenticated_client: TestClient, test_user, session: Session):
+def test_get_nudges_for_client_succeeds(authenticated_client: TestClient, test_client: Client):
     """Tests successful retrieval of nudges for a specific client."""
-    # Debug: Check if we're in CI and what database we're using
-    import os
-    if os.getenv('GITHUB_ACTIONS') == 'true':
-        print(f"Running in CI environment")
-        print(f"DATABASE_URL: {os.getenv('DATABASE_URL')}")
-        
-        # Check what tables exist
-        from sqlmodel import text
-        result = session.exec(text("""
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'public'
-            ORDER BY table_name
-        """))
-        tables = [row[0] for row in result.all()]
-        print(f"Available tables in CI: {tables}")
-        
-        # Check if campaignbriefing table exists
-        if "campaignbriefing" not in tables:
-            print("ERROR: campaignbriefing table not found!")
-            print("This suggests migrations were not run correctly.")
-            # Try to create the table manually for testing
-            try:
-                from data.models import CampaignBriefing
-                from sqlmodel import SQLModel
-                SQLModel.metadata.create_all(session.bind)
-                print("Attempted to create tables manually")
-            except Exception as e:
-                print(f"Failed to create tables manually: {e}")
-    
-    # Arrange - create a test client
-    from data.models.client import Client
-    client = Client(
-        id=uuid.uuid4(),
-        user_id=test_user.id,
-        full_name="Test Client",
-        phone_number="+15551234567"
-    )
-    session.add(client)
-    session.commit()
-
     # Act
-    response = authenticated_client.get(f"/api/clients/{client.id}/nudges")
+    response = authenticated_client.get(f"/api/clients/{test_client.id}/nudges")
 
     # Assert
     assert response.status_code == 200
@@ -255,21 +166,10 @@ def test_get_nudges_for_client_fails_unauthenticated(client: TestClient):
     # Assert
     assert response.status_code == 401
 
-def test_get_nudges_for_client_returns_correct_structure(authenticated_client: TestClient, test_user, session: Session):
+def test_get_nudges_for_client_returns_correct_structure(authenticated_client: TestClient, test_client: Client, session: Session):
     """Tests that the nudges endpoint returns the correct data structure."""
-    # Arrange - create a test client
-    from data.models.client import Client
-    client = Client(
-        id=uuid.uuid4(),
-        user_id=test_user.id,
-        full_name="Test Client",
-        phone_number="+15551234567"
-    )
-    session.add(client)
-    session.commit()
-
     # Act
-    response = authenticated_client.get(f"/api/clients/{client.id}/nudges")
+    response = authenticated_client.get(f"/api/clients/{test_client.id}/nudges")
 
     # Assert
     assert response.status_code == 200
@@ -287,7 +187,7 @@ def test_get_nudges_for_client_returns_correct_structure(authenticated_client: T
         assert "original_draft" in nudge
         assert "matched_audience" in nudge
 
-def test_direct_database_query_works(session: Session, test_user):
+def test_direct_database_query_works(session: Session, test_user: User):
     """Test that we can directly query the database without going through the API."""
     import os
     if os.getenv('GITHUB_ACTIONS') == 'true':
