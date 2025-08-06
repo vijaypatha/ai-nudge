@@ -341,13 +341,18 @@ def update_campaign_audience(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token),
 ):
-    # FIX: Removed the 'session' keyword argument from this function call
     clients = crm_service.get_clients_by_ids(payload.client_ids, user_id=current_user.id)
     if len(clients) != len(payload.client_ids):
         raise HTTPException(status_code=404, detail="One or more clients not found.")
     
     new_audience = [
-        MatchedClient(client_id=c.id, client_name=c.full_name, match_reasons=["Manually Added"])
+        MatchedClient(
+            client_id=c.id,
+            client_name=c.full_name,
+            # FIX: Add the missing 'match_score' field, which is required by the Pydantic model.
+            match_score=0,
+            match_reasons=["Manually Added"]
+        )
         for c in clients
     ]
     
