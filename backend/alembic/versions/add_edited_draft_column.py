@@ -11,7 +11,7 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision = 'add_edited_draft_to_campaignbriefing'
+revision = 'add_edited_draft_column'
 down_revision = '6fced02bbabe'
 branch_labels = None
 depends_on = None
