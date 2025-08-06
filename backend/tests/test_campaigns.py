@@ -1,12 +1,4 @@
 # File: backend/tests/test_campaigns.py
-# 
-# What does this file test:
-# This file tests campaign functionality including campaign creation, management,
-# campaign briefings, and campaign-related API endpoints. It validates the
-# campaign system that handles marketing campaigns, content creation, and
-# campaign lifecycle management for different verticals.
-# 
-# When was it updated: 2025-01-27
 
 import pytest
 import uuid
@@ -441,13 +433,13 @@ def test_send_instant_nudge_now_fails(authenticated_client: TestClient, test_cli
         assert response.status_code == 500
         assert "Failed to send instant nudge" in response.json()["detail"]
 
-def test_trigger_send_campaign_succeeds(authenticated_client: TestClient, test_campaign: CampaignBriefing):
+def test_trigger_send_campaign_succeeds(authenticated_client: TestClient, test_campaign: CampaignBriefing, test_user: User):
     """
     Tests successful triggering of campaign send.
     """
-    # FIX: The patch must target where the object is looked up.
-    # The function is called in `api.rest.campaigns`, so we patch it there.
-    with patch("api.rest.campaigns.outbound_workflow.send_campaign_to_audience.delay") as mock_send:
+    # FIX: The application code passes the function object to BackgroundTasks, not .delay().
+    # Therefore, we patch the function itself.
+    with patch("api.rest.campaigns.outbound_workflow.send_campaign_to_audience") as mock_send:
         # Act
         response = authenticated_client.post(f"/api/campaigns/{test_campaign.id}/send")
         
@@ -455,7 +447,8 @@ def test_trigger_send_campaign_succeeds(authenticated_client: TestClient, test_c
         assert response.status_code == 202
         data = response.json()
         assert data["message"] == "Campaign sending process started."
-        mock_send.assert_called_once()
+        # Assert that the mocked function was called once with the correct arguments
+        mock_send.assert_called_once_with(test_campaign.id, test_user.id)
 
 def test_trigger_send_campaign_fails_not_found(authenticated_client: TestClient):
     """
