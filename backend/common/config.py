@@ -47,7 +47,8 @@ class Settings(BaseSettings):
     ADMIN_EMAIL: Optional[str] = None
     ADMIN_PHONE_NUMBER: Optional[str] = None
     ADMIN_TWILIO_PHONE_NUMBER: Optional[str] = None
-    ALLOWED_CORS_ORIGINS: str = "http://localhost:3000,https://ai-nudge-frontend.onrender.com,https://ai-nudge.onrender.com"
+    # ALLOWED_CORS_ORIGINS: str = "http://localhost:3000,https://ai-nudge-frontend.onrender.com,https://ai-nudge.onrender.com"
+    ALLOWED_CORS_ORIGINS: str = "http://localhost:3000,https://ai-nudge-frontend.onrender.com,https://ai-nudge.onrender.com,https://www.ainudge.app"
     CORS_ORIGIN_REGEX: Optional[str] = r"https://ai-nudge-frontend-pr-.*\.onrender\.com"
     
     WEBSOCKET_ALLOWED_ORIGINS: str = '["https://www.ainudge.app", "https://ainudge.app"]' # Allow your domains

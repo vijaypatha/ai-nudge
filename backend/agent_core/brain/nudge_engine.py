@@ -125,7 +125,17 @@ async def _create_campaign_from_event(event: MarketEvent, user: User, resource: 
         realtor=user, resource=resource, event_type=event.event_type, matched_audience=matched_audience
     )
 
-    audience_for_db = [m.model_dump(mode='json') for m in matched_audience]
+    # --- FIX: Properly serialize matched_audience to JSON ---
+    audience_for_db = []
+    for m in matched_audience:
+        client_data = {
+            "client_id": str(m.client_id),
+            "client_name": m.client_name,
+            "match_score": m.match_score,
+            "match_reasons": m.match_reasons
+        }
+        audience_for_db.append(client_data)
+    
     new_briefing = CampaignBriefing(
         id=uuid.uuid4(),
         user_id=user.id,
