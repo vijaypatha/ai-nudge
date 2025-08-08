@@ -22,19 +22,23 @@ logger = logging.getLogger(__name__)
 async def process_global_events_for_user(user: User, global_events: list[GlobalMlsEvent]):
     """
     Processes a batch of global events for a single user, creating user-specific
-    MarketEvents and generating nudges. This is a reusable function.
+    MarketEvents and generating nudges with resilient transaction handling.
     """
     logger.info(f"PIPELINE: Processing {len(global_events)} global events for user {user.id} ({user.full_name})...")
-    try:
-        with Session(engine) as db_session:
-            for detached_event in global_events:
-                # Re-attach the event object to the current session to prevent DetachedInstanceError
+    
+    # --- THIS IS THE FIX ---
+    # We now handle transactions on a per-event basis. This ensures that a single
+    # failing event does not cause successfully created campaigns to be lost.
+    for detached_event in global_events:
+        try:
+            with Session(engine) as db_session:
+                # Re-attach the event object to the current session
                 global_event = db_session.merge(detached_event)
                 
                 market_event_record = MarketEvent(
                     id=uuid4(),
                     user_id=user.id,
-                    event_type="new_listing", # Assuming all are new for now
+                    event_type="new_listing", # This could be made more dynamic later
                     entity_id=global_event.listing_key,
                     entity_type="property",
                     payload=global_event.raw_payload,
@@ -43,15 +47,20 @@ async def process_global_events_for_user(user: User, global_events: list[GlobalM
                 )
                 db_session.add(market_event_record)
                 
+                # The nudge_engine will add the new campaign to the session
                 await nudge_engine.process_market_event(
                     event=market_event_record, user=user, db_session=db_session
                 )
-            
-            db_session.commit()
-            logger.info(f"PIPELINE: Successfully processed events for user {user.id}.")
+                
+                # Commit after each event is fully processed
+                db_session.commit()
+                logger.info(f"PIPELINE: Successfully processed and committed event {global_event.listing_key} for user {user.id}.")
 
-    except Exception as e:
-        logger.error(f"PIPELINE: Failed to process events for user {user.id}. Error: {e}", exc_info=True)
+        except Exception as e:
+            # Log the specific event that failed and continue to the next one.
+            logger.error(f"PIPELINE: Failed to process event {detached_event.listing_key} for user {user.id}. Error: {e}", exc_info=True)
+            # A rollback is handled implicitly by the 'with Session...' block exiting on error.
+    # --- END OF FIX ---
 
 
 async def run_main_opportunity_pipeline(minutes_ago: int | None = None):

@@ -154,27 +154,34 @@ def get_client_nudge_summary_list(
 
 @router.get("", response_model=AgnosticNudgesResponse)
 async def get_all_campaigns(
+    session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
 ):
     """Fetches all campaign briefings in DRAFT status for the current user."""
     try:
-        briefings = crm_service.get_new_campaign_briefings_for_user(user_id=current_user.id)
+        briefings_from_db = crm_service.get_new_campaign_briefings_for_user(user_id=current_user.id, session=session)
         content_recommendations = get_content_recommendations_for_user(user_id=current_user.id)
-        content_briefings = [
-            CampaignBriefing(
-                id=rec['resource']['id'], user_id=current_user.id,
-                campaign_type='content_recommendation', headline=f"Content: {rec['resource']['title']}",
-                original_draft=rec['generated_message'], matched_audience=rec['matched_clients'],
-                key_intel={
-                    'content_preview': rec['resource'],
-                    'strategic_context': f"Share this {rec['resource']['content_type']} with your client",
-                    'trigger_source': 'Content Library'
-                },
-                status=CampaignStatus.DRAFT, created_at=datetime.now(pytz.utc), updated_at=datetime.now(pytz.utc)
-            ) for rec in content_recommendations
-        ]
         
-        all_briefings = briefings + content_briefings
+        newly_created_content_briefings = []
+        if content_recommendations:
+            for rec in content_recommendations:
+                new_briefing = CampaignBriefing(
+                    id=rec['resource']['id'], user_id=current_user.id,
+                    campaign_type='content_recommendation', headline=f"Content: {rec['resource']['title']}",
+                    original_draft=rec['generated_message'], matched_audience=rec['matched_clients'],
+                    key_intel={
+                        'content_preview': rec['resource'],
+                        'strategic_context': f"Share this {rec['resource']['content_type']} with your client",
+                        'trigger_source': 'Content Library'
+                    },
+                    status=CampaignStatus.DRAFT,
+                )
+                crm_service.save_campaign_briefing(new_briefing, session=session)
+                newly_created_content_briefings.append(new_briefing)
+            
+            session.commit()
+        
+        all_briefings = briefings_from_db + newly_created_content_briefings
         
         vertical_config = VERTICAL_CONFIGS.get(current_user.vertical, {})
         campaign_configs = vertical_config.get("campaign_configs", {})
@@ -182,9 +189,7 @@ async def get_all_campaigns(
         display_config = {
             campaign_type: config.get("display", {}) for campaign_type, config in campaign_configs.items()
         }
-        display_config['content_recommendation'] = {
-            'icon': 'BookOpen', 'color': 'text-blue-400', 'title': 'Content'
-        }
+        display_config['content_recommendation'] = {'icon': 'BookOpen', 'color': 'text-blue-400', 'title': 'Content'}
         
         return AgnosticNudgesResponse(nudges=all_briefings, display_config=display_config)
     except Exception as e:

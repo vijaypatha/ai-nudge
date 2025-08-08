@@ -118,21 +118,19 @@ export default function NudgesPage() {
     const handleAction = async (briefing: CampaignBriefing, action: 'dismiss' | 'send') => {
         try {
             if (action === 'send') {
-                // Only send the fields that CampaignUpdate expects
                 const updatePayload = {
-                    edited_draft: briefing.edited_draft || "",
+                    edited_draft: briefing.edited_draft || briefing.original_draft,
                     matched_audience: briefing.matched_audience,
-                    status: 'active' as const  // Changed from 'approved' to 'active'
+                    status: 'active' as const
                 };
                 
-                console.log('Sending payload:', updatePayload);
-                console.log('Payload JSON:', JSON.stringify(updatePayload));
-                
-                // Test the debug endpoint first
-                await api.put(`/api/campaigns/test-debug/${briefing.id}`, updatePayload);
+                // --- THIS IS THE FIX ---
+                // The incorrect test-debug line has been removed.
+                // The code now proceeds directly to the correct API calls.
                 
                 await api.put(`/api/campaigns/${briefing.id}`, updatePayload);
                 await api.post(`/api/campaigns/${briefing.id}/send`, {});
+    
             } else {
                 await api.put(`/api/campaigns/${briefing.id}`, { status: 'dismissed' as const });
             }
