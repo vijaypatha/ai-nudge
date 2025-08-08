@@ -45,66 +45,56 @@ async def process_incoming_sms(from_number: str, to_number: str, body: str):
     """
     logging.info(f"TWILIO: Processing SMS from '{from_number}' to '{to_number}': '{body}'")
 
-    # --- ADD: Imports for Redis client and channel name ---
+    # --- THIS IS THE FIX ---
+    # Initialize the Redis client and channel name once at the top level
+    # to ensure a stable connection is used.
     import redis
     import json
     from common.config import get_settings
     settings = get_settings()
-    redis_client = redis.from_url(settings.REDIS_URL)
+    redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
     USER_NOTIFICATION_CHANNEL = "user-notifications"
-    # --- END ADD ---
+    # --- END OF FIX ---
 
-    user = crm_service.get_user_by_twilio_number(to_number)
-    if not user:
-        logging.error(f"TWILIO: No user found for destination number {to_number}. Discarding message.")
-        return
+    with Session(engine) as session:
+        user = crm_service.get_user_by_twilio_number(to_number, session=session)
+        if not user:
+            logging.error(f"TWILIO: No user found for destination number {to_number}. Discarding message.")
+            return
 
-    found_client = crm_service.get_client_by_phone(phone_number=from_number, user_id=user.id)
-    if not found_client:
-        logging.error(f"TWILIO: No client with number {from_number} found for user {user.id}. Discarding message.")
-        return
+        found_client = crm_service.get_client_by_phone(phone_number=from_number, user_id=user.id, session=session)
+        if not found_client:
+            logging.error(f"TWILIO: No client with number {from_number} found for user {user.id}. Discarding message.")
+            return
 
-    logging.info(f"TWILIO: Matched to user '{user.full_name}' (ID: {user.id}) and client '{found_client.full_name}' (ID: {found_client.id}).")
+        logging.info(f"TWILIO: Matched to user '{user.full_name}' and client '{found_client.full_name}'.")
 
-    incoming_message = Message(
-        client_id=found_client.id,
-        user_id=user.id,
-        content=body,
-        direction=MessageDirection.INBOUND,
-        status=MessageStatus.RECEIVED,
-        source=MessageSource.MANUAL,
-        sender_type=MessageSenderType.USER,
-    )
-    
-    try:
-        saved_message = crm_service.save_message(incoming_message)
-        logging.info(f"TWILIO: Logged incoming message from client {found_client.id}")
-
-        # --- THIS IS THE FIX ---
-        # Instead of calling the websocket manager directly, which only works in a
-        # single-process environment, we publish a message to the central Redis channel.
-        # The listener in main.py will then broadcast it to the correct user.
+        incoming_message = Message(
+            client_id=found_client.id,
+            user_id=user.id,
+            content=body,
+            direction=MessageDirection.INBOUND,
+            status=MessageStatus.RECEIVED,
+            source=MessageSource.MANUAL,
+            sender_type=MessageSenderType.USER,
+        )
+        
         try:
-            message_payload = saved_message.model_dump(mode='json')
-            
+            saved_message = crm_service.save_message(incoming_message, session=session)
+            logging.info(f"TWILIO: Logged incoming message from client {found_client.id}")
+
+            # Publish the NEW_MESSAGE event to the Redis channel
+            message_payload = json.loads(saved_message.model_dump_json())
             notification_payload = {
                 "user_id": str(user.id),
-                "payload": {
-                    "type": "NEW_MESSAGE",
-                    "payload": message_payload
-                }
+                "payload": {"type": "NEW_MESSAGE", "payload": message_payload}
             }
-            
             redis_client.publish(USER_NOTIFICATION_CHANNEL, json.dumps(notification_payload))
             logging.info(f"TWILIO: Published 'NEW_MESSAGE' event to Redis for user {user.id}")
 
         except Exception as e:
-            logging.error(f"TWILIO: CRITICAL - Failed to publish 'NEW_MESSAGE' to Redis. Error: {e}", exc_info=True)
-        # --- END OF FIX ---
-
-    except Exception as e:
-        logging.error(f"TWILIO: Failed to save incoming message: {e}", exc_info=True)
-        return
+            logging.error(f"TWILIO: Failed to save or publish incoming message: {e}", exc_info=True)
+            return
 
     # FAQ AUTO-REPLY (This logic remains unchanged)
     if settings.FAQ_AUTO_REPLY_ENABLED and user.faq_auto_responder_enabled:

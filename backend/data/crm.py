@@ -672,6 +672,29 @@ def get_active_events_in_range(lookback_days: int, session: Session) -> List[Mar
     )
     return session.exec(statement).all()
 
+def get_active_events_in_batches(
+    session: Session,
+    lookback_days: int = 30,
+    batch_size: int = 50,
+    page: int = 1
+) -> List[MarketEvent]:
+    """
+    Fetches recent, active market events from the database in paginated batches
+    to conserve memory during large re-scoring operations.
+    """
+    offset = (page - 1) * batch_size
+    time_threshold = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    
+    statement = (
+        select(MarketEvent)
+        .where(MarketEvent.created_at >= time_threshold)
+        .order_by(MarketEvent.created_at.desc())
+        .offset(offset)
+        .limit(batch_size)
+    )
+    
+    return session.exec(statement).all()
+
 def update_campaign_briefing(campaign_id: uuid.UUID, update_data: CampaignUpdate, user_id: uuid.UUID) -> Optional[CampaignBriefing]:
     """Updates a campaign briefing with new data, ensuring it belongs to the user."""
     with Session(engine) as session:

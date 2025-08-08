@@ -297,14 +297,12 @@ async def get_nudges_for_client(
                 continue
             
             nudge_resource = NudgeResource(attributes={})
-
             if campaign.triggering_resource_id:
                 resource = crm_service.get_resource_by_id(
                     resource_id=campaign.triggering_resource_id,
                     user_id=current_user.id,
                     session=session
                 )
-                
                 if resource and resource.attributes:
                     nudge_resource.address = resource.attributes.get("UnparsedAddress")
                     nudge_resource.price = resource.attributes.get("ListPrice")
@@ -312,21 +310,18 @@ async def get_nudges_for_client(
                     nudge_resource.baths = resource.attributes.get("BathroomsTotalInteger")
                     nudge_resource.attributes = resource.attributes
             
-            # --- THIS IS THE FIX ---
-            # We now pass the key_intel field from the campaign object to the response.
             client_nudge = ClientNudgeResponse(
                 id=campaign.id,
                 campaign_id=campaign.id,
                 headline=campaign.headline,
                 campaign_type=campaign.campaign_type,
                 resource=nudge_resource,
-                key_intel=campaign.key_intel, # <-- ADD THIS LINE
+                key_intel=campaign.key_intel, # THIS LINE FIXES THE MISSING DATA
                 original_draft=campaign.original_draft,
                 edited_draft=campaign.edited_draft,
                 matched_audience=campaign.matched_audience
             )
             client_nudges.append(client_nudge)
-            # --- END OF FIX ---
 
     return client_nudges
 
