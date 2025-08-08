@@ -82,8 +82,12 @@ async def test_mls_new_listing_event_creates_campaign(session: Session):
         
         new_listing_event = MarketEvent(
             id=uuid.uuid4(),
-            event_type="new_listing", market_area="pleasant_grove", entity_type="RESOURCE", # entity_type is now generic
-            entity_id=str(entity_id), payload=property_attributes  # Convert UUID to string for SQLite compatibility
+            user_id=realtor.id,  # Add the user_id field
+            event_type="new_listing", 
+            market_area="pleasant_grove", 
+            entity_type="RESOURCE", # entity_type is now generic
+            entity_id=str(entity_id), 
+            payload=property_attributes  # Convert UUID to string for SQLite compatibility
         )
 
         # 2. ACT
