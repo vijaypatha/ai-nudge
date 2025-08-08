@@ -56,69 +56,61 @@ const MatchReasonTag: FC<{ reason: string }> = ({ reason }) => {
 };
 
 const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudge }> = ({ resource, briefing }) => {
-    // --- FIX: Source image data from key_intel.content_preview ---
     const contentPreview = briefing.key_intel?.content_preview || {};
     const { attributes } = resource;
-
     const [showPhotoGallery, setShowPhotoGallery] = useState(false);
-    
     const isContentNudge = briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation';
-    const contentData = briefing.resource?.attributes;
-    
-    if (isContentNudge && contentData) {
-        const { title, description, url, content_type } = contentData;
+
+    if (isContentNudge) {
+        const { title, description, url, content_type } = briefing.resource?.attributes || {};
         return (
             <div className="space-y-3">
                 <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><BookOpen size={16} /> Content Resource</h4>
-                <div className="relative w-full h-48 rounded-lg overflow-hidden bg-white/5 border border-white/10 group">
-                    <div className="w-full h-full flex items-center justify-center bg-brand-dark">
-                        <BookOpen size={48} className="text-brand-text-muted" />
-                    </div>
-                    <div className="absolute bottom-3 left-3 right-3">
-                        <h5 className="font-bold text-white text-base drop-shadow-md">{title}</h5>
-                        {description && <p className="text-white/80 text-sm drop-shadow-md">{description}</p>}
+                <div className="relative w-full h-48 rounded-lg overflow-hidden bg-white/5 border border-white/10 group flex items-center justify-center">
+                    <BookOpen size={48} className="text-brand-text-muted" />
+                    <div className="absolute bottom-3 left-3 right-3 p-2 bg-black/40 rounded">
+                        <h5 className="font-bold text-white text-base drop-shadow-md truncate">{title}</h5>
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs">
-                    <span className="bg-white/10 text-brand-text-muted px-2 py-1 rounded flex items-center gap-1.5">📄 Type: {content_type}</span>
-                    {url && (
-                        <button 
-                            onClick={() => window.open(url, '_blank')}
-                            className="bg-white/10 text-brand-text-muted px-2 py-1 rounded flex items-center gap-1.5 hover:bg-white/20 hover:text-brand-text-main transition-colors cursor-pointer"
-                        >
-                            🔗 Preview Content
-                        </button>
-                    )}
+                    <span className="bg-white/10 text-brand-text-muted px-2 py-1 rounded">Type: {content_type}</span>
+                    {url && <button onClick={() => window.open(url, '_blank')} className="bg-white/10 text-brand-text-muted px-2 py-1 rounded hover:bg-white/20">🔗 Preview Content</button>}
                 </div>
             </div>
         );
     }
     
-    // Use the reliable data from content_preview
     const imageUrl = contentPreview.image_url;
     const photoCount = contentPreview.photo_count || 0;
     const galleryPhotos = contentPreview.photo_gallery || [];
-    // --- END OF FIX ---
 
-    const renderDetail = (label: string, value: any, icon: ReactNode) => {
+    const renderDetail = (label: string, value: any) => {
         if (!value && value !== 0) return null;
-        const formattedValue = label === 'Price' && typeof value === 'number' ? value.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }) : value?.toLocaleString();
-        return (<span className="bg-white/10 text-brand-text-muted px-2 py-1 rounded flex items-center gap-1.5">{icon} {label}: {formattedValue}</span>);
+        const formattedValue = label === 'Price' && typeof value === 'number' ? `$${value.toLocaleString('en-US')}` : value?.toLocaleString();
+        return (<span className="bg-black/30 text-white/80 text-xs font-semibold px-2.5 py-1 rounded">{label}: {formattedValue}</span>);
     };
 
     return (
         <div className="space-y-3">
             <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><Home size={16} /> Property</h4>
-            <div className="relative w-full h-48 rounded-lg overflow-hidden bg-white/5 border border-white/10 group">
-                {imageUrl ? (<Image src={imageUrl} alt={resource.address || 'Property Image'} layout="fill" objectFit="cover" unoptimized />) : (<div className="w-full h-full flex items-center justify-center bg-brand-dark"><ImageIcon size={48} className="text-brand-text-muted" /></div>)}
-                {photoCount > 1 && (<button onClick={() => setShowPhotoGallery(true)} className="absolute top-2 right-2 bg-black/70 text-white p-2 rounded-full hover:bg-black/90 transition-colors" title={`View all ${photoCount} photos`}><ImageIcon size={16} /></button>)}
-                <div className="absolute bottom-3 left-3 right-3"><h5 className="font-bold text-white text-base drop-shadow-md">{resource.address}</h5></div>
-            </div>
-            <div className="flex flex-wrap gap-2 text-xs">
-                {renderDetail("Price", resource.price, '💰')}
-                {renderDetail("Beds", resource.beds, '🛏️')}
-                {renderDetail("Baths", resource.baths, '🚿')}
-                {renderDetail("SqFt", attributes.LivingArea, '📏')}
+            <div className="relative w-full h-48 rounded-lg overflow-hidden bg-brand-dark border border-white/10 group">
+                {imageUrl ? (
+                    <Image src={imageUrl} alt={resource.address || 'Property Image'} layout="fill" objectFit="cover" unoptimized />
+                ) : (
+                    <div className="w-full h-full flex flex-col justify-between items-start p-4 bg-white/5">
+                        <ImageIcon size={32} className="text-brand-text-muted/50" />
+                        <div className="w-full">
+                            <h5 className="font-bold text-white text-base drop-shadow-md">{resource.address || "Property Address Unavailable"}</h5>
+                            <div className="flex flex-wrap gap-2 text-xs mt-2">
+                                {renderDetail("Price", resource.price)}
+                                {renderDetail("Beds", resource.beds)}
+                                {renderDetail("Baths", resource.baths)}
+                                {renderDetail("SqFt", attributes.LivingArea)}
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {photoCount > 1 && (<button onClick={() => setShowPhotoGallery(true)} className="absolute top-2 right-2 bg-black/70 text-white p-2 rounded-full hover:bg-black/90" title={`View all ${photoCount} photos`}><ImageIcon size={16} /></button>)}
             </div>
             {showPhotoGallery && <PhotoGalleryModal photos={galleryPhotos} onClose={() => setShowPhotoGallery(false)} />}
         </div>
