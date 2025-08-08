@@ -55,17 +55,17 @@ const MatchReasonTag: FC<{ reason: string }> = ({ reason }) => {
 };
 
 const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudge }> = ({ resource, briefing }) => {
+    // --- FIX: Source image data from key_intel.content_preview ---
+    const contentPreview = briefing.key_intel?.content_preview || {};
     const { attributes } = resource;
+
     const [showPhotoGallery, setShowPhotoGallery] = useState(false);
     
-    // Check if this is a content-based nudge
     const isContentNudge = briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation';
     const contentData = briefing.resource?.attributes;
     
     if (isContentNudge && contentData) {
-        // Content-based resource display
         const { title, description, url, content_type } = contentData;
-        
         return (
             <div className="space-y-3">
                 <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><BookOpen size={16} /> Content Resource</h4>
@@ -93,11 +93,11 @@ const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudg
         );
     }
     
-    // Market-based resource display (property photos)
-    const mediaItems = attributes?.Media || [];
-    const imageUrl = mediaItems?.[0]?.MediaURL;
-    const photoCount = mediaItems.length;
-    const galleryPhotos = mediaItems.map((item: { MediaURL: string }) => item.MediaURL).filter(Boolean);
+    // Use the reliable data from content_preview
+    const imageUrl = contentPreview.image_url;
+    const photoCount = contentPreview.photo_count || 0;
+    const galleryPhotos = contentPreview.photo_gallery || [];
+    // --- END OF FIX ---
 
     const renderDetail = (label: string, value: any, icon: ReactNode) => {
         if (!value && value !== 0) return null;
@@ -148,9 +148,13 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDra
     const draft = briefing.edited_draft ?? briefing.original_draft ?? '';
     const matchedAudience = briefing.matched_audience ?? [];
 
-    // Generate links for the message based on nudge type
     const generateLinks = () => {
-        // Check if this is a content-based nudge
+        // --- FIX: Source photo data from key_intel.content_preview ---
+        const contentPreview = briefing.key_intel?.content_preview || {};
+        const photoUrls = contentPreview.photo_gallery || [];
+        // --- END OF FIX ---
+        
+        // Check for content-based nudge first
         if ((briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation') && briefing.resource?.attributes) {
             const contentData = briefing.resource.attributes;
             const contentUrl = contentData.url;
@@ -161,16 +165,11 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDra
             }
         }
         
-        // Check if this is a market-based nudge (property photos)
-        const mediaItems = briefing.resource?.attributes?.Media || [];
-        const photoUrls = mediaItems.map((item: { MediaURL: string }) => item.MediaURL).filter(Boolean);
-        
         if (photoUrls.length === 0) return '';
         
         if (photoUrls.length === 1) {
             return `\n\n📸 View photos: ${photoUrls[0]}`;
         } else {
-            // Show only the first 3 photos to avoid overwhelming the message
             const maxPhotos = 3;
             const photosToShow = photoUrls.slice(0, maxPhotos);
             const photoLinks = photosToShow.map((url: string, index: number) => `📸 Photo ${index + 1}: ${url}`).join('\n');
@@ -183,12 +182,10 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDra
         }
     };
 
-    // Get the display text for the textarea
     const getDisplayText = () => {
         const links = generateLinks();
         const hasLinks = draft.includes('📸') || draft.includes('🔗') || draft.includes('View photos') || draft.includes('View ');
         
-        // Only add links if they don't already exist
         if (links && !hasLinks) {
             return draft + links;
         }
