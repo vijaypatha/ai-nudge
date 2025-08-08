@@ -1,5 +1,5 @@
 // frontend/app/(main)/conversations/[clientId]/page.tsx
-// --- FINAL VERSION: Adds a WebSocket listener for real-time messages ---
+// --- FINAL CORRECTED VERSION ---
 
 'use client';
 
@@ -103,7 +103,6 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         fetchClientAndConversation();
     }, [clientId, api, fetchConversationData]);
 
-    // --- BEGIN FIX: Add listener for NEW_MESSAGE event ---
     useEffect(() => {
         if (!socket) return;
     
@@ -134,9 +133,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         return () => {
             socket.removeEventListener('message', handleSocketMessage);
         };
-    // The dependency array ensures this listener always has the latest functions and data
     }, [socket, clientId, fetchConversationData]);
-    // --- END FIX ---
 
     const handleSendMessage = useCallback(async (content: string) => {
         if (!content.trim() || !selectedClient || isSending) return;
@@ -163,7 +160,6 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         }
     }, [selectedClient, api, fetchConversationData, refreshConversations, isSending]);
 
-    // --- (All other handlers and rendering logic remain unchanged) ---
     const handleOpenScheduleModal = useCallback((content: string) => { setComposerContent(content); setIsScheduleModalOpen(true); }, []);
     const handleScheduleSuccess = useCallback(() => { setIsScheduleModalOpen(false); if (selectedClient) { refetchScheduledMessagesForClient(selectedClient.id); } alert("Message scheduled successfully!"); }, [selectedClient, refetchScheduledMessagesForClient]);
     const handlePlanAction = useCallback(async (action: 'approve' | 'dismiss', planId: string) => { if (!selectedClient) return; setIsPlanProcessing(true); setIsPlanSuccess(false); try { if (action === 'approve') { await api.post(`/api/campaigns/${planId}/approve`, {}); setIsPlanSuccess(true); fetchConversationData(selectedClient.id); setTimeout(() => setIsPlanSuccess(false), 3000); } else { await api.put(`/api/campaigns/${planId}`, { status: 'cancelled' }); fetchConversationData(selectedClient.id); } } catch (error) { console.error(`Failed to ${action} plan:`, error); alert(`Failed to ${action} the plan.`); } finally { setIsPlanProcessing(false); } }, [selectedClient, api, fetchConversationData]);
