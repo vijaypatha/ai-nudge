@@ -45,7 +45,6 @@ def _get_client_score_for_event(client: Client, event: MarketEvent, resource_emb
 def _build_content_preview(event: MarketEvent, resource: Resource) -> Dict[str, Any]:
     """
     Builds a standardized content_preview object for the frontend ActionDeck.
-    (Functionality unchanged)
     """
     logging.info(f"NUDGE_ENGINE: Building content preview for resource {resource.id} of type {resource.resource_type}")
     
@@ -75,24 +74,25 @@ def _build_content_preview(event: MarketEvent, resource: Resource) -> Dict[str, 
 
     if resource.resource_type == "property":
         attrs = resource.attributes
-        # Add logging to verify data
-        logging.info(f"NUDGE_ENGINE: Building content preview for resource {resource.id}")
-        logging.info(f"NUDGE_ENGINE: Resource attributes: {attrs}")
-        
         media_items = attrs.get('Media', [])
-        logging.info(f"NUDGE_ENGINE: Found {len(media_items)} media items")
         
         # Get all photo URLs for gallery
-        all_photos = [media.get('MediaURL') for media in media_items if media.get('MediaCategory') == 'Photo']
-        logging.info(f"NUDGE_ENGINE: Found {len(all_photos)} photo URLs: {all_photos}")
+        all_photos = [media.get('MediaURL') for media in media_items if media.get('MediaCategory') == 'Photo' and media.get('MediaURL')]
         
+        # --- THIS IS THE FIX ---
+        # 1. Try to find the primary image with Order == 0.
+        primary_image = next((media.get('MediaURL') for media in media_items if media.get('Order') == 0), None)
+        # 2. If it fails, use the first available photo from the gallery as a fallback.
+        hero_image_url = primary_image or (all_photos[0] if all_photos else None)
+        # --- END OF FIX ---
+
         preview = {
             "content_type": "property",
             "url": attrs.get("listing_url"),
-            "image_url": next((media.get('MediaURL') for media in media_items if media.get('Order') == 0), None),
-            "photo_gallery": all_photos,  # Add all photo URLs
-            "photo_count": len(all_photos),  # Add photo count
-            "has_photos": len(all_photos) > 0,  # Add boolean flag
+            "image_url": hero_image_url,
+            "photo_gallery": all_photos,
+            "photo_count": len(all_photos),
+            "has_photos": len(all_photos) > 0,
             "title": attrs.get("UnparsedAddress", "Property Listing"),
             "description": attrs.get("PublicRemarks"),
             "details": {
@@ -103,10 +103,10 @@ def _build_content_preview(event: MarketEvent, resource: Resource) -> Dict[str, 
                 "status": attrs.get("MlsStatus"),
             }
         }
-        logging.info(f"NUDGE_ENGINE: Built property preview: {preview}")
+        logging.info(f"NUDGE_ENGINE: Built property preview with hero image: {hero_image_url}")
         return preview
 
-    logging.warning(f"NUDGE_ENGINE: No content preview builder found for resource type {resource.resource_type}. Returning empty object.")
+    logging.warning(f"NUDGE_ENGINE: No content preview builder for resource type {resource.resource_type}. Returning empty.")
     return {}
 
 
