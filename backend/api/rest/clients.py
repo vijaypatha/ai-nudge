@@ -3,6 +3,7 @@
 
 import logging
 import json # Correctly placed import
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import List, Optional, Dict, Any
 from uuid import UUID
@@ -64,6 +65,7 @@ class ClientNudgeResponse(BaseModel):
     headline: str
     campaign_type: str
     resource: NudgeResource
+    key_intel: Dict[str, Any] = {}
     original_draft: str
     edited_draft: Optional[str] = None
     matched_audience: List[MatchedClient]
@@ -293,12 +295,8 @@ async def get_nudges_for_client(
 
             if not is_match:
                 continue
-
-            # --- FIX: Make resource fetching resilient ---
-            # We will now create a nudge response even if the resource is missing,
-            # ensuring consistency with the summary view.
             
-            nudge_resource = NudgeResource(attributes={}) # Default to an empty resource
+            nudge_resource = NudgeResource(attributes={})
 
             if campaign.triggering_resource_id:
                 resource = crm_service.get_resource_by_id(
@@ -307,7 +305,6 @@ async def get_nudges_for_client(
                     session=session
                 )
                 
-                # If the resource is found, populate the nudge_resource with its data.
                 if resource and resource.attributes:
                     nudge_resource.address = resource.attributes.get("UnparsedAddress")
                     nudge_resource.price = resource.attributes.get("ListPrice")
@@ -315,13 +312,15 @@ async def get_nudges_for_client(
                     nudge_resource.baths = resource.attributes.get("BathroomsTotalInteger")
                     nudge_resource.attributes = resource.attributes
             
-            # This response is now created regardless of whether the resource was found, fixing the bug.
+            # --- THIS IS THE FIX ---
+            # We now pass the key_intel field from the campaign object to the response.
             client_nudge = ClientNudgeResponse(
                 id=campaign.id,
                 campaign_id=campaign.id,
                 headline=campaign.headline,
                 campaign_type=campaign.campaign_type,
                 resource=nudge_resource,
+                key_intel=campaign.key_intel, # <-- ADD THIS LINE
                 original_draft=campaign.original_draft,
                 edited_draft=campaign.edited_draft,
                 matched_audience=campaign.matched_audience
@@ -434,3 +433,31 @@ async def delete_client_scheduled_messages(client_id: UUID, current_user: User =
     print(f"API: Received request to delete all scheduled messages for client {client_id}")
     crm_service.delete_scheduled_messages_for_client(client_id=client_id, user_id=current_user.id)
     return None
+
+#endpoint to fetch the timeline data.
+class TimelineEvent(BaseModel):
+    type: str  # e.g., 'message_inbound', 'message_outbound', 'nudge_sent'
+    date: datetime
+    description: str
+    
+# --- ADD THIS NEW ENDPOINT ---
+@router.get("/{client_id}/timeline", response_model=List[TimelineEvent])
+async def get_client_timeline(
+    client_id: UUID,
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Retrieves a brief, consolidated history of recent interactions for a client.
+    """
+    if not client_id:
+        raise HTTPException(status_code=400, detail="Client ID is required.")
+        
+    timeline_events = crm_service.get_relationship_timeline_for_client(
+        client_id=client_id,
+        user_id=current_user.id
+    )
+    
+    if timeline_events is None:
+        raise HTTPException(status_code=404, detail="Client not found or error fetching timeline.")
+        
+    return timeline_events

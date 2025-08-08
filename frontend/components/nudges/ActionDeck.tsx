@@ -10,6 +10,7 @@ import { CampaignBriefing as CampaignBriefingType, Client, MatchedClient, useApp
 import { ManageAudienceModal } from '@/components/modals/ManageAudienceModal';
 import { DisplayConfig } from './OpportunityNudgesView';
 import { PhotoGalleryModal } from '@/components/modals/PhotoGalleryModal';
+import { RelationshipTimeline } from './RelationshipTimeline';
 import {
     User as UserIcon, Sparkles, Send, X, Users, Home, TrendingUp, RotateCcw,
     TimerOff, CalendarPlus, Archive, Edit, BedDouble, Bath, ArrowLeftCircle,
@@ -206,6 +207,7 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDra
                     {/* Left Column */}
                     <div className="p-5 space-y-6 border-r border-white/5">
                         <ResourceCard resource={briefing.resource} briefing={briefing} />
+                        <RelationshipTimeline clientId={briefing.matched_audience[0]?.client_id} />
                         <div className="space-y-3">
                             <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><ChevronsRight size={16}/> Strategic Context</h4>
                             <p className="text-brand-text-main text-base">

@@ -1374,3 +1374,51 @@ async def process_new_contact_for_existing_events(client: Client, user_id: UUID)
         
         logging.info(f"PROCESSING NEW CONTACT: Created {campaigns_created} campaigns for {client.full_name}")
         return campaigns_created
+
+#function that builds the timeline by querying messages and campaigns.
+
+def get_relationship_timeline_for_client(client_id: UUID, user_id: UUID, limit: int = 4) -> Optional[List[Dict[str, Any]]]:
+    """
+    Constructs a timeline of recent interactions for a client, combining
+    messages and sent nudges.
+    """
+    with Session(engine) as session:
+        # First, verify the client belongs to the user
+        client = get_client_by_id(client_id=client_id, user_id=user_id, session=session)
+        if not client:
+            return None 
+
+        timeline = []
+
+        # 1. Get recent messages
+        messages = session.exec(
+            select(Message)
+            .where(Message.client_id == client_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit * 2) # Fetch more to ensure we have enough recent items
+        ).all()
+
+        for msg in messages:
+            event_type = "message_inbound" if msg.direction == MessageDirection.INBOUND else "message_outbound"
+            description = "You received a message" if event_type == "message_inbound" else "You sent a message"
+            timeline.append({"type": event_type, "date": msg.created_at, "description": description})
+
+        # 2. Get recently sent nudges (campaigns that became active/completed)
+        sent_nudges = session.exec(
+            select(CampaignBriefing)
+            .where(
+                CampaignBriefing.matched_audience.op('->>')('client_id').contains(str(client_id)),
+                CampaignBriefing.user_id == user_id,
+                CampaignBriefing.status.in_([CampaignStatus.ACTIVE, CampaignStatus.COMPLETED])
+            )
+            .order_by(CampaignBriefing.updated_at.desc())
+            .limit(limit)
+        ).all()
+
+        for nudge in sent_nudges:
+            timeline.append({"type": "nudge_sent", "date": nudge.updated_at, "description": f"Nudge sent: '{nudge.headline}'"})
+            
+        # 3. Sort all events chronologically and take the most recent ones
+        timeline.sort(key=lambda x: x["date"], reverse=True)
+        
+        return timeline[:limit]

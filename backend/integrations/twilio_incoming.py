@@ -40,9 +40,19 @@ async def get_user_faqs(user_id: str) -> List[dict]:
 
 async def process_incoming_sms(from_number: str, to_number: str, body: str):
     """
-    Process incoming SMS, log it, and broadcast a real-time notification.
+    Process incoming SMS, log it, and publish a notification to Redis for
+    real-time broadcasting.
     """
     logging.info(f"TWILIO: Processing SMS from '{from_number}' to '{to_number}': '{body}'")
+
+    # --- ADD: Imports for Redis client and channel name ---
+    import redis
+    import json
+    from common.config import get_settings
+    settings = get_settings()
+    redis_client = redis.from_url(settings.REDIS_URL)
+    USER_NOTIFICATION_CHANNEL = "user-notifications"
+    # --- END ADD ---
 
     user = crm_service.get_user_by_twilio_number(to_number)
     if not user:
@@ -62,49 +72,42 @@ async def process_incoming_sms(from_number: str, to_number: str, body: str):
         content=body,
         direction=MessageDirection.INBOUND,
         status=MessageStatus.RECEIVED,
-        source=MessageSource.MANUAL, # Source is manual as it's from the client
-        sender_type=MessageSenderType.USER, # Sender is the client (a type of user)
+        source=MessageSource.MANUAL,
+        sender_type=MessageSenderType.USER,
     )
     
     try:
-        # Use a variable to capture the saved message with its generated ID and timestamps
         saved_message = crm_service.save_message(incoming_message)
         logging.info(f"TWILIO: Logged incoming message from client {found_client.id}")
 
-        # --- BEGIN FIX: Broadcast the full message to BOTH client and user channels ---
+        # --- THIS IS THE FIX ---
+        # Instead of calling the websocket manager directly, which only works in a
+        # single-process environment, we publish a message to the central Redis channel.
+        # The listener in main.py will then broadcast it to the correct user.
         try:
-            # Pydantic models need to be converted to dicts for JSON serialization.
-            # .model_dump(mode='json') handles types like UUID and datetime correctly.
             message_payload = saved_message.model_dump(mode='json')
             
-            notification = {
-                "type": "NEW_MESSAGE",
-                "payload": message_payload
+            notification_payload = {
+                "user_id": str(user.id),
+                "payload": {
+                    "type": "NEW_MESSAGE",
+                    "payload": message_payload
+                }
             }
             
-            # 1. Broadcast to the specific client channel (for detailed conversation views)
-            await websocket_manager.broadcast_json_to_client(
-                client_id=str(found_client.id),
-                data=notification
-            )
-            
-            # 2. Broadcast to the general user channel (for list views and global notifications)
-            await websocket_manager.broadcast_to_user(
-                user_id=str(user.id),
-                data=notification
-            )
-            logging.info(f"TWILIO: Broadcasted WebSocket notifications for client {found_client.id} to user {user.id}")
+            redis_client.publish(USER_NOTIFICATION_CHANNEL, json.dumps(notification_payload))
+            logging.info(f"TWILIO: Published 'NEW_MESSAGE' event to Redis for user {user.id}")
 
         except Exception as e:
-            logging.error(f"TWILIO: Failed to broadcast WebSocket notification. Error: {e}", exc_info=True)
-        # --- END FIX ---
+            logging.error(f"TWILIO: CRITICAL - Failed to publish 'NEW_MESSAGE' to Redis. Error: {e}", exc_info=True)
+        # --- END OF FIX ---
 
     except Exception as e:
         logging.error(f"TWILIO: Failed to save incoming message: {e}", exc_info=True)
         return
 
-    # 4. FAQ AUTO-REPLY (Original functionality preserved)
-    if settings.FAQ_AUTO_REPLY_ENABLED:
+    # FAQ AUTO-REPLY (This logic remains unchanged)
+    if settings.FAQ_AUTO_REPLY_ENABLED and user.faq_auto_responder_enabled:
         try:
             user_faqs = await get_user_faqs(user.id)
             if user_faqs:
@@ -114,13 +117,7 @@ async def process_incoming_sms(from_number: str, to_number: str, body: str):
                 if faq_response:
                     logging.info(f"TWILIO: FAQ matched, sending response: '{faq_response}'")
 
-                    sms_sent_successfully = twilio_outgoing.send_sms(
-                        to_number=from_number,
-                        body=faq_response[:320],
-                        from_number=to_number,
-                    )
-                    
-                    if sms_sent_successfully:
+                    if twilio_outgoing.send_sms(to_number=from_number, body=faq_response[:320], from_number=to_number):
                         outgoing_message = Message(
                             client_id=found_client.id,
                             user_id=user.id,
@@ -136,7 +133,7 @@ async def process_incoming_sms(from_number: str, to_number: str, body: str):
         except Exception as e:
             logging.error(f"TWILIO: FAQ processing error: {e}", exc_info=True)
 
-    # 5. Fallback to AI orchestrator (Original functionality preserved)
+    # Fallback to AI orchestrator (This logic remains unchanged)
     try:
         await orchestrator.handle_incoming_message(
             client_id=found_client.id, incoming_message=saved_message, user=user
