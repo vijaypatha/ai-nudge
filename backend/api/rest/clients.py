@@ -271,7 +271,6 @@ async def get_client_scheduled_messages(client_id: UUID, current_user: User = De
     return messages
 
 # --- NEW ENDPOINT FOR CLIENT-CENTRIC NUDGE VIEW ---
-# --- MODIFIED ENDPOINT FOR CLIENT-CENTRIC NUDGE VIEW ---
 @router.get("/{client_id}/nudges", response_model=List[ClientNudgeResponse])
 async def get_nudges_for_client(
     client_id: UUID,
@@ -292,34 +291,43 @@ async def get_nudges_for_client(
                 for audience_member in campaign.matched_audience
             )
 
-            if is_match and campaign.triggering_resource_id:
+            if not is_match:
+                continue
+
+            # --- FIX: Make resource fetching resilient ---
+            # We will now create a nudge response even if the resource is missing,
+            # ensuring consistency with the summary view.
+            
+            nudge_resource = NudgeResource(attributes={}) # Default to an empty resource
+
+            if campaign.triggering_resource_id:
                 resource = crm_service.get_resource_by_id(
                     resource_id=campaign.triggering_resource_id,
                     user_id=current_user.id,
                     session=session
                 )
-
+                
+                # If the resource is found, populate the nudge_resource with its data.
                 if resource and resource.attributes:
-                    nudge_resource = NudgeResource(
-                        address=resource.attributes.get("UnparsedAddress"),
-                        price=resource.attributes.get("ListPrice"),
-                        beds=resource.attributes.get("BedroomsTotal"),
-                        baths=resource.attributes.get("BathroomsTotalInteger"),
-                        attributes=resource.attributes
-                    )
-
-                    # --- FIX: Populate the full response model with all required fields ---
-                    client_nudge = ClientNudgeResponse(
-                        id=campaign.id,
-                        campaign_id=campaign.id,
-                        headline=campaign.headline,
-                        campaign_type=campaign.campaign_type,
-                        resource=nudge_resource,
-                        original_draft=campaign.original_draft,
-                        edited_draft=None,  # edited_draft is not a field in CampaignBriefing model
-                        matched_audience=campaign.matched_audience
-                    )
-                    client_nudges.append(client_nudge)
+                    nudge_resource.address = resource.attributes.get("UnparsedAddress")
+                    nudge_resource.price = resource.attributes.get("ListPrice")
+                    nudge_resource.beds = resource.attributes.get("BedroomsTotal")
+                    nudge_resource.baths = resource.attributes.get("BathroomsTotalInteger")
+                    nudge_resource.attributes = resource.attributes
+            
+            # This response is now created regardless of whether the resource was found, fixing the bug.
+            client_nudge = ClientNudgeResponse(
+                id=campaign.id,
+                campaign_id=campaign.id,
+                headline=campaign.headline,
+                campaign_type=campaign.campaign_type,
+                resource=nudge_resource,
+                original_draft=campaign.original_draft,
+                edited_draft=campaign.edited_draft,
+                matched_audience=campaign.matched_audience
+            )
+            client_nudges.append(client_nudge)
+            # --- END OF FIX ---
 
     return client_nudges
 
