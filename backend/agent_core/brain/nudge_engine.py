@@ -236,7 +236,7 @@ async def process_market_event(event: MarketEvent, user: User, db_session: Sessi
     # --- FIX 2: Process clients in batches to conserve memory ---
     matched_audience = []
     page = 1
-    batch_size = 500  # Process 500 clients at a time
+    batch_size = 5  # Process 500 clients at a time
 
     while True:
         logging.info(f"NUDGE_ENGINE: Processing client batch, page {page}, for user {user.id}...")
