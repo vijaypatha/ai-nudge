@@ -1,20 +1,20 @@
 // frontend/components/nudges/ActionDeck.tsx
-// --- FINAL, V4 CORRECTED VERSION ---
+// --- FINAL, PRODUCTION-READY VERSION ---
 
 'use client';
 
 import { useState, FC, ReactNode, useEffect } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CampaignBriefing as CampaignBriefingType, Client, MatchedClient, useAppContext } from '@/context/AppContext';
+import { CampaignBriefing as CampaignBriefingType, Client, MatchedClient } from '@/context/AppContext';
 import { ManageAudienceModal } from '@/components/modals/ManageAudienceModal';
 import { DisplayConfig } from './OpportunityNudgesView';
 import { PhotoGalleryModal } from '@/components/modals/PhotoGalleryModal';
 import { RelationshipTimeline } from './RelationshipTimeline';
 import {
     User as UserIcon, Sparkles, Send, X, Users, Home, TrendingUp, RotateCcw,
-    TimerOff, CalendarPlus, Archive, Edit, BedDouble, Bath, ArrowLeftCircle,
-    ArrowRightCircle, Brain, Mic, ChevronsRight, ImageIcon, Building, BrainCircuit, BookOpen
+    TimerOff, CalendarPlus, Archive, Edit, ArrowLeftCircle,
+    ArrowRightCircle, Brain, Mic, ChevronsRight, ImageIcon, BrainCircuit, BookOpen
 } from 'lucide-react';
 
 // The full briefing type returned by the /clients/{id}/nudges endpoint
@@ -39,7 +39,7 @@ const ICONS: Record<string, ReactNode> = {
 
 const BRAND_ACCENT_COLOR = '#20D5B3';
 
-// --- UI Sub-Components (Implementations Restored) ---
+// --- UI Sub-Components ---
 
 const ScoreCircle: FC<{ score: number }> = ({ score }) => {
     const radius = 18;
@@ -57,50 +57,28 @@ const MatchReasonTag: FC<{ reason: string }> = ({ reason }) => {
 
 const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudge }> = ({ resource, briefing }) => {
     const contentPreview = briefing.key_intel?.content_preview || {};
-    const { attributes } = resource;
     const [showPhotoGallery, setShowPhotoGallery] = useState(false);
     const [imageError, setImageError] = useState(false);
     const isContentNudge = briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation';
 
-    // Enhanced image extraction with fallbacks
-    const getImageData = () => {
-        // Primary source: content_preview from key_intel
-        if (contentPreview.image_url) {
-            return {
-                imageUrl: contentPreview.image_url,
-                photoCount: contentPreview.photo_count || 0,
-                galleryPhotos: contentPreview.photo_gallery || []
-            };
-        }
+    // Centralized data extraction from the most reliable source: key_intel.content_preview
+    const {
+        title: previewTitle,
+        image_url: imageUrl,
+        photo_gallery: galleryPhotos = [],
+        photo_count: photoCount = 0,
+        details = {}
+    } = contentPreview;
 
-        // Fallback: Extract from resource attributes directly
-        const mediaItems = attributes?.Media || [];
-        const photoUrls = mediaItems
-            .filter((item: any) => item.MediaCategory === 'Photo')
-            .map((item: any) => item.MediaURL)
-            .filter(Boolean);
+    const {
+        price,
+        bedrooms,
+        bathrooms,
+        sqft
+    } = details as { price?: any, bedrooms?: any, bathrooms?: any, sqft?: any };
 
-        return {
-            imageUrl: photoUrls[0] || null,
-            photoCount: photoUrls.length,
-            galleryPhotos: photoUrls
-        };
-    };
-
-    const { imageUrl, photoCount, galleryPhotos } = getImageData();
-
-    // Add debugging for development
-    useEffect(() => {
-        if (process.env.NODE_ENV === 'development') {
-            console.log('ResourceCard Debug:', {
-                contentPreview,
-                resourceAttributes: attributes,
-                imageUrl,
-                photoCount,
-                galleryPhotos
-            });
-        }
-    }, [contentPreview, attributes, imageUrl, photoCount, galleryPhotos]);
+    // Fallback for address: preview title -> resource.address -> parse headline
+    const displayAddress = previewTitle || resource.address || briefing.headline.replace('New Listing: ', '');
 
     const handleImageError = () => {
         setImageError(true);
@@ -108,7 +86,7 @@ const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudg
     };
 
     if (isContentNudge) {
-        const { title, description, url, content_type } = briefing.resource?.attributes || {};
+        const { url, content_type, title } = briefing.resource?.attributes || {};
         return (
             <div className="space-y-3">
                 <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><BookOpen size={16} /> Content Resource</h4>
@@ -125,12 +103,6 @@ const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudg
             </div>
         );
     }
-    
-    // --- THIS IS THE FIX ---
-    // Use the address from the resource object, but fall back to parsing it from the
-    // headline if it's missing. This ensures the address is always available.
-    const displayAddress = resource.address || briefing.headline.replace('New Listing: ', '');
-    // --- END OF FIX ---
 
     const renderDetail = (label: string, value: any) => {
         if (!value && value !== 0) return null;
@@ -143,11 +115,11 @@ const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudg
             <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><Home size={16} /> Property</h4>
             <div className="relative w-full h-48 rounded-lg overflow-hidden bg-brand-dark border border-white/10 group">
                 {imageUrl && !imageError ? (
-                    <Image 
-                        src={imageUrl} 
-                        alt={displayAddress} 
-                        layout="fill" 
-                        objectFit="cover" 
+                    <Image
+                        src={imageUrl}
+                        alt={displayAddress}
+                        layout="fill"
+                        objectFit="cover"
                         unoptimized
                         onError={handleImageError}
                     />
@@ -157,10 +129,10 @@ const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudg
                         <div className="w-full">
                             <h5 className="font-bold text-white text-base drop-shadow-md">{displayAddress}</h5>
                             <div className="flex flex-wrap gap-2 text-xs mt-2">
-                                {renderDetail("Price", resource.price)}
-                                {renderDetail("Beds", resource.beds)}
-                                {renderDetail("Baths", resource.baths)}
-                                {renderDetail("SqFt", attributes.LivingArea)}
+                                {renderDetail("Price", price)}
+                                {renderDetail("Beds", bedrooms)}
+                                {renderDetail("Baths", bathrooms)}
+                                {renderDetail("SqFt", sqft)}
                             </div>
                         </div>
                     </div>
@@ -190,38 +162,35 @@ interface PersuasiveCommandCardProps {
 
 const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDraftChange, onAudienceUpdate, onAction, displayConfig }) => {
     const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
-    
+
     const config = displayConfig[briefing.campaign_type] || { icon: 'Default', color: 'text-primary-action', title: 'Nudge' };
     const icon = ICONS[config.icon] || ICONS.Default;
     const draft = briefing.edited_draft ?? briefing.original_draft ?? '';
     const matchedAudience = briefing.matched_audience ?? [];
 
     const generateLinks = () => {
-        // --- FIX: Source photo data from key_intel.content_preview ---
         const contentPreview = briefing.key_intel?.content_preview || {};
         const photoUrls = contentPreview.photo_gallery || [];
-        // --- END OF FIX ---
-        
+
         // Check for content-based nudge first
-        if ((briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation') && briefing.resource?.attributes) {
-            const contentData = briefing.resource.attributes;
-            const contentUrl = contentData.url;
-            const contentType = contentData.content_type;
-            
+        if ((briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation')) {
+            const contentUrl = contentPreview.url;
+            const contentType = contentPreview.content_type;
+
             if (contentUrl) {
-                return `\n\n🔗 View ${contentType}: ${contentUrl}`;
+                return `\n\n🔗 View ${contentType || 'Content'}: ${contentUrl}`;
             }
         }
-        
+
         if (photoUrls.length === 0) return '';
-        
+
         if (photoUrls.length === 1) {
             return `\n\n📸 View photos: ${photoUrls[0]}`;
         } else {
             const maxPhotos = 3;
             const photosToShow = photoUrls.slice(0, maxPhotos);
             const photoLinks = photosToShow.map((url: string, index: number) => `📸 Photo ${index + 1}: ${url}`).join('\n');
-            
+
             if (photoUrls.length <= maxPhotos) {
                 return `\n\n📸 View all ${photoUrls.length} photos:\n${photoLinks}`;
             } else {
@@ -233,7 +202,7 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDra
     const getDisplayText = () => {
         const links = generateLinks();
         const hasLinks = draft.includes('📸') || draft.includes('🔗') || draft.includes('View photos') || draft.includes('View ');
-        
+
         if (links && !hasLinks) {
             return draft + links;
         }
@@ -276,7 +245,7 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDra
                             <div className="flex items-center justify-between mb-2">
                                 <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><Edit size={16}/> Draft Message</h4>
                                 {briefing.campaign_type === 'content_suggestion' && briefing.resource?.attributes?.url && (
-                                    <button 
+                                    <button
                                         onClick={() => window.open(briefing.resource.attributes.url, '_blank')}
                                         className="text-xs bg-white/10 text-brand-text-muted px-2 py-1 rounded hover:bg-white/20 hover:text-brand-text-main transition-colors"
                                     >
@@ -294,74 +263,41 @@ const PersuasiveCommandCard: FC<PersuasiveCommandCardProps> = ({ briefing, onDra
     );
 };
 
-interface ActionDeckProps { 
-    initialBriefings: ClientNudge[]; 
+interface ActionDeckProps {
+    initialBriefings: ClientNudge[];
     initialClientId: string;
     initialClientName: string;
-    onClose: () => void; 
-    onAction: (briefing: CampaignBriefingType, action: 'dismiss' | 'send') => Promise<void>; 
+    onClose: () => void;
+    onAction: (briefing: CampaignBriefingType, action: 'dismiss' | 'send') => Promise<void>;
     displayConfig: DisplayConfig;
 }
 
 export const ActionDeck: FC<ActionDeckProps> = ({ initialBriefings, initialClientId, initialClientName, onClose, onAction, displayConfig }) => {
-    
+
     const [originalBriefings] = useState(initialBriefings);
-    
-    const getInitialState = () => {
-        return originalBriefings.map(briefing => {
-            // Find the primary client in the original audience
-            const primaryClient = briefing.matched_audience?.find(c => c.client_id === initialClientId);
-            
-            // Create a new audience with only the primary client
-            const audience = primaryClient ? [primaryClient] : [{
-                client_id: initialClientId,
-                client_name: initialClientName,
-                match_score: 75,
-                match_reasons: ["Primary client for this context"]
-            }];
-            
-            // Initialize edited_draft with content that includes links
-            const baseDraft = briefing.edited_draft || briefing.original_draft;
-            const links = generateLinksForBriefing(briefing);
-            const initialDraft = links && !baseDraft.includes('📸') && !baseDraft.includes('🔗') 
-                ? baseDraft + links 
-                : baseDraft;
-            
-            return { 
-                ...briefing, 
-                matched_audience: audience,
-                edited_draft: initialDraft
-            };
-        });
-    };
-    
+
     // Helper function to generate links for a briefing
     const generateLinksForBriefing = (briefing: ClientNudge) => {
-        // Check if this is a content-based nudge
-        if ((briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation') && briefing.resource?.attributes) {
-            const contentData = briefing.resource.attributes;
-            const contentUrl = contentData.url;
-            const contentType = contentData.content_type;
-            
-            if (contentUrl) {
-                return `\n\n🔗 View ${contentType}: ${contentUrl}`;
-            }
+        // Source data consistently from key_intel.content_preview
+        const contentPreview = briefing.key_intel?.content_preview || {};
+
+        // Check for content-based nudge first
+        if ((briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation') && contentPreview.url) {
+            return `\n\n🔗 View ${contentPreview.content_type || 'Content'}: ${contentPreview.url}`;
         }
-        
-        // Check if this is a market-based nudge (property photos)
-        const mediaItems = briefing.resource?.attributes?.Media || [];
-        const photoUrls = mediaItems.map((item: { MediaURL: string }) => item.MediaURL).filter(Boolean);
-        
+
+        // Fallback to property-based nudge (photos)
+        const photoUrls = contentPreview.photo_gallery || [];
+
         if (photoUrls.length === 0) return '';
-        
+
         if (photoUrls.length === 1) {
             return `\n\n📸 View photos: ${photoUrls[0]}`;
         } else {
-            // Show only the first 3 photos to avoid overwhelming the message
             const maxPhotos = 3;
             const photosToShow = photoUrls.slice(0, maxPhotos);
             const photoLinks = photosToShow.map((url: string, index: number) => `📸 Photo ${index + 1}: ${url}`).join('\n');
-            
+
             if (photoUrls.length <= maxPhotos) {
                 return `\n\n📸 View all ${photoUrls.length} photos:\n${photoLinks}`;
             } else {
@@ -369,26 +305,54 @@ export const ActionDeck: FC<ActionDeckProps> = ({ initialBriefings, initialClien
             }
         }
     };
-    
+
+    const getInitialState = () => {
+        return originalBriefings.map(briefing => {
+            // Find the primary client in the original audience
+            const primaryClient = briefing.matched_audience?.find(c => c.client_id === initialClientId);
+
+            // Create a new audience with only the primary client
+            const audience = primaryClient ? [primaryClient] : [{
+                client_id: initialClientId,
+                client_name: initialClientName,
+                match_score: 75,
+                match_reasons: ["Primary client for this context"]
+            }];
+
+            // Initialize edited_draft with content that includes links
+            const baseDraft = briefing.edited_draft || briefing.original_draft || "";
+            const links = generateLinksForBriefing(briefing);
+            const initialDraft = links && !baseDraft.includes('📸') && !baseDraft.includes('🔗')
+                ? baseDraft + links
+                : baseDraft;
+
+            return {
+                ...briefing,
+                matched_audience: audience,
+                edited_draft: initialDraft
+            };
+        });
+    };
+
     const [displayBriefings, setDisplayBriefings] = useState(getInitialState);
     const [cardIndex, setCardIndex] = useState(0);
 
     const currentDisplayBriefing = displayBriefings[cardIndex];
 
-    const handleActionComplete = async (action: 'send' | 'dismiss') => { 
+    const handleActionComplete = async (action: 'send' | 'dismiss') => {
         const briefingToSend = displayBriefings[cardIndex];
-        await onAction(briefingToSend, action); 
-        
+        await onAction(briefingToSend, action);
+
         const newDisplayBriefings = displayBriefings.filter(b => b.id !== briefingToSend.id);
         setDisplayBriefings(newDisplayBriefings);
 
         if (newDisplayBriefings.length === 0) {
-            onClose(); 
+            onClose();
         } else if (cardIndex >= newDisplayBriefings.length) {
             setCardIndex(newDisplayBriefings.length - 1);
         }
     };
-    
+
     const handleDraftChange = (newDraft: string) => {
         const newBriefings = [...displayBriefings];
         newBriefings[cardIndex].edited_draft = newDraft;
@@ -401,7 +365,7 @@ export const ActionDeck: FC<ActionDeckProps> = ({ initialBriefings, initialClien
         const updatedAudience = newAudience.map(c => {
             const existingClientData = originalFullAudience.find(mc => mc.client_id === c.id);
             return {
-                client_id: c.id, 
+                client_id: c.id,
                 client_name: c.full_name,
                 match_score: existingClientData?.match_score || 50,
                 match_reasons: existingClientData?.match_reasons || ["Manually Added"]
@@ -439,16 +403,16 @@ export const ActionDeck: FC<ActionDeckProps> = ({ initialBriefings, initialClien
                 )}
                 <div className="relative w-full max-w-4xl h-[90vh] max-h-[750px]">
                     <AnimatePresence mode="wait">
-                        <motion.div 
-                            key={currentDisplayBriefing.id} 
-                            initial={{ scale: 0.95, y: 50, opacity: 0 }} 
-                            animate={{ scale: 1, y: 0, opacity: 1 }} 
-                            exit={{ scale: 0.95, y: -50, opacity: 0 }} 
-                            transition={{ type: "spring", stiffness: 300, damping: 30 }} 
+                        <motion.div
+                            key={currentDisplayBriefing.id}
+                            initial={{ scale: 0.95, y: 50, opacity: 0 }}
+                            animate={{ scale: 1, y: 0, opacity: 1 }}
+                            exit={{ scale: 0.95, y: -50, opacity: 0 }}
+                            transition={{ type: "spring", stiffness: 300, damping: 30 }}
                             className="absolute inset-0"
                         >
-                            <PersuasiveCommandCard 
-                                briefing={currentDisplayBriefing} 
+                            <PersuasiveCommandCard
+                                briefing={currentDisplayBriefing}
                                 onDraftChange={handleDraftChange}
                                 onAudienceUpdate={handleAudienceUpdate}
                                 onAction={(action) => handleActionComplete(action)}
