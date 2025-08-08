@@ -1379,41 +1379,30 @@ async def process_new_contact_for_existing_events(client: Client, user_id: UUID)
 
 def get_relationship_timeline_for_client(client_id: UUID, user_id: UUID, limit: int = 5) -> Optional[List[Dict[str, Any]]]:
     """
-    Constructs a timeline of recent interactions, combining messages,
-    sent nudges, and newly created (draft) nudges.
+    Constructs a timeline of recent MESSAGE interactions for a client.
+    Based on user feedback, this no longer includes nudge events.
     """
     with Session(engine) as session:
+        # Verify the client belongs to the user
         client = get_client_by_id(client_id=client_id, user_id=user_id, session=session)
         if not client:
             return None 
 
         timeline = []
-        
-        # 1. Get recent messages
-        messages = session.exec(select(Message).where(Message.client_id == client_id).order_by(Message.created_at.desc()).limit(limit)).all()
+
+        # Get recent messages
+        messages = session.exec(
+            select(Message)
+            .where(Message.client_id == client_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        ).all()
+
         for msg in messages:
             event_type = "message_inbound" if msg.direction == MessageDirection.INBOUND else "message_outbound"
             description = "You received a message" if event_type == "message_inbound" else "You sent a message"
-            timeline.append({"type": event_type, "date": msg.created_at, "description": description, "entity": msg.content[:40] + '...' if len(msg.content) > 40 else msg.content})
+            entity = msg.content[:45] + '...' if len(msg.content) > 45 else msg.content
+            timeline.append({"type": event_type, "date": msg.created_at, "description": description, "entity": entity})
 
-        # 2. Get recent nudges (both sent and still in draft) for the user
-        user_nudges = session.exec(
-            select(CampaignBriefing)
-            .where(CampaignBriefing.user_id == user_id, CampaignBriefing.status.in_([CampaignStatus.DRAFT, CampaignStatus.ACTIVE, CampaignStatus.COMPLETED]))
-            .order_by(CampaignBriefing.updated_at.desc()).limit(25)
-        ).all()
-
-        for nudge in user_nudges:
-            if any(str(audience.get("client_id")) == str(client_id) for audience in nudge.matched_audience):
-                if nudge.status == CampaignStatus.DRAFT:
-                    event_type = "nudge_created"
-                    description = "New opportunity identified"
-                else:
-                    event_type = "nudge_sent"
-                    description = "Nudge sent"
-                
-                timeline.append({"type": event_type, "date": nudge.updated_at, "description": description, "entity": nudge.headline})
-
-        # 3. Sort and limit all combined events
-        timeline.sort(key=lambda x: x["date"], reverse=True)
-        return timeline[:limit]
+        # The timeline is already sorted by date from the query
+        return timeline

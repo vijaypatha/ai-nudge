@@ -3,7 +3,7 @@
 
 'use client';
 
-import { useState, FC, ReactNode } from 'react';
+import { useState, FC, ReactNode, useEffect } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CampaignBriefing as CampaignBriefingType, Client, MatchedClient, useAppContext } from '@/context/AppContext';
@@ -59,7 +59,53 @@ const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudg
     const contentPreview = briefing.key_intel?.content_preview || {};
     const { attributes } = resource;
     const [showPhotoGallery, setShowPhotoGallery] = useState(false);
+    const [imageError, setImageError] = useState(false);
     const isContentNudge = briefing.campaign_type === 'content_suggestion' || briefing.campaign_type === 'content_recommendation';
+
+    // Enhanced image extraction with fallbacks
+    const getImageData = () => {
+        // Primary source: content_preview from key_intel
+        if (contentPreview.image_url) {
+            return {
+                imageUrl: contentPreview.image_url,
+                photoCount: contentPreview.photo_count || 0,
+                galleryPhotos: contentPreview.photo_gallery || []
+            };
+        }
+
+        // Fallback: Extract from resource attributes directly
+        const mediaItems = attributes?.Media || [];
+        const photoUrls = mediaItems
+            .filter((item: any) => item.MediaCategory === 'Photo')
+            .map((item: any) => item.MediaURL)
+            .filter(Boolean);
+
+        return {
+            imageUrl: photoUrls[0] || null,
+            photoCount: photoUrls.length,
+            galleryPhotos: photoUrls
+        };
+    };
+
+    const { imageUrl, photoCount, galleryPhotos } = getImageData();
+
+    // Add debugging for development
+    useEffect(() => {
+        if (process.env.NODE_ENV === 'development') {
+            console.log('ResourceCard Debug:', {
+                contentPreview,
+                resourceAttributes: attributes,
+                imageUrl,
+                photoCount,
+                galleryPhotos
+            });
+        }
+    }, [contentPreview, attributes, imageUrl, photoCount, galleryPhotos]);
+
+    const handleImageError = () => {
+        setImageError(true);
+        console.warn('Failed to load image:', imageUrl);
+    };
 
     if (isContentNudge) {
         const { title, description, url, content_type } = briefing.resource?.attributes || {};
@@ -80,9 +126,11 @@ const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudg
         );
     }
     
-    const imageUrl = contentPreview.image_url;
-    const photoCount = contentPreview.photo_count || 0;
-    const galleryPhotos = contentPreview.photo_gallery || [];
+    // --- THIS IS THE FIX ---
+    // Use the address from the resource object, but fall back to parsing it from the
+    // headline if it's missing. This ensures the address is always available.
+    const displayAddress = resource.address || briefing.headline.replace('New Listing: ', '');
+    // --- END OF FIX ---
 
     const renderDetail = (label: string, value: any) => {
         if (!value && value !== 0) return null;
@@ -94,13 +142,20 @@ const ResourceCard: FC<{ resource: ClientNudge['resource'], briefing: ClientNudg
         <div className="space-y-3">
             <h4 className="font-semibold text-sm text-brand-text-muted flex items-center gap-2"><Home size={16} /> Property</h4>
             <div className="relative w-full h-48 rounded-lg overflow-hidden bg-brand-dark border border-white/10 group">
-                {imageUrl ? (
-                    <Image src={imageUrl} alt={resource.address || 'Property Image'} layout="fill" objectFit="cover" unoptimized />
+                {imageUrl && !imageError ? (
+                    <Image 
+                        src={imageUrl} 
+                        alt={displayAddress} 
+                        layout="fill" 
+                        objectFit="cover" 
+                        unoptimized
+                        onError={handleImageError}
+                    />
                 ) : (
                     <div className="w-full h-full flex flex-col justify-between items-start p-4 bg-white/5">
                         <ImageIcon size={32} className="text-brand-text-muted/50" />
                         <div className="w-full">
-                            <h5 className="font-bold text-white text-base drop-shadow-md">{resource.address || "Property Address Unavailable"}</h5>
+                            <h5 className="font-bold text-white text-base drop-shadow-md">{displayAddress}</h5>
                             <div className="flex flex-wrap gap-2 text-xs mt-2">
                                 {renderDetail("Price", resource.price)}
                                 {renderDetail("Beds", resource.beds)}

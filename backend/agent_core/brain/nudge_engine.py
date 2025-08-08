@@ -75,12 +75,21 @@ def _build_content_preview(event: MarketEvent, resource: Resource) -> Dict[str, 
 
     if resource.resource_type == "property":
         attrs = resource.attributes
+        # Add logging to verify data
+        logging.info(f"NUDGE_ENGINE: Building content preview for resource {resource.id}")
+        logging.info(f"NUDGE_ENGINE: Resource attributes: {attrs}")
+        
+        media_items = attrs.get('Media', [])
+        logging.info(f"NUDGE_ENGINE: Found {len(media_items)} media items")
+        
         # Get all photo URLs for gallery
-        all_photos = [media.get('MediaURL') for media in attrs.get('Media', []) if media.get('MediaCategory') == 'Photo']
+        all_photos = [media.get('MediaURL') for media in media_items if media.get('MediaCategory') == 'Photo']
+        logging.info(f"NUDGE_ENGINE: Found {len(all_photos)} photo URLs: {all_photos}")
+        
         preview = {
             "content_type": "property",
             "url": attrs.get("listing_url"),
-            "image_url": next((media.get('MediaURL') for media in attrs.get('Media', []) if media.get('Order') == 0), None),
+            "image_url": next((media.get('MediaURL') for media in media_items if media.get('Order') == 0), None),
             "photo_gallery": all_photos,  # Add all photo URLs
             "photo_count": len(all_photos),  # Add photo count
             "has_photos": len(all_photos) > 0,  # Add boolean flag
