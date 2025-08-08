@@ -22,7 +22,7 @@ postgresql://postgres:password123@db:5432/realestate_db
 
 ## Database Tables
 
-The application contains **10 main tables**:
+The application contains **12 main tables**:
 
 ### 1. `user` Table
 **Purpose**: Stores user account information and preferences
@@ -108,8 +108,10 @@ The application contains **10 main tables**:
 - `key_intel` (JSON) - AI insights
 - `matched_audience` (JSON) - Matched clients
 - `original_draft` (String)
-- `status` (Enum: DRAFT, ACTIVE, PAUSED, COMPLETED, CANCELLED, indexed)
+- `edited_draft` (String, optional) - User-edited version
+- `status` (Enum: DRAFT, ACTIVE, PAUSED, COMPLETED, CANCELLED, DISMISSED, indexed)
 - `created_at` (DateTime)
+- `updated_at` (DateTime, auto-updated)
 
 ### 6. `resource` Table
 **Purpose**: Stores various resources (properties, content, etc.)
@@ -242,14 +244,19 @@ The application contains **10 main tables**:
 The database uses Alembic for migrations with the following key migrations:
 - `ea68fcacaed1_initial_database_schema.py` - Initial schema
 - `357f39f135c0_add_explicit_tablename_to_.py` - Explicit table names
+- `514e677f7478_add_super_user_field.py` - Super user functionality
+- `6fced02bbabe_add_updated_at_to_campaignbriefing.py` - Campaign briefing timestamps
 - `2ce7c9665fe8_add_pipeline_run_table.py` - Pipeline tracking
+- `add_edited_draft_column.py` - Campaign briefing editing
+- `add_flexmls_oauth_token_fields.py` - MLS OAuth integration
+- `remove_flexmls_oauth_token_fields.py` - Cleanup of OAuth fields
 - `add_negativepreference_table.py` - User feedback
 - `e0664be3e4b6_add_globalmlsevent_table.py` - Global MLS events
 
 ## Database Statistics
 
 - **Total Tables**: 12
-- **Primary Tables**: 10 (excluding junction tables)
+- **Primary Tables**: 12 (all main tables)
 - **Total Indexes**: 50+ (including composite indexes)
 - **JSON Fields**: 15+ across all tables
 - **UUID Primary Keys**: All tables
@@ -271,6 +278,7 @@ The database uses Alembic for migrations with the following key migrations:
 - Vector embeddings for semantic search
 - JSON storage for AI-generated content
 - Feedback loops for learning
+- Campaign briefing status management (DRAFT, ACTIVE, PAUSED, etc.)
 
 ### 4. Message Pipeline
 - `message` for actual messages

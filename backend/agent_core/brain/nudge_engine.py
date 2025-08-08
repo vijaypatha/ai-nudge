@@ -151,12 +151,27 @@ async def _create_campaign_from_event(event: MarketEvent, user: User, resource: 
     logging.info(f"NUDGE_ENGINE: Successfully created CampaignBriefing {new_briefing.id} for event {event.id}.")
 
 async def process_market_event(event: MarketEvent, user: User, db_session: Session = None):
-    # (Setup logic unchanged)
-    event.user_id = user.id
+    # The 'user' parameter is kept for compatibility but will be replaced by the correct user.
     if db_session is None:
         from data.database import engine
         db_session = Session(engine)
-    
+
+    # --- FIX: Ensure we operate with the correct user for this specific event ---
+    # The pipeline may pass a generic user, so we fetch the actual user from the event's user_id.
+    # This is the central fix for the data mismatch problem.
+    if not event.user_id:
+        logging.error(f"NUDGE_ENGINE: MarketEvent {event.id} is missing a user_id. Cannot process.")
+        return
+
+    correct_user = crm_service.get_user_by_id(user_id=event.user_id, session=db_session)
+    if not correct_user:
+        logging.error(f"NUDGE_ENGINE: Could not find user with ID {event.user_id} from event {event.id}.")
+        return
+
+    # We now exclusively use the 'correct_user' object for all subsequent operations.
+    user = correct_user
+    # --- END OF FIX ---
+
     db_session.add(event)
     db_session.commit()
     db_session.refresh(event)
@@ -226,21 +241,19 @@ async def process_market_event(event: MarketEvent, user: User, db_session: Sessi
         score, reasons = _get_client_score_for_event(client, event, resource_embedding, vertical_config)
         
         # --- NEW: FEEDBACK LOOP PENALTY LOGIC ---
-        # After getting the initial score, check against the client's negative feedback.
         if resource_embedding:
             negative_preferences = crm_service.get_negative_preferences(client_id=client.id, session=db_session)
             if negative_preferences:
                 is_penalized = False
                 for dismissed_embedding in negative_preferences:
                     similarity_to_dismissed = calculate_cosine_similarity(resource_embedding, dismissed_embedding)
-                    # If the new nudge is very similar to a previously dismissed one...
                     if similarity_to_dismissed > FEEDBACK_PENALTY_THRESHOLD:
                         is_penalized = True
-                        break # No need to check others
+                        break
                 
                 if is_penalized:
                     original_score = score
-                    score *= FEEDBACK_PENALTY_FACTOR #...apply a heavy penalty.
+                    score *= FEEDBACK_PENALTY_FACTOR
                     reasons.append("🎯 Penalized: Similar to a previously dismissed nudge.")
                     logging.info(f"NUDGE_ENGINE (FEEDBACK): Penalized client {client.id} for resource {resource.id}. Score reduced from {original_score} to {score}.")
         # --- END OF FEEDBACK LOOP LOGIC ---
