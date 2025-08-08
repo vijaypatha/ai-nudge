@@ -156,9 +156,7 @@ async def process_market_event(event: MarketEvent, user: User, db_session: Sessi
         from data.database import engine
         db_session = Session(engine)
 
-    # --- FIX: Ensure we operate with the correct user for this specific event ---
-    # The pipeline may pass a generic user, so we fetch the actual user from the event's user_id.
-    # This is the central fix for the data mismatch problem.
+    # --- FIX 1: Ensure we operate with the correct user for this specific event ---
     if not event.user_id:
         logging.error(f"NUDGE_ENGINE: MarketEvent {event.id} is missing a user_id. Cannot process.")
         return
@@ -167,10 +165,8 @@ async def process_market_event(event: MarketEvent, user: User, db_session: Sessi
     if not correct_user:
         logging.error(f"NUDGE_ENGINE: Could not find user with ID {event.user_id} from event {event.id}.")
         return
-
-    # We now exclusively use the 'correct_user' object for all subsequent operations.
     user = correct_user
-    # --- END OF FIX ---
+    # --- END OF FIX 1 ---
 
     db_session.add(event)
     db_session.commit()
@@ -228,43 +224,49 @@ async def process_market_event(event: MarketEvent, user: User, db_session: Sessi
     elif resource.resource_type == "property" and resource.attributes.get('PublicRemarks'):
         resource_embedding = await llm_client.generate_embedding(resource.attributes['PublicRemarks'])
 
-    all_clients = crm_service.get_all_clients(user_id=user.id, session=db_session)
-    logging.info(f"NUDGE_ENGINE: Found {len(all_clients)} clients to score against event {event.id}.")
-
+    # --- FIX 2: Process clients in batches to conserve memory ---
     matched_audience = []
+    page = 1
+    batch_size = 500  # Process 500 clients at a time
 
-    for client in all_clients:
-        if crm_service.does_nudge_exist_for_client_and_resource(client.id, resource.id, db_session, event.event_type):
-            logging.info(f"NUDGE_ENGINE: Nudge already exists for client {client.id} and resource {resource.id}. Skipping.")
-            continue
-
-        score, reasons = _get_client_score_for_event(client, event, resource_embedding, vertical_config)
+    while True:
+        logging.info(f"NUDGE_ENGINE: Processing client batch, page {page}, for user {user.id}...")
+        client_batch = crm_service.get_clients_in_batches(
+            user_id=user.id, session=db_session, batch_size=batch_size, page=page
+        )
         
-        # --- NEW: FEEDBACK LOOP PENALTY LOGIC ---
-        if resource_embedding:
-            negative_preferences = crm_service.get_negative_preferences(client_id=client.id, session=db_session)
-            if negative_preferences:
-                is_penalized = False
-                for dismissed_embedding in negative_preferences:
-                    similarity_to_dismissed = calculate_cosine_similarity(resource_embedding, dismissed_embedding)
-                    if similarity_to_dismissed > FEEDBACK_PENALTY_THRESHOLD:
-                        is_penalized = True
-                        break
-                
-                if is_penalized:
-                    original_score = score
-                    score *= FEEDBACK_PENALTY_FACTOR
-                    reasons.append("🎯 Penalized: Similar to a previously dismissed nudge.")
-                    logging.info(f"NUDGE_ENGINE (FEEDBACK): Penalized client {client.id} for resource {resource.id}. Score reduced from {original_score} to {score}.")
-        # --- END OF FEEDBACK LOOP LOGIC ---
+        # When an empty batch is returned, we have processed all clients.
+        if not client_batch:
+            logging.info(f"NUDGE_ENGINE: No more clients to process for user {user.id}.")
+            break
 
-        if score >= MATCH_THRESHOLD:
-            logging.info(f"NUDGE_ENGINE: Client {client.id} ({client.full_name}) matched event {event.id} with score {score}. Reasons: {reasons}")
-            matched_audience.append(MatchedClient(
-                client_id=client.id, client_name=client.full_name, match_score=score, match_reasons=reasons
-            ))
-        else:
-            logging.info(f"NUDGE_ENGINE: Client {client.id} ({client.full_name}) did not match event {event.id}. Score: {score}")
+        logging.info(f"NUDGE_ENGINE: Scoring {len(client_batch)} clients in batch {page} against event {event.id}.")
+
+        for client in client_batch:
+            if crm_service.does_nudge_exist_for_client_and_resource(client.id, resource.id, db_session, event.event_type):
+                continue
+
+            score, reasons = _get_client_score_for_event(client, event, resource_embedding, vertical_config)
+            
+            if resource_embedding:
+                negative_preferences = crm_service.get_negative_preferences(client_id=client.id, session=db_session)
+                if negative_preferences:
+                    is_penalized = any(
+                        calculate_cosine_similarity(resource_embedding, dismissed_embedding) > FEEDBACK_PENALTY_THRESHOLD
+                        for dismissed_embedding in negative_preferences
+                    )
+                    if is_penalized:
+                        score *= FEEDBACK_PENALTY_FACTOR
+                        reasons.append("🎯 Penalized: Similar to a previously dismissed nudge.")
+
+            if score >= MATCH_THRESHOLD:
+                matched_audience.append(MatchedClient(
+                    client_id=client.id, client_name=client.full_name, match_score=score, match_reasons=reasons
+                ))
+        
+        # Move to the next page for the next iteration
+        page += 1
+    # --- END OF FIX 2 ---
 
     if matched_audience and resource:
         logging.info(f"NUDGE_ENGINE: Creating campaign for {len(matched_audience)} matched clients for event {event.id}.")

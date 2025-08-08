@@ -1286,6 +1286,19 @@ def does_nudge_exist_for_client_and_resource(client_id: uuid.UUID, resource_id: 
                 return True
     return False
 
+def get_clients_in_batches(user_id: uuid.UUID, session: Session, batch_size: int = 500, page: int = 1) -> List[Client]:
+    """
+    Retrieves clients for a user in paginated batches to conserve memory.
+    """
+    offset = (page - 1) * batch_size
+    statement = (
+        select(Client)
+        .where(Client.user_id == user_id)
+        .offset(offset)
+        .limit(batch_size)
+    )
+    return session.exec(statement).all()
+
 async def process_new_contact_for_existing_events(client: Client, user_id: UUID):
     """
     Immediately score new contact against all existing events and create campaigns.
