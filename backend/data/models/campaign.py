@@ -43,7 +43,6 @@ class CampaignBriefing(SQLModel, table=True):
     user_id: UUID = Field(foreign_key="user.id", index=True)
     client_id: Optional[UUID] = Field(default=None, foreign_key="client.id", index=True)
     
-    # Field to reliably link this nudge to the resource that triggered it.
     triggering_resource_id: Optional[UUID] = Field(default=None, foreign_key="resource.id", index=True)
     
     parent_message_id: Optional[UUID] = Field(default=None, foreign_key="message.id", index=True)
@@ -56,8 +55,8 @@ class CampaignBriefing(SQLModel, table=True):
     edited_draft: Optional[str] = Field(default=None)
     status: CampaignStatus = Field(default=CampaignStatus.DRAFT, index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
     updated_at: Optional[datetime] = Field(default_factory=datetime.utcnow, sa_column_kwargs={"onupdate": datetime.utcnow})
+    source: Optional[str] = Field(default=None, index=True)  # --- [NEW] Field to track the source of the nudge ---
 
     # Database relationships
     parent_message: Optional["Message"] = Relationship(back_populates="ai_drafts")

@@ -23,7 +23,7 @@ from data import crm as crm_service
 from data.database import engine
 from agent_core import audience_builder
 from api.websocket_manager import manager as websocket_manager
-from celery_tasks import initial_data_fetch_for_user_task
+from celery_tasks import initial_data_fetch_for_user_task, backfill_nudges_for_client_task
 from data.models.campaign import MatchedClient
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
@@ -77,13 +77,20 @@ async def add_manual_client(
     current_user: User = Depends(get_current_user_from_token)
 ):
     """
-    Creates a single new client and updates the user's onboarding state.
+    Creates a single new client, triggers the backfill pipeline, and updates onboarding state.
     """
     client, is_new = await crm_service.create_or_update_client(
         user_id=current_user.id, 
         client_data=client_data
     )
     
+    # --- ADDED: Dispatch backfill task for new clients ---
+    if is_new:
+        logging.info(f"API: New client {client.id} created, dispatching backfill task.")
+        backfill_nudges_for_client_task.delay(client_id=str(client.id))
+    
+    # This logic appears to be for the *user's* first contact, not a new client in general.
+    # It correctly triggers the *user's* initial data fetch.
     try:
         if not current_user.onboarding_state.get('contacts_imported'):
             logging.info(f"Updating onboarding state for user {current_user.id} after manual contact add.")
@@ -435,7 +442,6 @@ class TimelineEvent(BaseModel):
     date: datetime
     description: str
     
-# --- ADD THIS NEW ENDPOINT ---
 @router.get("/{client_id}/timeline", response_model=List[TimelineEvent])
 async def get_client_timeline(
     client_id: UUID,
@@ -456,3 +462,69 @@ async def get_client_timeline(
         raise HTTPException(status_code=404, detail="Client not found or error fetching timeline.")
         
     return timeline_events
+
+# --- NEW: Pydantic model for Interactive Search results ---
+class InteractiveSearchResponse(BaseModel):
+    event_id: UUID
+    headline: str
+    resource: NudgeResource # Re-use the existing resource model
+    score: int
+    reasons: List[str]
+
+# --- NEW: Endpoint for Interactive Search ---
+@router.get("/{client_id}/search-matches", response_model=List[InteractiveSearchResponse])
+async def interactive_search_for_client(
+    client_id: UUID,
+    current_user: User = Depends(get_current_user_from_token),
+    page: int = 1,
+    page_size: int = 20,
+):
+    """
+    Performs a fast, paginated, on-demand search for a single client
+    against recent events. This powers the "Search for Matches" button.
+    """
+    from agent_core.brain.nudge_engine import score_event_against_client, MATCH_THRESHOLD
+    from data.database import engine
+    from agent_core.brain.verticals import VERTICAL_CONFIGS
+    
+    with Session(engine) as session:
+        client = crm_service.get_client_by_id(client_id, current_user.id, session)
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found")
+
+        vertical_config = VERTICAL_CONFIGS.get(current_user.vertical, {})
+        if not vertical_config:
+            return []
+
+        events_to_search = crm_service.get_active_events_in_batches(
+            session=session, lookback_days=90, batch_size=page_size, page=page
+        )
+        
+        matches = []
+        for event in events_to_search:
+            resource = crm_service.get_resource_by_entity_id(event.entity_id, session)
+            if not resource:
+                continue
+            
+            score, reasons = await score_event_against_client(client, event, resource, vertical_config, session)
+
+            if score >= MATCH_THRESHOLD:
+                # --- THIS IS THE FIX ---
+                # Properly create the NudgeResource object before appending.
+                nudge_resource = NudgeResource(
+                    address=resource.attributes.get("UnparsedAddress"),
+                    price=resource.attributes.get("ListPrice"),
+                    beds=resource.attributes.get("BedroomsTotal"),
+                    baths=resource.attributes.get("BathroomsTotalInteger"),
+                    attributes=resource.attributes
+                )
+                matches.append(
+                    InteractiveSearchResponse(
+                        event_id=event.id,
+                        headline=resource.attributes.get("UnparsedAddress", "New Opportunity"),
+                        resource=nudge_resource,
+                        score=score,
+                        reasons=reasons
+                    )
+                )
+        return matches

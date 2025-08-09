@@ -25,6 +25,20 @@ if config.config_file_name is not None:
 
 
 # --- CUSTOM METADATA AND URL CONFIGURATION ---
+
+# --- THIS IS THE FIX ---
+# Add imports for all of your SQLModel classes here so that Alembic's
+# autogenerate can see them and compare them against the database.
+from data.models.user import User
+from data.models.client import Client
+from data.models.message import Message, ScheduledMessage
+from data.models.campaign import CampaignBriefing
+from data.models.resource import Resource, ContentResource
+from data.models.event import MarketEvent, GlobalMlsEvent, PipelineRun # CORRECTED IMPORT
+from data.models.feedback import NegativePreference
+from data.models.faq import Faq
+# --- END OF FIX ---
+
 # Point to all of your SQLModel table definitions
 target_metadata = SQLModel.metadata
 # Use the database URL from your application's settings

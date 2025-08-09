@@ -19,7 +19,7 @@ from data.models.faq import Faq
 from integrations import twilio_outgoing
 from integrations.gemini import match_faq_with_gemini
 from sqlmodel import Session, select
-from api.websocket_manager import manager as websocket_manager
+from backend.api.websocket_manager import manager as websocket_manager
 
 settings = get_settings()
 
@@ -94,6 +94,15 @@ async def process_incoming_sms(from_number: str, to_number: str, body: str):
             }
             redis_client.publish(USER_NOTIFICATION_CHANNEL, json.dumps(notification_payload))
             logging.info(f"TWILIO: Published 'NEW_MESSAGE' event to Redis for user {user.id}")
+
+            # Also broadcast directly to any WebSocket connections in this process for instant UI updates
+            try:
+                await websocket_manager.send_to_user_connections(
+                    str(user.id), {"type": "NEW_MESSAGE", "payload": message_payload}
+                )
+                logging.info(f"TWILIO: Also broadcasted 'NEW_MESSAGE' directly to user {user.id} connections.")
+            except Exception as ws_err:
+                logging.warning(f"TWILIO: Direct WS broadcast failed (will rely on Redis): {ws_err}")
 
         except Exception as e:
             logging.error(f"TWILIO: Failed to save or publish incoming message: {e}", exc_info=True)

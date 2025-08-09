@@ -10,6 +10,9 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 from uuid import UUID
 from sqlmodel import Session, select
+from data.models.event import MarketEvent
+from agent_core.brain.nudge_engine import MATCH_THRESHOLD
+from data.models.campaign import MatchedClient
 # REMOVED: The websocket manager is no longer used in this file
 # from api.websocket_manager import manager
 
@@ -117,50 +120,12 @@ def initial_data_fetch_for_user_task(self, user_id: str):
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def process_new_contact_async(self, client_id: str, user_id: str) -> dict:
     """
-    Asynchronously processes a new contact against existing events.
-    This prevents blocking the API response during contact creation.
+    MODIFIED: This task is now deprecated in favor of the backfill pipeline
+    but is kept for compatibility. It will now simply log and return success.
+    The backfill_nudges_for_client_task now handles this logic asynchronously.
     """
-    try:
-        logger.info(f"CELERY: Starting async processing for new client {client_id}")
-        
-        # Convert string IDs to UUIDs
-        client_uuid = UUID(client_id)
-        user_uuid = UUID(user_id)
-        
-        # Get the client and user
-        session = Session(engine)
-        client = session.exec(select(Client).where(Client.id == client_uuid)).first()
-        from data.models import User
-        user = session.exec(select(User).where(User.id == user_uuid)).first()
-        
-        if not client:
-            logger.error(f"CELERY: Client {client_id} not found")
-            return {"status": "error", "reason": "client_not_found"}
-        
-        if not user:
-            logger.error(f"CELERY: User {user_id} not found")
-            return {"status": "error", "reason": "user_not_found"}
-        
-        # Process the new contact against existing events
-        # This is the same logic as before, but now runs asynchronously
-        from data.crm import process_new_contact_for_existing_events
-        
-        # Run the async function in the event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            campaigns_created = loop.run_until_complete(
-                process_new_contact_for_existing_events(client, user_uuid)
-            )
-            logger.info(f"CELERY: Created {campaigns_created} campaigns for new client {client.full_name}")
-            return {"status": "success", "campaigns_created": campaigns_created}
-        finally:
-            loop.close()
-            
-    except Exception as e:
-        logger.error(f"CELERY: Error processing new contact {client_id}: {e}")
-        # Retry the task if it fails
-        raise self.retry(countdown=60, max_retries=3)
+    logger.info(f"CELERY: Task process_new_contact_async called for client {client_id}. This task is deprecated. Backfill pipeline handles this flow.")
+    return {"status": "success_deprecated", "reason": "Functionality moved to backfill pipeline."}
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def send_scheduled_message_task(self, message_id: str) -> dict:
@@ -373,6 +338,85 @@ def health_check_task() -> dict:
     except Exception as e:
         logger.error(f"CELERY: Health check failed: {e}")
         return {"status": "unhealthy", "error": str(e)}
+    
+# --- [NEW] Task for the Proactive Nudge Pipeline ---
+@celery_app.task(name="tasks.score_event_for_best_match")
+def score_event_for_best_match_task(market_event_id: str):
+    """
+    PROACTIVE PIPELINE: Takes a new market event, finds the best client match,
+    and creates a single nudge.
+    """
+    from data.database import engine
+    from agent_core.brain.nudge_engine import find_best_match_for_event
+    from data.models.user import User
+    
+    logger.info(f"CELERY: Proactive pipeline starting for MarketEvent ID: {market_event_id}")
+    with Session(engine) as session:
+        event = session.get(MarketEvent, UUID(market_event_id))
+        if not event:
+            logger.error(f"CELERY: MarketEvent {market_event_id} not found.")
+            return {"status": "error", "reason": "event_not_found"}
+
+        user = session.get(User, event.user_id)
+        resource = crm_service.get_resource_by_entity_id(event.entity_id, session)
+        if not user or not resource:
+            logger.error(f"CELERY: User or Resource not found for event {market_event_id}.")
+            return {"status": "error", "reason": "user_or_resource_not_found"}
+        
+        try:
+            asyncio.run(find_best_match_for_event(event, user, resource, session))
+            event.status = "processed"
+            session.add(event)
+            session.commit()
+            logger.info(f"CELERY: Proactive pipeline finished for MarketEvent ID: {market_event_id}")
+            return {"status": "success"}
+        except Exception as e:
+            logger.error(f"CELERY: Proactive pipeline failed for event {market_event_id}: {e}", exc_info=True)
+            return {"status": "error", "reason": str(e)}
+
+# --- [NEW] Task for the Client Backfill Pipeline ---
+@celery_app.task(name="tasks.backfill_nudges_for_client")
+def backfill_nudges_for_client_task(client_id: str, lookback_days: int = 14):
+    """
+    BACKFILL PIPELINE: When a new client is created, this task finds relevant
+    nudges from recent history to give them an initial set of opportunities.
+    """
+    from data.database import engine
+    from agent_core.brain.nudge_engine import score_event_against_client, _create_campaign_from_event
+    from agent_core.brain.verticals import VERTICAL_CONFIGS
+    from data.models.user import User
+    
+    logger.info(f"CELERY: Backfill pipeline starting for Client ID: {client_id}")
+    with Session(engine) as session:
+        client = session.get(Client, UUID(client_id))
+        if not client:
+            logger.error(f"CELERY: Client {client_id} not found for backfill.")
+            return {"status": "error", "reason": "client_not_found"}
+        
+        user = session.get(User, client.user_id)
+        vertical_config = VERTICAL_CONFIGS.get(user.vertical, {})
+        if not vertical_config:
+            return {"status": "skipped", "reason": "no_vertical_config"}
+
+        recent_events = crm_service.get_active_events_in_batches(session, lookback_days, batch_size=200, page=1)
+
+        for event in recent_events:
+            resource = crm_service.get_resource_by_entity_id(event.entity_id, session)
+            if not resource or crm_service.does_nudge_exist_for_client_and_resource(client.id, resource.id, session, event.event_type):
+                continue
+            
+            try:
+                score, reasons = asyncio.run(score_event_against_client(client, event, resource, vertical_config, session))
+
+                if score >= MATCH_THRESHOLD:
+                    match = MatchedClient(client_id=client.id, client_name=client.full_name, match_score=score, match_reasons=reasons)
+                    asyncio.run(_create_campaign_from_event(event, user, resource, [match], session, client.id, source='initial_highlight'))
+            except Exception as e:
+                logger.error(f"CELERY: Failed to process event {event.id} for client {client.id} during backfill: {e}", exc_info=True)
+        
+        session.commit()
+    logger.info(f"CELERY: Backfill pipeline finished for Client ID: {client_id}")
+    return {"status": "success"}
 
 # Legacy tasks for compatibility
 @celery_app.task(name="celery_tasks.main_opportunity_pipeline_task", time_limit=1800, soft_time_limit=1500)
@@ -457,60 +501,3 @@ def check_for_recency_nudges_task():
     """Legacy task - kept for compatibility"""
     logger.info("CELERY: Legacy recency task called - no action taken")
     return {"status": "legacy_task"}
-
-# --- NEW TASK FOR SEMANTIC RE-SCORING ---
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def rescore_client_against_recent_events_task(self, client_id: str, user_id: str):
-    """
-    MODIFIED: Asynchronously re-scores a client and then publishes a 'nudges_updated'
-    event to a Redis channel for broadcasting by any connected web server process.
-    """
-    logger.info(f"CELERY: Starting client re-score task for client_id: {client_id}")
-    try:
-        client_uuid = uuid.UUID(client_id)
-        user_uuid = uuid.UUID(user_id)
-        
-        # This async function contains the original logic.
-        # It is now wrapped so we can run it synchronously within the Celery task.
-        async def rescore_and_notify():
-            # Run the re-scoring logic (this part is unchanged)
-            await nudge_engine.rescore_client_against_events(client_id=client_uuid, user_id=user_uuid)
-            
-            # --- THIS IS THE CRITICAL FIX ---
-            # Instead of calling the websocket manager directly, which lives in a
-            # different process, we publish a message to a central Redis channel.
-            try:
-                # This is the message that will be sent over the Redis channel.
-                # It contains all the information the listener needs to route the message.
-                notification_payload = {
-                    "user_id": user_id,
-                    "payload": {
-                        "event": "nudges_updated",
-                        "message": "Your nudges have been re-scored."
-                    }
-                }
-                
-                # Publish the JSON-encoded payload to the central notification channel.
-                redis_client.publish(USER_NOTIFICATION_CHANNEL, json.dumps(notification_payload))
-                
-                # New log message to confirm the publish action.
-                logger.info(f"CELERY: Successfully published 'nudges_updated' event to Redis for user_id: {user_id}")
-            
-            except Exception as e:
-                # Log an error if publishing to Redis fails for any reason.
-                logger.error(f"CELERY: CRITICAL - Could not publish 'nudges_updated' to Redis. Error: {e}", exc_info=True)
-
-        # Run the async wrapper function
-        asyncio.run(rescore_and_notify())
-        
-        logger.info(f"CELERY: Client re-score and notification task completed for user_id: {user_id}")
-        return {"status": "success"}
-            
-    except Exception as e:
-        logger.error(f"CELERY: Client re-score task failed for client {client_id}. Retrying... Error: {e}", exc_info=True)
-        raise self.retry(exc=e)
-
-if __name__ == "__main__":
-    logger.info("Triggering main opportunity pipeline manually...")
-    main_opportunity_pipeline_task.delay()
-    logger.info("Main opportunity pipeline task triggered.")

@@ -21,46 +21,53 @@ logger = logging.getLogger(__name__)
 
 async def process_global_events_for_user(user: User, global_events: list[GlobalMlsEvent]):
     """
-    Processes a batch of global events for a single user, creating user-specific
-    MarketEvents and generating nudges with resilient transaction handling.
+    MODIFIED: Processes a batch of global events for a single user by creating
+    user-specific MarketEvents and dispatching a Celery task for scoring.
     """
-    logger.info(f"PIPELINE: Processing {len(global_events)} global events for user {user.id} ({user.full_name})...")
+    # --- ADDED: Import the new Celery task ---
+    from celery_tasks import score_event_for_best_match_task
+    from uuid import uuid4
+
+    logger.info(f"PIPELINE: Processing {len(global_events)} global events for user {user.id}...")
     
-    # --- THIS IS THE FIX ---
-    # We now handle transactions on a per-event basis. This ensures that a single
-    # failing event does not cause successfully created campaigns to be lost.
     for detached_event in global_events:
         try:
             with Session(engine) as db_session:
-                # Re-attach the event object to the current session
                 global_event = db_session.merge(detached_event)
                 
+                # Check for existing MarketEvent to ensure idempotency
+                existing_market_event = db_session.exec(
+                    select(MarketEvent).where(
+                        MarketEvent.user_id == user.id,
+                        MarketEvent.entity_id == global_event.listing_key
+                    )
+                ).first()
+                if existing_market_event:
+                    logger.warning(f"PIPELINE: MarketEvent for entity {global_event.listing_key} and user {user.id} already exists. Skipping.")
+                    continue
+
                 market_event_record = MarketEvent(
                     id=uuid4(),
                     user_id=user.id,
-                    event_type="new_listing", # This could be made more dynamic later
+                    event_type="new_listing",
                     entity_id=global_event.listing_key,
                     entity_type="property",
                     payload=global_event.raw_payload,
                     market_area="default",
-                    status="pending"
+                    status="unprocessed" # Mark as unprocessed until the task runs
                 )
                 db_session.add(market_event_record)
-                
-                # The nudge_engine will add the new campaign to the session
-                await nudge_engine.process_market_event(
-                    event=market_event_record, user=user, db_session=db_session
-                )
-                
-                # Commit after each event is fully processed
                 db_session.commit()
-                logger.info(f"PIPELINE: Successfully processed and committed event {global_event.listing_key} for user {user.id}.")
+                db_session.refresh(market_event_record)
+
+                # --- THIS IS THE KEY CHANGE ---
+                # Dispatch a Celery task to handle scoring asynchronously
+                score_event_for_best_match_task.delay(market_event_id=str(market_event_record.id))
+                
+                logger.info(f"PIPELINE: Dispatched scoring task for event {market_event_record.id} (Listing: {global_event.listing_key}) for user {user.id}.")
 
         except Exception as e:
-            # Log the specific event that failed and continue to the next one.
-            logger.error(f"PIPELINE: Failed to process event {detached_event.listing_key} for user {user.id}. Error: {e}", exc_info=True)
-            # A rollback is handled implicitly by the 'with Session...' block exiting on error.
-    # --- END OF FIX ---
+            logger.error(f"PIPELINE: Failed to create MarketEvent or dispatch task for {detached_event.listing_key}. Error: {e}", exc_info=True)
 
 
 async def run_main_opportunity_pipeline(minutes_ago: int | None = None):

@@ -45,8 +45,6 @@ def get_user_by_id(user_id: uuid.UUID, session: Optional[Session] = None) -> Opt
     else:
         with Session(engine) as new_session:
             return _get(new_session)
-    
-# --- FIND AND REPLACE THIS FUNCTION ---
 
 def get_user_by_twilio_number(phone_number: str, session: Optional[Session] = None) -> Optional[User]:
     """Retrieves a single user by their assigned Twilio phone number."""
@@ -76,7 +74,6 @@ def update_user(user_id: uuid.UUID, update_data: UserUpdate) -> Optional[User]:
         session.refresh(user)
         return user
 
-# --- NEW FUNCTION TO FIX PIPELINE CRASH ---
 def get_first_onboarded_user() -> Optional[User]:
     """
     Retrieves the first user who has completed onboarding.
@@ -89,7 +86,6 @@ def get_first_onboarded_user() -> Optional[User]:
             .limit(1)
         )
         return session.exec(statement).first()
-# -----------------------------------------
 
 # --- Client Functions ---
 
@@ -274,25 +270,24 @@ def get_client_nudge_summaries(user_id: uuid.UUID, session: Session) -> List[Dic
 async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUID) -> tuple[Optional[Client], bool]:
     """
     MODIFIED: Generically updates a client, but now ALSO runs the profiler agent
-    to extract structured preferences if the notes were updated, ensuring consistency.
+    to extract structured preferences if the notes were updated. The old rescore task
+    has been removed.
     """
     notes_were_updated = False
-    
+
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client:
             return None, False
 
         update_dict = update_data.model_dump(exclude_unset=True)
-        
-        # Check if notes are part of this update
+
         if 'notes' in update_dict:
             notes_were_updated = True
 
         for key, value in update_dict.items():
             if key == 'phone' and value:
                 value = format_phone_number(value)
-            # If preferences are being updated, merge them with existing ones
             if key == 'preferences' and isinstance(value, dict):
                 current_prefs = client.preferences or {}
                 current_prefs.update(value)
@@ -300,16 +295,13 @@ async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUI
                 flag_modified(client, 'preferences')
             else:
                 setattr(client, key, value)
-        
+
         session.add(client)
 
-        # If notes were changed, run the profiler to extract/update structured preferences
         if notes_were_updated:
             logging.info(f"CRM: Notes updated for client {client.id}, running profiler agent.")
             user = session.get(User, user_id)
             user_vertical = user.vertical if user else "general"
-            
-            # Use all available text to get the best extraction
             all_text_to_analyze = f"Notes: {client.notes}\nTags: {', '.join(client.user_tags or [])} {', '.join(client.ai_tags or [])}"
             extracted_prefs = await profiler_agent.extract_preferences_from_text(all_text_to_analyze, user_vertical)
 
@@ -319,24 +311,15 @@ async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUI
                     client.preferences = {}
                 client.preferences.update(extracted_prefs)
                 flag_modified(client, "preferences")
-        
-        # Commit all changes (notes, preferences, etc.) to the database
+
         session.commit()
         session.refresh(client)
 
-        # Now that data is saved, regenerate embedding and trigger re-score
         if notes_were_updated or 'preferences' in update_dict or 'user_tags' in update_dict:
-            logging.info(f"CRM: Client data changed. Updating embedding and queuing re-score for client {client.id}.")
+            logging.info(f"CRM: Client data changed. Updating embedding for client {client.id}.")
             await semantic_service.update_client_embedding(client, session)
-            session.commit() # Commit the new embedding
+            session.commit()
             session.refresh(client)
-
-            try:
-                from celery_tasks import rescore_client_against_recent_events_task
-                rescore_client_against_recent_events_task.delay(client_id=str(client.id), user_id=str(user_id))
-                logging.info(f"CRM: Queued re-score task for client {client.id}")
-            except Exception as e:
-                logging.error(f"CRM: Failed to trigger re-score task for client {client.id}: {e}")
 
         return client, notes_were_updated
 
@@ -419,14 +402,6 @@ async def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uui
             client.user_tags = tags
             session.add(client)
             await semantic_service.update_client_embedding(client, session)
-            # --- ADD TRIGGER HERE ---
-            try:
-                from celery_tasks import rescore_client_against_recent_events_task
-                rescore_client_against_recent_events_task.delay(client_id=str(client.id), user_id=str(user_id))
-                logging.info(f"CRM: Queued re-score task for client {client.id} after tag update.")
-            except Exception as e:
-                logging.error(f"CRM: Failed to trigger re-score task for client {client.id}: {e}")
-            # --- END TRIGGER ---
             session.commit()
             session.refresh(client)
             return client
@@ -447,27 +422,26 @@ async def update_client_notes(client_id: UUID, notes: str, user_id: UUID) -> Opt
 
 async def update_client_intel(client_id: UUID, user_id: UUID, tags_to_add: Optional[List[str]] = None, notes_to_add: Optional[str] = None) -> Optional[Client]:
     """
-    Appends notes/tags, extracts preferences, and calls semantic_service to regenerate the embedding.
-    --- MODIFIED: Uses flag_modified to ensure JSON preference changes are persisted to the database. ---
+    Appends notes/tags, extracts preferences, regenerates embedding, but
+    REMOVES the old rescore task trigger.
     """
     with Session(engine) as session:
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
         if not client:
             logging.warning(f"CRM: update_client_intel called for non-existent client {client_id}")
             return None
-        
+
         user = session.get(User, user_id)
         if not user:
             logging.error(f"CRM: Could not find user {user_id} during intel update for client {client_id}")
-            return None # Or handle as appropriate
-            
+            return None
+
         user_vertical = user.vertical or "general"
         profile_was_updated = False
 
         if tags_to_add:
-            # Using ai_tags as per our discussion about automating AI-suggested tags
             client.ai_tags = sorted(list(set(client.ai_tags or []).union(set(tags_to_add))))
-            flag_modified(client, "ai_tags") # Also flag the tags list as modified
+            flag_modified(client, "ai_tags")
             profile_was_updated = True
             logging.info(f"CRM: Updated AI tags for client {client.id}")
 
@@ -475,48 +449,25 @@ async def update_client_intel(client_id: UUID, user_id: UUID, tags_to_add: Optio
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             new_note_entry = f"Note from AI ({timestamp}):\n{notes_to_add}"
             client.notes = f"{client.notes}\n\n---\n\n{new_note_entry}" if client.notes else new_note_entry
-            
-            # Use the full client context for the best possible preference extraction
+
             all_text_to_analyze = f"Notes: {client.notes}\nTags: {', '.join(client.user_tags or [])} {', '.join(client.ai_tags or [])}"
-            
             extracted_prefs = await profiler_agent.extract_preferences_from_text(all_text_to_analyze, user_vertical)
-            
+
             if extracted_prefs:
                 logging.info(f"CRM: Profiler extracted preferences: {extracted_prefs}")
-                
-                # Initialize preferences if they are None
                 if client.preferences is None:
                     client.preferences = {}
-                
-                # Update the dictionary in place
                 client.preferences.update(extracted_prefs)
-                
-                # --- THIS IS THE FIX ---
-                # Explicitly mark the 'preferences' field as modified.
                 flag_modified(client, "preferences")
                 logging.info(f"CRM: Marked 'preferences' as modified for client {client.id}. New state: {client.preferences}")
-
             profile_was_updated = True
 
         if profile_was_updated:
-            # The session will now track all changes to client.notes, client.ai_tags, and client.preferences
             session.add(client)
-            
-            # Regenerate the semantic embedding since the client's data has changed
             await semantic_service.update_client_embedding(client, session)
-            
-            # Queue a re-score task since preferences may have changed
-            try:
-                from celery_tasks import rescore_client_against_recent_events_task
-                rescore_client_against_recent_events_task.delay(client_id=str(client.id), user_id=str(user_id))
-                logging.info(f"CRM: Queued re-score task for client {client.id} after intel update.")
-            except Exception as e:
-                logging.error(f"CRM: Failed to trigger re-score task for client {client.id}: {e}")
-        
-        # A single commit at the end of the transaction handles all changes.
+
         session.commit()
         session.refresh(client)
-        
         logging.info(f"CRM: Intel update complete and committed for client {client.id}. Final preferences: {client.preferences}")
         return client
 
@@ -559,7 +510,6 @@ def get_negative_preferences(client_id: UUID, session: Session) -> List[List[flo
     statement = select(NegativePreference.dismissed_embedding).where(NegativePreference.client_id == client_id)
     results = session.exec(statement).all()
     return results
-
 
 # --- Resource Functions ---
 
@@ -1412,7 +1362,17 @@ async def process_new_contact_for_existing_events(client: Client, user_id: UUID)
                         match_reasons=reasons
                     )]
                     
-                    await _create_campaign_from_event(event, user, resource, matched_audience, db_session=session)
+                    # --- THIS IS THE FIX ---
+                    # The function signature for _create_campaign_from_event was updated.
+                    # We now pass the client's ID as the primary_client_id.
+                    await _create_campaign_from_event(
+                        event=event, 
+                        user=user, 
+                        resource=resource, 
+                        matched_audience=matched_audience, 
+                        db_session=session,
+                        primary_client_id=client.id 
+                    )
                     campaigns_created += 1
                     logging.info(f"PROCESSING NEW CONTACT: Created campaign for event {event.id}")
                 else:
