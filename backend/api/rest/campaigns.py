@@ -2,7 +2,6 @@
 # REFACTORED for robustness and maintainability without removing existing code.
 
 import logging
-import asyncio
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body, Query, Request
 from typing import List, Dict, Any, Optional
 from uuid import UUID
@@ -419,5 +418,10 @@ def trigger_send_campaign(
     campaign: CampaignBriefing = Depends(get_campaign_briefing_for_user_from_path), # Using the dependency
     current_user: User = Depends(get_current_user_from_token)
 ):
-    background_tasks.add_task(outbound_workflow.send_campaign_to_audience, campaign.id, current_user.id)
+    logging.info(
+        f"API: Triggering send for campaign {campaign.id} (user {current_user.id})."
+    )
+    background_tasks.add_task(
+        outbound_workflow.send_campaign_to_audience, campaign.id, current_user.id
+    )
     return {"message": "Campaign sending process started."}
