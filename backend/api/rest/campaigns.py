@@ -24,7 +24,7 @@ from data.models.campaign import CampaignBriefing, CampaignUpdate, CampaignStatu
 from agent_core.content_resource_service import get_content_recommendations_for_user
 from data.database import get_session
 import pytz 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 from agent_core import llm_client
 
@@ -158,6 +158,19 @@ async def get_all_campaigns(
     current_user: User = Depends(get_current_user_from_token)
 ):
     """Fetches all campaign briefings in DRAFT status for the current user."""
+
+    # Make nested structures JSON-safe (UUIDs -> str, datetimes -> ISO8601)
+    def json_sanitize(data: Any) -> Any:
+        if isinstance(data, dict):
+            return {k: json_sanitize(v) for k, v in data.items()}
+        if isinstance(data, list):
+            return [json_sanitize(i) for i in data]
+        if isinstance(data, uuid.UUID):
+            return str(data)
+        if isinstance(data, (datetime, date)):
+            return data.isoformat()
+        return data
+
     try:
         briefings_from_db = crm_service.get_new_campaign_briefings_for_user(user_id=current_user.id, session=session)
         content_recommendations = get_content_recommendations_for_user(user_id=current_user.id)
@@ -165,12 +178,19 @@ async def get_all_campaigns(
         newly_created_content_briefings = []
         if content_recommendations:
             for rec in content_recommendations:
+                # Sanitize the data before creating the SQLModel object.
+                sanitized_resource = json_sanitize(rec['resource'])
+                sanitized_clients = json_sanitize(rec['matched_clients'])
+
                 new_briefing = CampaignBriefing(
-                    id=rec['resource']['id'], user_id=current_user.id,
-                    campaign_type='content_recommendation', headline=f"Content: {rec['resource']['title']}",
-                    original_draft=rec['generated_message'], matched_audience=rec['matched_clients'],
+                    id=uuid.UUID(str(rec['resource']['id'])),
+                    user_id=current_user.id,
+                    campaign_type='content_recommendation',
+                    headline=f"Content: {rec['resource']['title']}",
+                    original_draft=rec['generated_message'],
+                    matched_audience=sanitized_clients,
                     key_intel={
-                        'content_preview': rec['resource'],
+                        'content_preview': sanitized_resource,
                         'strategic_context': f"Share this {rec['resource']['content_type']} with your client",
                         'trigger_source': 'Content Library'
                     },
@@ -195,7 +215,6 @@ async def get_all_campaigns(
     except Exception as e:
         logging.error(f"Error fetching campaigns for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching campaigns.")
-
 @router.post("/draft-instant-nudge", response_model=DraftResponse)
 async def draft_instant_nudge_endpoint(
     payload: DraftInstantNudgePayload,
