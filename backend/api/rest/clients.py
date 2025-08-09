@@ -286,8 +286,8 @@ async def get_nudges_for_client(
     current_user: User = Depends(get_current_user_from_token)
 ):
     """
-    Retrieves all active nudges (CampaignBriefings in DRAFT status)
-    for a single, specified client, now including all required fields for the ActionDeck.
+    Retrieves all active nudges for a single client, safely handling
+    potentially incomplete audience data from the database.
     """
     client_nudges = []
 
@@ -317,16 +317,31 @@ async def get_nudges_for_client(
                     nudge_resource.baths = resource.attributes.get("BathroomsTotalInteger")
                     nudge_resource.attributes = resource.attributes
             
+            # --- THIS IS THE FIX ---
+            # Manually construct the matched_audience to provide default values
+            # for any missing fields, preventing the Pydantic validation error.
+            sanitized_audience = []
+            for member in campaign.matched_audience:
+                sanitized_audience.append(
+                    MatchedClient(
+                        client_id=member.get("client_id"),
+                        client_name=member.get("client_name"),
+                        match_score=member.get("match_score", 0), # Default to 0 if missing
+                        match_reasons=member.get("match_reasons", []) # Default to empty list if missing
+                    )
+                )
+            # --- END FIX ---
+            
             client_nudge = ClientNudgeResponse(
                 id=campaign.id,
                 campaign_id=campaign.id,
                 headline=campaign.headline,
                 campaign_type=campaign.campaign_type,
                 resource=nudge_resource,
-                key_intel=campaign.key_intel, # THIS LINE FIXES THE MISSING DATA
+                key_intel=campaign.key_intel,
                 original_draft=campaign.original_draft,
                 edited_draft=campaign.edited_draft,
-                matched_audience=campaign.matched_audience
+                matched_audience=sanitized_audience # Use the sanitized list
             )
             client_nudges.append(client_nudge)
 
