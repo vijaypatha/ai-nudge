@@ -3,7 +3,7 @@
 import logging
 import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
-from api.websocket_manager import manager
+from backend.api.websocket_manager import manager
 from data.models.user import User
 from jose import JWTError, jwt
 from sqlmodel import Session

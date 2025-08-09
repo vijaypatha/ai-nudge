@@ -178,12 +178,33 @@ async def get_all_campaigns(
         newly_created_content_briefings = []
         if content_recommendations:
             for rec in content_recommendations:
-                # Sanitize the data before creating the SQLModel object.
+                # Sanitize the data before creating or updating the SQLModel object.
                 sanitized_resource = json_sanitize(rec['resource'])
                 sanitized_clients = json_sanitize(rec['matched_clients'])
 
+                briefing_id = uuid.UUID(str(rec['resource']['id']))
+
+                # Deduplication: if a briefing with this ID already exists, update it instead of inserting
+                existing = session.get(CampaignBriefing, briefing_id)
+                if existing:
+                    existing.user_id = current_user.id
+                    existing.campaign_type = 'content_recommendation'
+                    existing.headline = f"Content: {rec['resource']['title']}"
+                    existing.original_draft = rec['generated_message']
+                    existing.matched_audience = sanitized_clients
+                    existing.key_intel = {
+                        'content_preview': sanitized_resource,
+                        'strategic_context': f"Share this {rec['resource']['content_type']} with your client",
+                        'trigger_source': 'Content Library'
+                    }
+                    if existing.status != CampaignStatus.DRAFT:
+                        existing.status = CampaignStatus.DRAFT
+                    session.add(existing)
+                    newly_created_content_briefings.append(existing)
+                    continue
+
                 new_briefing = CampaignBriefing(
-                    id=uuid.UUID(str(rec['resource']['id'])),
+                    id=briefing_id,
                     user_id=current_user.id,
                     campaign_type='content_recommendation',
                     headline=f"Content: {rec['resource']['title']}",
@@ -198,7 +219,7 @@ async def get_all_campaigns(
                 )
                 crm_service.save_campaign_briefing(new_briefing, session=session)
                 newly_created_content_briefings.append(new_briefing)
-            
+
             session.commit()
         
         all_briefings = briefings_from_db + newly_created_content_briefings
