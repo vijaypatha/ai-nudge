@@ -126,70 +126,91 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     refreshConversationsRef.current = refreshConversations;
     refreshNudgesRef.current = refreshNudges;
   }, [refreshConversations, refreshNudges]);
+  
+  // --- WebSocket Connection Logic with Auto-Reconnect ---
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-
-  // --- WebSocket Connection Logic with all fixes applied ---
   useEffect(() => {
-    if (!isAuthenticated || socketRef.current) {
+    // This effect now only depends on `isAuthenticated` and `tokenRef.current`, making it stable.
+    if (!isAuthenticated || !tokenRef.current) {
       return;
     }
 
-    const wsUrl = (process.env.NEXT_PUBLIC_API_URL || 'ws://localhost:8001').replace(/^http/, 'ws');
-    const ws = new WebSocket(`${wsUrl}/ws/user?token=${tokenRef.current}`);
-    socketRef.current = ws;
+    let ws: WebSocket | null = null;
+    const connect = () => {
+      // Don't try to connect if one is already open or connecting.
+      if (socketRef.current && socketRef.current.readyState < 2) {
+        return;
+      }
+      
+      const wsUrl = (process.env.NEXT_PUBLIC_API_URL || 'ws://localhost:8001').replace(/^http/, 'ws');
+      ws = new WebSocket(`${wsUrl}/ws/user?token=${tokenRef.current}`);
+      socketRef.current = ws;
 
-    ws.onopen = () => {
-      console.log("WebSocket connection established for user notifications.");
-      setSocket(ws);
-    };
+      ws.onopen = () => {
+        console.log("WebSocket connection established for user notifications.");
+        setSocket(ws);
+        // Clear any pending retry timers on successful connection
+        if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+      };
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log("WebSocket message received:", data);
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("WebSocket message received:", data);
 
-        // FIX #2: Call the latest function from the ref to avoid stale closures
-        if (data.type === 'NEW_MESSAGE') {
-          console.log("New message received signal. Refreshing conversations list.");
-          refreshConversationsRef.current();
+          // Use refs to call the latest versions of these functions
+          if (data.type === 'NEW_MESSAGE') {
+            refreshConversationsRef.current();
+          }
+          if (data.event === 'nudges_updated' || data.type === 'NUDGES_UPDATED') {
+            refreshNudgesRef.current();
+          }
+        } catch (error) {
+          console.error("Error handling WebSocket message:", error);
         }
+      };
 
-        if (data.event === 'nudges_updated' || data.type === 'NUDGES_UPDATED') {
-          console.log("Nudges update signal received. Re-fetching nudges.");
-          refreshNudgesRef.current();
+      ws.onclose = (event) => {
+        console.log(`WebSocket connection closed. Code: ${event.code}`);
+        if (socketRef.current === ws) {
+          socketRef.current = null;
+          setSocket(null);
         }
-      } catch (error) {
-        console.error("Error handling WebSocket message:", error);
-      }
+        
+        // --- THIS IS THE AUTO-RECONNECT LOGIC ---
+        // Do not retry if the server closed the connection for a specific reason (e.g., auth failure)
+        // or if the user is no longer authenticated.
+        if (event.code !== 1008 && isAuthenticated) {
+          console.log("Attempting to reconnect in 5 seconds...");
+          retryTimeoutRef.current = setTimeout(connect, 5000);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+        // The onclose event will fire after an error, triggering the reconnect logic.
+        ws?.close();
+      };
     };
 
-    ws.onclose = () => {
-      console.log("WebSocket connection closed.");
-      if (socketRef.current === ws) {
-        setSocket(null);
-        socketRef.current = null;
-      }
-    };
+    connect(); // Initial connection attempt
 
-    ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
-      if (socketRef.current === ws) {
-        setSocket(null);
-        socketRef.current = null;
-      }
-    };
-
+    // Cleanup function
     return () => {
-      console.log("Cleaning up WebSocket connection.");
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close();
+      console.log("Cleaning up WebSocket effect.");
+      // Clear any pending retry timers
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
       }
-      if (socketRef.current === ws) {
+      // Close the WebSocket connection if it exists
+      if (socketRef.current) {
+        socketRef.current.onclose = null; // Prevent reconnect logic from firing on manual close
+        socketRef.current.close();
         socketRef.current = null;
       }
     };
-    // FIX #3: The dependency array is now minimal and stable. This effect only runs on auth changes.
-  }, [isAuthenticated]);
+  }, [isAuthenticated, tokenRef.current]); // Re-run only when authentication state changes
 
   // --- (Remaining hooks and functions are unchanged) ---
   useEffect(() => { const checkUserSession = async () => { setLoading(true); const savedToken = Cookies.get('auth_token'); if (savedToken) { await login(savedToken); } setLoading(false); }; checkUserSession(); }, [login]);
