@@ -20,9 +20,10 @@ interface InfoCardProps {
   className?: string;
   onEdit?: () => void;
   isPulsing?: boolean; // New prop for pulsing effect
+  headerAction?: React.ReactNode;
 }
 
-export const InfoCard = ({ title, icon, children, className, onEdit, isPulsing }: InfoCardProps) => (
+export const InfoCard = ({ title, icon, children, className, onEdit, isPulsing, headerAction }: InfoCardProps) => (
   <div className={clsx("bg-white/5 border border-white/10 rounded-xl relative transition-all", className)}>
     <div className="flex justify-between items-center px-4 pt-4 pb-2">
       <h3 className="text-sm font-semibold text-brand-text-muted flex items-center gap-2">
@@ -31,15 +32,18 @@ export const InfoCard = ({ title, icon, children, className, onEdit, isPulsing }
         </span>
         {title}
       </h3>
-      {onEdit && (
-        <button
-          onClick={onEdit}
-          className="p-1 text-brand-text-muted hover:text-white opacity-50 hover:opacity-100 transition-opacity"
-          title="Edit"
-        >
-          <Edit2 size={14} />
-        </button>
-      )}
+      <div className="flex items-center gap-2">
+        {headerAction}
+        {onEdit && (
+          <button
+            onClick={onEdit}
+            className="p-1 text-brand-text-muted hover:text-white opacity-50 hover:opacity-100 transition-opacity"
+            title="Edit"
+          >
+            <Edit2 size={14} />
+          </button>
+        )}
+      </div>
     </div>
     <div className="p-4 pt-0">
       {children}

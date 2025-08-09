@@ -1,5 +1,5 @@
 // frontend/app/(main)/conversations/[clientId]/page.tsx
-// --- FINAL CORRECTED VERSION ---
+// --- FINAL VERSION WITH INTERACTIVE SEARCH ---
 
 'use client';
 
@@ -20,6 +20,9 @@ import { ScheduleMessageModal } from '@/components/modals/ScheduleMessageModal';
 import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
 import { Users, Phone, Video, Loader2 } from 'lucide-react';
+
+// --- [NEW] Import the new search card component ---
+import { InteractiveSearchCard } from '@/components/conversation/InteractiveSearchCard';
 
 export interface ConversationDisplayConfig {
     client_intel: { title: string; icon: string; };
@@ -44,6 +47,15 @@ interface MessageComposerHandle {
     setValue: (value: string) => void;
 }
 
+// --- [NEW] Define the structure for a search result ---
+interface InteractiveSearchResult {
+    event_id: string;
+    headline: string;
+    resource: any;
+    score: number;
+    reasons: string[];
+}
+
 export default function ConversationPage({ params }: ConversationPageProps) {
     const { clientId } = params;
     const { api, socket, properties, updateClientInList, refetchScheduledMessagesForClient, refreshConversations } = useAppContext();
@@ -59,6 +71,10 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     const [isPlanSuccess, setIsPlanSuccess] = useState(false);
     const [isPlanUpdating, setIsPlanUpdating] = useState(false);
     
+    // --- [NEW] State management for the Interactive Search feature ---
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchResults, setSearchResults] = useState<InteractiveSearchResult[]>([]);
+
     const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
     const [composerContent, setComposerContent] = useState('');
 
@@ -86,6 +102,22 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         }
     }, [api, refetchScheduledMessagesForClient]);
 
+    // --- [NEW] Function to trigger and handle the interactive search API call ---
+    const handleInteractiveSearch = useCallback(async () => {
+        if (!api || !clientId) return;
+        setIsSearching(true);
+        setSearchResults([]); // Clear old results
+        try {
+            const results = await api.get(`/api/clients/${clientId}/search-matches`);
+            setSearchResults(results);
+        } catch (error) {
+            console.error("Failed to perform interactive search:", error);
+            alert("An error occurred while searching for matches.");
+        } finally {
+            setIsSearching(false);
+        }
+    }, [api, clientId]);
+
     useEffect(() => {
         const fetchClientAndConversation = async () => {
             if (!clientId || !api) return;
@@ -109,16 +141,10 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         const handleSocketMessage = (event: MessageEvent) => {
             try {
                 const data = JSON.parse(event.data);
-    
-                // Listen for new messages for the CURRENTLY viewed client
                 if (data.type === 'NEW_MESSAGE' && data.payload.client_id === clientId) {
-                    console.log(`NEW_MESSAGE event received for client ${clientId}. Refreshing conversation data.`);
                     fetchConversationData(clientId);
                 }
-
-                // Listen for plan updates for the CURRENTLY viewed client
                 if (data.event === 'PLAN_UPDATED' && data.clientId === clientId) {
-                    console.log(`PLAN_UPDATED event received for client ${clientId}. Refreshing data.`);
                     setIsPlanUpdating(true);
                     fetchConversationData(clientId);
                     setTimeout(() => setIsPlanUpdating(false), 5000);
@@ -127,28 +153,17 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                 console.error('WS: Error parsing message data', e);
             }
         };
-    
         socket.addEventListener('message', handleSocketMessage);
-    
-        return () => {
-            socket.removeEventListener('message', handleSocketMessage);
-        };
+        return () => { socket.removeEventListener('message', handleSocketMessage); };
     }, [socket, clientId, fetchConversationData]);
 
     const handleSendMessage = useCallback(async (content: string) => {
         if (!content.trim() || !selectedClient || isSending) return;
         setIsSending(true);
         const optimisticMessage: Message = { id: `agent-${Date.now()}`, client_id: selectedClient.id, content, direction: 'outbound', status: 'pending', created_at: new Date().toISOString(), source: 'manual', sender_type: 'user' };
-        
-        setConversationData(prevData => ({
-            ...(prevData || { messages: [], immediate_recommendations: null, active_plan: null }),
-            messages: [...(prevData?.messages || []), optimisticMessage],
-            immediate_recommendations: null,
-        }));
-
+        setConversationData(prevData => ({ ...(prevData || { messages: [], immediate_recommendations: null, active_plan: null }), messages: [...(prevData?.messages || []), optimisticMessage], immediate_recommendations: null, }));
         try {
             await api.post(`/api/conversations/${selectedClient.id}/send_reply`, { content });
-            // After sending, refresh both this conversation and the main list
             fetchConversationData(selectedClient.id);
             refreshConversations();
         } catch (err) {
@@ -174,6 +189,14 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         <>
             <DynamicTaggingCard client={selectedClient} onUpdate={handleClientUpdate} />
             <ClientIntelCard client={selectedClient} onUpdate={handleClientUpdate} onReplan={() => {}} displayConfig={displayConfig} />
+            
+            {/* --- [NEW] Render the Interactive Search Card --- */}
+            <InteractiveSearchCard 
+                onSearch={handleInteractiveSearch}
+                isSearching={isSearching}
+                results={searchResults}
+            />
+
             <ContentSuggestionsCard clientId={clientId} api={api} onSendMessage={handleSendMessage} />
             <RelationshipCampaignCard plan={activePlan || null} messages={scheduledMessages} onApprovePlan={(planId) => handlePlanAction('approve', planId)} onDismissPlan={(planId) => handlePlanAction('dismiss', planId)} isProcessing={isPlanProcessing} isSuccess={isPlanSuccess} isPlanUpdating={isPlanUpdating} onViewScheduled={() => router.push('/nudges?tab=scheduled')} displayConfig={displayConfig} />
             <InfoCard title={displayConfig?.properties?.title || 'Properties'}><ul className="space-y-4">{properties.slice(0, 3).map(property => (<li key={property.id} className="flex items-center gap-4"><div className="relative w-20 h-16 bg-brand-dark rounded-md overflow-hidden flex-shrink-0"><Image src={property.image_urls?.[0] || `https://placehold.co/300x200/0B112B/C4C4C4?text=${property.address.split(',')[0]}`} alt={`Image of ${property.address}`} layout="fill" objectFit="cover" /></div><div><h4 className="font-semibold text-brand-text-main truncate">{property.address}</h4><p className="text-sm text-brand-text-muted">${property.price.toLocaleString()}</p><p className="text-xs text-brand-accent font-medium">{property.status}</p></div></li>))}</ul></InfoCard>
