@@ -3,12 +3,12 @@
 import logging
 import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
-from api.websocket_manager import manager
-from data.models.user import User
+from backend.api.websocket_manager import manager
+from backend.data.models.user import User
 from jose import JWTError, jwt
 from sqlmodel import Session
-from data.database import engine
-from common.config import get_settings
+from backend.data.database import engine
+from backend.common.config import get_settings
 
 settings = get_settings()
 router = APIRouter()

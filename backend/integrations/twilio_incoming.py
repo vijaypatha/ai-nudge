@@ -81,9 +81,12 @@ async def process_incoming_sms(from_number: str, to_number: str, body: str):
         
         try:
             saved_message = crm_service.save_message(incoming_message, session=session)
-            logging.info(f"TWILIO: Logged incoming message from client {found_client.id}")
+            # Ensure the message is actually committed so downstream readers see it
+            session.commit()
+            session.refresh(saved_message)
+            logging.info(f"TWILIO: Logged and committed incoming message from client {found_client.id}")
 
-            # Publish the NEW_MESSAGE event to the Redis channel
+            # Publish the NEW_MESSAGE event to the Redis channel AFTER commit
             message_payload = json.loads(saved_message.model_dump_json())
             notification_payload = {
                 "user_id": str(user.id),
@@ -94,6 +97,7 @@ async def process_incoming_sms(from_number: str, to_number: str, body: str):
 
         except Exception as e:
             logging.error(f"TWILIO: Failed to save or publish incoming message: {e}", exc_info=True)
+            session.rollback()
             return
 
     # FAQ AUTO-REPLY (This logic remains unchanged)

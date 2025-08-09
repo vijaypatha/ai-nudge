@@ -194,11 +194,29 @@ def get_clients_by_ids(client_ids: List[UUID], user_id: UUID) -> List[Client]:
         )
         return session.exec(statement).all()
 
-def get_client_by_phone(phone_number: str, user_id: uuid.UUID) -> Optional[Client]:
-    """Retrieves a single client by their phone number, ensuring it belongs to the user."""
-    with Session(engine) as session:
-        statement = select(Client).where(Client.phone == phone_number, Client.user_id == user_id)
-        return session.exec(statement).first()
+def get_client_by_phone(
+    phone_number: str,
+    user_id: uuid.UUID,
+    session: Optional[Session] = None,
+) -> Optional[Client]:
+    """
+    Retrieves a single client by their phone number, ensuring it belongs to the user.
+    Accepts an optional session to participate in a larger transaction.
+    """
+    normalized_number = format_phone_number(phone_number)
+
+    def _get(db_session: Session) -> Optional[Client]:
+        statement = select(Client).where(
+            Client.phone == normalized_number,
+            Client.user_id == user_id,
+        )
+        return db_session.exec(statement).first()
+
+    if session:
+        return _get(session)
+    else:
+        with Session(engine) as new_session:
+            return _get(new_session)
 
 def get_all_clients(user_id: uuid.UUID, session: Optional[Session] = None) -> List[Client]:
     """Retrieves all clients from the database for a specific user."""
