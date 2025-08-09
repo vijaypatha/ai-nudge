@@ -46,11 +46,19 @@ def get_user_by_id(user_id: uuid.UUID, session: Optional[Session] = None) -> Opt
         with Session(engine) as new_session:
             return _get(new_session)
     
-def get_user_by_twilio_number(phone_number: str) -> Optional[User]:
+# --- FIND AND REPLACE THIS FUNCTION ---
+
+def get_user_by_twilio_number(phone_number: str, session: Optional[Session] = None) -> Optional[User]:
     """Retrieves a single user by their assigned Twilio phone number."""
-    with Session(engine) as session:
+    def _get(db_session: Session):
         statement = select(User).where(User.twilio_phone_number == phone_number)
-        return session.exec(statement).first()
+        return db_session.exec(statement).first()
+
+    if session:
+        return _get(session)
+    else:
+        with Session(engine) as new_session:
+            return _get(new_session)
 
 def update_user(user_id: uuid.UUID, update_data: UserUpdate) -> Optional[User]:
     """Updates a user's record with the provided data."""
