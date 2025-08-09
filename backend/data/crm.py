@@ -620,6 +620,14 @@ def get_campaign_briefing_by_id(
     else:
         with Session(engine) as new_session:
             return _get(new_session)
+
+def get_campaign_briefing_by_resource_id(resource_id: UUID, session: Session) -> Optional[CampaignBriefing]:
+    """
+    Finds a campaign briefing by the resource ID that triggered it.
+    Used to prevent duplicate nudge creation for the same event.
+    """
+    statement = select(CampaignBriefing).where(CampaignBriefing.triggering_resource_id == resource_id)
+    return session.exec(statement).first()
     
 def get_active_events_in_range(lookback_days: int, session: Session) -> List[MarketEvent]:
     """
