@@ -37,7 +37,7 @@ async def test_mls_new_listing_event_creates_campaign(session: Session):
             full_name="Test Realtor", 
             email="realtor@test.com", 
             phone_number="+15551112222",
-            vertical="real_estate"  # Set the vertical for the nudge engine
+            vertical="real_estate"
         )
         
         matching_client = Client(
@@ -48,12 +48,11 @@ async def test_mls_new_listing_event_creates_campaign(session: Session):
                 "locations": ["Pleasant Grove"], 
                 "min_bedrooms": 4
             },
-            user_tags=["buyer"]  # Add the buyer tag
+            user_tags=["buyer"]
         )
         session.add(realtor)
         session.add(matching_client)
         
-        # --- MODIFIED: This payload is now stored in the 'attributes' field of a Resource ---
         property_attributes = {
             "address": "123 Main St, Pleasant Grove, UT", 
             "price": 750000.0, 
@@ -61,37 +60,45 @@ async def test_mls_new_listing_event_creates_campaign(session: Session):
             "property_type": "SingleFamily", 
             "listing_url": "http://example.com/123",
             "last_updated": "2025-07-07T12:00:00Z",
-            "ListPrice": 750000,  # Add the ListPrice field that the scoring function expects
-            "BedroomsTotal": 4,    # Add the BedroomsTotal field
-            "City": "Pleasant Grove",  # Add the City field
-            "SubdivisionName": "Pleasant Grove",  # Add the SubdivisionName field
-            "PublicRemarks": "Beautiful home in Pleasant Grove with 4 bedrooms"  # Add remarks for scoring
+            "ListPrice": 750000,
+            "BedroomsTotal": 4,
+            "City": "Pleasant Grove",
+            "SubdivisionName": "Pleasant Grove",
+            "PublicRemarks": "Beautiful home in Pleasant Grove with 4 bedrooms"
         }
-        entity_id = uuid.uuid5(uuid.NAMESPACE_DNS, property_attributes["address"])
+        # Use a consistent UUID for the resource
+        resource_id = uuid.uuid5(uuid.NAMESPACE_DNS, property_attributes["address"])
 
-        # --- MODIFIED: Create a generic Resource instead of a specific Property ---
         resource_to_save = Resource(
-            id=entity_id, 
+            id=resource_id, 
             user_id=realtor.id,
-            resource_type="property", # Specify the vertical type
+            resource_type="property",
             status="ACTIVE",
-            attributes=property_attributes # Store all specific data here
+            entity_id=str(resource_id), # Ensure entity_id is set
+            attributes=property_attributes
         )
         session.add(resource_to_save)
         session.commit()
         
         new_listing_event = MarketEvent(
             id=uuid.uuid4(),
-            user_id=realtor.id,  # Add the user_id field
+            user_id=realtor.id,
             event_type="new_listing", 
             market_area="pleasant_grove", 
-            entity_type="RESOURCE", # entity_type is now generic
-            entity_id=str(entity_id), 
-            payload=property_attributes  # Convert UUID to string for SQLite compatibility
+            entity_type="property", # Corrected to match resource_type
+            entity_id=str(resource_id), 
+            payload=property_attributes
         )
 
         # 2. ACT
-        await nudge_engine.process_market_event(event=new_listing_event, user=realtor, db_session=session)
+        # --- THIS IS THE FIX ---
+        # Call the new, refactored nudge engine function directly.
+        await nudge_engine.find_best_match_for_event(
+            event=new_listing_event, 
+            user=realtor, 
+            resource=resource_to_save, 
+            db_session=session
+        )
 
         # 3. ASSERT
         statement = select(CampaignBriefing).where(CampaignBriefing.user_id == realtor.id)
