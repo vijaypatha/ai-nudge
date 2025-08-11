@@ -106,8 +106,11 @@ def assign_phone_number(
         if os.getenv("ENVIRONMENT") == "development":
             logger.warning("DEVELOPMENT MODE: Simulating Twilio number purchase. No real purchase will be made.")
             # Create a mock object that mimics the real Twilio response object.
-            # The only attribute we use from it is .phone_number.
-            incoming_phone_number = SimpleNamespace(phone_number=payload.phone_number)
+            # Include both phone_number and sid attributes for realistic simulation.
+            incoming_phone_number = SimpleNamespace(
+                phone_number=payload.phone_number,
+                sid="PN1234567890ABCDEF1234567890ABCDEF"  # Fixed fake SID for development
+            )
         else:
             # This is the original logic that runs in production
             incoming_phone_number = twilio_client.incoming_phone_numbers.create(
@@ -115,6 +118,35 @@ def assign_phone_number(
             )
         
         # The rest of the function proceeds as normal, using the real or mock object
+        
+        # --- CORRECTED LOGIC ---
+        # Assign the phone number to the default messaging service if configured
+        if settings.TWILIO_DEFAULT_MESSAGING_SERVICE_SID:
+            try:
+                # The environment check now happens INSIDE the main logic block
+                if os.getenv("ENVIRONMENT") == "development":
+                    # In dev, we log that we WOULD make the call, proving the code path works.
+                    logger.warning(
+                        f"DEVELOPMENT MODE: Simulating attachment of SID {incoming_phone_number.sid} "
+                        f"to Messaging Service {settings.TWILIO_DEFAULT_MESSAGING_SERVICE_SID}."
+                    )
+                else:
+                    # In prod, we make the real API call.
+                    twilio_client.messaging.services(settings.TWILIO_DEFAULT_MESSAGING_SERVICE_SID).phone_numbers.create(
+                        phone_number_sid=incoming_phone_number.sid
+                    )
+                
+                # This log can now be shared by both environments
+                logger.info(
+                    f"📦 Successfully processed attachment for phone number {incoming_phone_number.phone_number} "
+                    f"(SID: {incoming_phone_number.sid}) to Messaging Service {settings.TWILIO_DEFAULT_MESSAGING_SERVICE_SID}"
+                )
+
+            except Exception as e:
+                # This error handling now applies to production API calls
+                logger.error(f"❌ Failed to attach phone number {incoming_phone_number.phone_number} to Messaging Service: {str(e)}")
+                raise HTTPException(status_code=500, detail="Failed to attach number to messaging service.")
+        
         update_data = UserUpdate(twilio_phone_number=incoming_phone_number.phone_number)
         updated_user = crm_service.update_user(user_id=current_user.id, update_data=update_data)
         
