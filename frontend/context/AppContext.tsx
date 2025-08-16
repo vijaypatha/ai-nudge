@@ -9,7 +9,7 @@ import Cookies from 'js-cookie';
 
 // --- (Interfaces are unchanged) ---
 export interface User { id: string; full_name: string; email?: string; phone_number: string; twilio_phone_number?: string; user_type: 'realtor' | 'therapist' | 'loan_officer' | null; onboarding_complete: boolean; onboarding_state: { phone_verified: boolean; work_style_set: boolean; contacts_imported: boolean; first_nudges_seen: boolean;[key: string]: any; }; timezone?: string; mls_username?: string; mls_password?: string; license_number?: string; specialties?: string[]; faq_auto_responder_enabled: boolean; vertical?: string; tool_provider?: string; super_user?: boolean; }
-export interface Client { id: string; user_id: string; full_name: string; email: string | null; phone: string | null; ai_tags: string[]; user_tags: string[]; preferences: { notes?: string[];[key: string]: any; }; last_interaction: string | null; notes?: string; timezone?: string; }
+export interface Client { id: string; user_id: string; full_name: string; email: string | null; phone: string | null; ai_tags: string[]; user_tags: string[]; preferences: { notes?: string[];[key: string]: any; }; last_interaction: string | null; notes?: string; timezone?: string; intake_survey_completed?: boolean; intake_survey_sent_at?: string; }
 export interface Property { id: string; address: string; price: number; status: string; image_urls: string[]; }
 export interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reasons: string[]; }
 export interface CampaignBriefing { id: string; user_id: string; campaign_type: string; headline: string; listing_url?: string; key_intel: { [key: string]: any }; original_draft: string; edited_draft?: string; matched_audience: MatchedClient[]; status: string; is_plan: boolean; parent_message_id?: string; }
@@ -131,8 +131,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // This effect now only depends on `isAuthenticated` and `tokenRef.current`, making it stable.
-    if (!isAuthenticated || !tokenRef.current) {
+    // Only establish WebSocket connection when authenticated
+    if (!isAuthenticated) {
       return;
     }
 
@@ -143,8 +143,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
       
+      const token = tokenRef.current;
+      if (!token) {
+        console.log("No token available for WebSocket connection");
+        return;
+      }
+      
       const wsUrl = (process.env.NEXT_PUBLIC_API_URL || 'ws://localhost:8001').replace(/^http/, 'ws');
-      ws = new WebSocket(`${wsUrl}/ws/user?token=${tokenRef.current}`);
+      ws = new WebSocket(`${wsUrl}/ws/user?token=${token}`);
       socketRef.current = ws;
 
       ws.onopen = () => {
@@ -178,10 +184,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           setSocket(null);
         }
         
-        // --- THIS IS THE AUTO-RECONNECT LOGIC ---
-        // Do not retry if the server closed the connection for a specific reason (e.g., auth failure)
-        // or if the user is no longer authenticated.
-        if (event.code !== 1008 && isAuthenticated) {
+        // Only retry if the connection was closed unexpectedly and user is still authenticated
+        if (event.code !== 1008 && event.code !== 1012 && isAuthenticated) {
           console.log("Attempting to reconnect in 5 seconds...");
           retryTimeoutRef.current = setTimeout(connect, 5000);
         }
@@ -210,7 +214,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         socketRef.current = null;
       }
     };
-  }, [isAuthenticated, tokenRef.current]); // Re-run only when authentication state changes
+  }, [isAuthenticated]); // Only depend on authentication state, not the token ref
 
   // --- (Remaining hooks and functions are unchanged) ---
   useEffect(() => { const checkUserSession = async () => { setLoading(true); const savedToken = Cookies.get('auth_token'); if (savedToken) { await login(savedToken); } setLoading(false); }; checkUserSession(); }, [login]);

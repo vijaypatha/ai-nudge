@@ -15,19 +15,21 @@ async def generate_embedding(text: str) -> List[float]:
     """
     if not text or not text.strip():
         logger.warning("LLM CLIENT: generate_embedding called with empty text. Returning zero-vector.")
-        return [0.0] * 1536  # OpenAI embedding dimension
+        return [0.0] * 768  # Gemini embedding dimension
     
     settings = get_settings()
     
     try:
         if settings.LLM_PROVIDER == "openai":
             return await _generate_openai_embedding(text)
+        elif settings.LLM_PROVIDER == "gemini":
+            return await _generate_gemini_embedding(text)
         else:
             logger.error(f"LLM CLIENT: Unsupported provider '{settings.LLM_PROVIDER}'")
-            return [0.0] * 1536
+            return [0.0] * 768
     except Exception as e:
         logger.error(f"LLM CLIENT: Failed to generate embedding: {e}")
-        return [0.0] * 1536
+        return [0.0] * 768
 
 async def _generate_openai_embedding(text: str) -> List[float]:
     """Generates embedding using OpenAI API with proper error handling."""
@@ -36,7 +38,16 @@ async def _generate_openai_embedding(text: str) -> List[float]:
         return await get_text_embedding(text)
     except Exception as e:
         logger.error(f"LLM CLIENT: OpenAI embedding failed: {e}")
-        return [0.0] * 1536
+        return [0.0] * 768
+
+async def _generate_gemini_embedding(text: str) -> List[float]:
+    """Generates embedding using Gemini API with proper error handling."""
+    try:
+        from integrations.gemini import get_text_embedding
+        return await get_text_embedding(text)
+    except Exception as e:
+        logger.error(f"LLM CLIENT: Gemini embedding failed: {e}")
+        return [0.0] * 768
 
 async def get_chat_completion(
     prompt: str,
@@ -45,23 +56,18 @@ async def get_chat_completion(
     json_response: bool = False
 ) -> Optional[str]:
     """
-    Gets a chat completion from the configured LLM provider. This function now
-    correctly formats the request for the underlying provider functions.
+    Gets a chat completion from the configured LLM provider.
     """
     settings = get_settings()
     provider = settings.LLM_PROVIDER
     
     logger.info(f"LLM CLIENT: Requesting chat completion with provider '{provider}'...")
     
-    # This is the critical change: construct the 'messages' list that the
-    # underlying provider functions now expect.
-    messages_payload = [{"role": "user", "content": prompt}]
-    
     try:
         if provider.lower() == "openai":
             from integrations.openai import get_chat_completion
             return await get_chat_completion(
-                messages=messages_payload, 
+                prompt=prompt, 
                 temperature=temperature, 
                 max_tokens=max_tokens, 
                 json_response=json_response
@@ -69,10 +75,10 @@ async def get_chat_completion(
         elif provider.lower() == "gemini":
             from integrations.gemini import get_chat_completion as get_gemini_chat
             return await get_gemini_chat(
-                messages=messages_payload, 
+                prompt=prompt, 
                 temperature=temperature, 
                 max_tokens=max_tokens, 
-                json_response=json_response
+                response_format={"type": "json_object"} if json_response else None
             )
         else:
             raise ValueError(f"Unknown LLM_PROVIDER '{provider}' in settings.")

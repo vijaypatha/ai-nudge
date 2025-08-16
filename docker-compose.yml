@@ -75,6 +75,7 @@ services:
     restart: unless-stopped
     command: celery -A backend.celery_worker.celery_app worker --loglevel=info --concurrency=2
     environment:
+      PYTHONDONTWRITEBYTECODE: "1" # Prevents Python from writing .pyc files
       ENVIRONMENT: development
       PYTHONPATH: /app
       RUNNING_IN_CELERY: "true"
@@ -102,6 +103,7 @@ services:
     restart: unless-stopped
     command: celery -A backend.celery_worker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     environment:
+      PYTHONDONTWRITEBYTECODE: "1" # Prevents Python from writing .pyc files
       ENVIRONMENT: development
       PYTHONPATH: /app
       RUNNING_IN_CELERY: "true"

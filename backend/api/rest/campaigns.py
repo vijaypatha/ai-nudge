@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional
 from uuid import UUID
 import uuid
 from pydantic import BaseModel
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 # Local application imports
 from data.models.user import User
@@ -20,6 +20,7 @@ from workflow import outbound as outbound_workflow
 from agent_core.brain import relationship_planner
 from workflow import campaigns as campaign_workflow
 from data.models.campaign import CampaignBriefing, CampaignUpdate, CampaignStatus, MatchedClient
+from data.models.resource import Resource
 from agent_core.content_resource_service import get_content_recommendations_for_user
 from data.database import get_session
 import pytz 
@@ -55,6 +56,7 @@ class ClientNudgeSummary(BaseModel):
     client_name: str
     total_nudges: int
     nudge_type_counts: Dict[str, int]
+    consolidated_nudge_id: Optional[str] = None
 
 class ClientNudgeSummaryResponse(BaseModel):
     client_summaries: List[ClientNudgeSummary]
@@ -141,6 +143,13 @@ def get_client_nudge_summary_list(
         
         display_config['content_recommendation'] = {
             'icon': 'BookOpen', 'color': 'text-blue-400', 'title': 'Content'
+        }
+
+        # --- THIS IS THE FIX ---
+        # We now add the missing display configuration for the main consolidated nudge type,
+        # ensuring the frontend knows how to style it.
+        display_config['consolidated_initial_matches'] = {
+            'icon': 'Home', 'color': 'text-primary-action', 'title': 'Initial Matches'
         }
 
         return ClientNudgeSummaryResponse(
@@ -354,6 +363,77 @@ async def send_instant_nudge_now(
     if not saved_message:
         raise HTTPException(status_code=500, detail="Failed to send instant nudge.")
     return saved_message
+#  adds the new "Render" and "Regenerate" endpoints needed by the frontend.
+
+class RenderedBriefingResponse(BaseModel):
+    id: UUID
+    headline: str
+    original_draft: str
+    key_intel: Dict[str, Any]
+    matched_audience: List[MatchedClient]
+    top_matches_rendered: List[Dict[str, Any]] = []
+
+@router.get("/{campaign_id}/render", response_model=RenderedBriefingResponse)
+async def render_campaign_briefing(
+    campaign: CampaignBriefing = Depends(get_campaign_briefing_for_user_from_path),
+    session: Session = Depends(get_session)
+):
+    """
+    MODIFIED: Renders a consolidated briefing by fetching the latest resource
+    data and using the pre-computed commentary saved in the nudge.
+    """
+    rendered_matches = []
+    if resource_pointers := campaign.key_intel.get("matched_resource_ids"):
+        resource_ids = [UUID(p["resource_id"]) for p in resource_pointers]
+        resources = session.exec(select(Resource).where(Resource.id.in_(resource_ids))).all()
+        resource_map = {str(r.id): r for r in resources}
+
+        for pointer in resource_pointers:
+            resource = resource_map.get(pointer["resource_id"])
+            if resource and resource.status == "active":
+                # --- THIS IS THE NEW LOGIC ---
+                # Read the pre-computed commentary directly from the pointer.
+                # No more just-in-time generation here.
+                rendered_match = pointer.copy()
+                rendered_match["resource_data"] = resource.attributes
+                # The 'agent_commentary' key is now expected to be in the pointer
+                rendered_matches.append(rendered_match)
+
+    # Sort matches by score to ensure consistent display
+    rendered_matches.sort(key=lambda x: x.get('score', 0), reverse=True)
+
+    return RenderedBriefingResponse(
+        id=campaign.id,
+        headline=campaign.headline,
+        original_draft=campaign.original_draft,
+        key_intel=campaign.key_intel,
+        matched_audience=[MatchedClient.model_validate(m) for m in campaign.matched_audience],
+        top_matches_rendered=rendered_matches
+    )
+
+
+@router.post("/{campaign_id}/regenerate", status_code=202)
+async def regenerate_campaign_matches(
+    campaign: CampaignBriefing = Depends(get_campaign_briefing_for_user_from_path),
+    session: Session = Depends(get_session)
+):
+    """
+    Triggers a regeneration of the consolidated match list for a briefing.
+    """
+    from agent_core.brain import nudge_engine
+    logging.info(f"API: Triggering manual regeneration for briefing {campaign.id}")
+    
+    # Run regeneration in the background
+    background_tasks = BackgroundTasks()
+    background_tasks.add_task(
+        nudge_engine._create_or_update_consolidated_nudge,
+        client=campaign.client,
+        user=campaign.user,
+        session=session,
+        source="manual_regeneration"
+    )
+    
+    return {"status": "success", "message": "Regeneration process started."}
 
 @router.put("/{campaign_id}", response_model=CampaignBriefing)
 async def update_campaign_briefing(

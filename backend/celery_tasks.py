@@ -340,39 +340,12 @@ def health_check_task() -> dict:
         return {"status": "unhealthy", "error": str(e)}
     
 # --- [NEW] Task for the Proactive Nudge Pipeline ---
+# This task is now deprecated in favor of a single batch processing task, 
+# but we keep the stub to prevent errors from any old tasks still in the queue.
 @celery_app.task(name="tasks.score_event_for_best_match")
 def score_event_for_best_match_task(market_event_id: str):
-    """
-    PROACTIVE PIPELINE: Takes a new market event, finds the best client match,
-    and creates a single nudge.
-    """
-    from data.database import engine
-    from agent_core.brain.nudge_engine import find_best_match_for_event
-    from data.models.user import User
-    
-    logger.info(f"CELERY: Proactive pipeline starting for MarketEvent ID: {market_event_id}")
-    with Session(engine) as session:
-        event = session.get(MarketEvent, UUID(market_event_id))
-        if not event:
-            logger.error(f"CELERY: MarketEvent {market_event_id} not found.")
-            return {"status": "error", "reason": "event_not_found"}
-
-        user = session.get(User, event.user_id)
-        resource = crm_service.get_resource_by_entity_id(event.entity_id, session)
-        if not user or not resource:
-            logger.error(f"CELERY: User or Resource not found for event {market_event_id}.")
-            return {"status": "error", "reason": "user_or_resource_not_found"}
-        
-        try:
-            asyncio.run(find_best_match_for_event(event, user, resource, session))
-            event.status = "processed"
-            session.add(event)
-            session.commit()
-            logger.info(f"CELERY: Proactive pipeline finished for MarketEvent ID: {market_event_id}")
-            return {"status": "success"}
-        except Exception as e:
-            logger.error(f"CELERY: Proactive pipeline failed for event {market_event_id}: {e}", exc_info=True)
-            return {"status": "error", "reason": str(e)}
+    logger.warning(f"CELERY: Deprecated task 'score_event_for_best_match' called for event {market_event_id}. Logic has moved to the main pipeline task.")
+    return {"status": "deprecated"}
 
 # --- [NEW] Task for the Client Backfill Pipeline ---
 @celery_app.task(name="tasks.backfill_nudges_for_client")

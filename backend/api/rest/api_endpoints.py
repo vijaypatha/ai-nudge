@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import os
 
 # --- MODIFIED: Removed 'properties' from the import list ---
-from . import admin_triggers, auth, campaigns, clients, conversations, faqs, inbox, nudges, users, scheduled_messages, community, twilio_numbers, websockets, content_resources, mls
+from . import admin_triggers, auth, campaigns, clients, conversations, faqs, inbox, nudges, users, scheduled_messages, community, twilio_numbers, websockets, content_resources, mls, surveys, portal
 
 api_router = APIRouter()
 
@@ -27,6 +27,8 @@ api_router.include_router(websockets.router)
 api_router.include_router(content_resources.router, prefix="/content-resources", tags=["content-resources"])
 
 api_router.include_router(mls.router)
+api_router.include_router(surveys.router)
+api_router.include_router(portal.router)
 
 # --- ADDED: Simple properties endpoint to prevent 404 errors ---
 @api_router.get("/properties")

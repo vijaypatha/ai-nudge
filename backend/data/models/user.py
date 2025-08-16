@@ -1,9 +1,4 @@
-# ---
 # File Path: backend/data/models/user.py
-# ---
-# DEFINITIVE FIX: Adds 'tool_provider' and 'vertical' to support the
-# new vertical-agnostic architecture.
-# ---
 
 from enum import Enum
 from typing import List, Optional, TYPE_CHECKING, Dict, Any
@@ -13,9 +8,10 @@ from sqlmodel import SQLModel, Field, Relationship, Column, JSON
 if TYPE_CHECKING:
     from .campaign import CampaignBriefing
     from .faq import Faq
-    from .client import Client
+    from .client import Client, ClientIntakeSurvey
     from .message import Message, ScheduledMessage
     from .resource import Resource, ContentResource
+    from .survey import SurveyQuestion  # Import the new model
 
 class UserType(str, Enum):
     REALTOR = "realtor"
@@ -32,13 +28,9 @@ class User(SQLModel, table=True):
     email: Optional[str] = Field(default=None, index=True)
     phone_number: str = Field(index=True, unique=True)
     
-    # --- NEW: Vertical-Agnostic Configuration ---
-    # Stores the user's professional vertical (e.g., 'real_estate', 'therapy')
+    # --- Vertical-Agnostic Configuration ---
     vertical: Optional[str] = Field(default=None, index=True)
-    # Stores the key for the integration tool factory (e.g., 'flexmls_spark')
     tool_provider: Optional[str] = Field(default=None, index=True)
-    # --- NEW: Super User Flag ---
-    # Allows access to all verticals for monitoring purposes
     super_user: bool = Field(default=False, index=True)
 
     # --- Onboarding Tracking Fields ---
@@ -63,6 +55,11 @@ class User(SQLModel, table=True):
     license_number: Optional[str] = Field(default=None)
     specialties: Optional[List[str]] = Field(default_factory=list, sa_column=Column(JSON))
     faq_auto_responder_enabled: bool = Field(default=True)
+    
+    # --- Survey configuration ---
+    intake_survey_enabled: bool = Field(default=True)
+    intake_survey_auto_send: bool = Field(default=True)
+    intake_survey_delay_hours: int = Field(default=24)
     twilio_phone_number: Optional[str] = Field(default=None, index=True)
     timezone: Optional[str] = Field(default=None, index=True)
 
@@ -74,6 +71,9 @@ class User(SQLModel, table=True):
     scheduled_messages: List["ScheduledMessage"] = Relationship(back_populates="user")
     resources: List["Resource"] = Relationship(back_populates="user")
     content_resources: List["ContentResource"] = Relationship(back_populates="user")
+    client_surveys: List["ClientIntakeSurvey"] = Relationship(back_populates="user")
+    # --- NEW RELATIONSHIP ---
+    custom_survey_questions: List["SurveyQuestion"] = Relationship(back_populates="user")
 
 class UserUpdate(SQLModel):
     """Defines all updatable fields for a user."""
@@ -84,21 +84,17 @@ class UserUpdate(SQLModel):
     onboarding_complete: Optional[bool] = None
     onboarding_state: Optional[Dict[str, Any]] = None
 
-    # --- NEW: Add new fields to the update model ---
     vertical: Optional[str] = None
     tool_provider: Optional[str] = None
     super_user: Optional[bool] = None
 
-    # Existing Fields
     market_focus: Optional[List[str]] = None
     ai_style_guide: Optional[Dict[str, Any]] = None
     strategy: Optional[Dict[str, Any]] = None
     mls_username: Optional[str] = None
     mls_password: Optional[str] = None
     license_number: Optional[str] = None
-    # --- MODIFIED: Ensure 'specialties' is included for updates ---
     specialties: Optional[List[str]] = None
     faq_auto_responder_enabled: Optional[bool] = None
     twilio_phone_number: Optional[str] = None
     timezone: Optional[str] = None
-

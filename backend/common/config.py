@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     """
     model_config = ConfigDict(env_file=".env", env_file_encoding="utf-8")
 
-    LLM_PROVIDER: str = "openai"
+    LLM_PROVIDER: str = "gemini"  # Changed from "openai" to "gemini"
     OPENAI_API_KEY: str
     GOOGLE_API_KEY: str
     GOOGLE_CSE_ID: str
@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     # ALLOWED_CORS_ORIGINS: str = "http://localhost:3000,https://ai-nudge-frontend.onrender.com,https://ai-nudge.onrender.com"
     ALLOWED_CORS_ORIGINS: str = "http://localhost:3000,https://ai-nudge-frontend.onrender.com,https://ai-nudge.onrender.com,https://www.ainudge.app"
     CORS_ORIGIN_REGEX: Optional[str] = r"https://ai-nudge-frontend-pr-.*\.onrender\.com"
+    FRONTEND_BASE_URL: str = "http://localhost:3000"
+
     
     WEBSOCKET_ALLOWED_ORIGINS: str = '["https://www.ainudge.app", "https://ainudge.app"]' # Allow your domains
 

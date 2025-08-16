@@ -91,14 +91,101 @@ Response:"""
         logging.error(f"GEMINI FAQ ERROR: {e}")
         return None
 
-async def get_chat_completion(prompt: str, **kwargs) -> Optional[str]:
+async def get_chat_completion(
+    prompt_messages: List[dict] = None,
+    prompt: str = None,
+    model: str = "gemini-2.5-flash",
+    temperature: float = 0.7,
+    max_tokens: int = 1000,
+    response_format: dict = None,
+    **kwargs
+) -> Optional[str]:
     """
-    (Placeholder) Gets a chat completion from the Google Gemini API.
+    Gets a chat completion from Google Gemini 2.5 API.
     
-    NOTE: This function is a placeholder to fix a critical import error. 
-    It is not a full implementation for Gemini chat completions.
-    The system will work correctly as long as the LLM_PROVIDER is set to 'openai'.
+    Args:
+        prompt_messages: List of message dicts with 'role' and 'content' keys
+        prompt: Single string prompt (alternative to prompt_messages)
+        model: Gemini model to use (default: gemini-2.0-flash-exp)
+        temperature: Controls randomness (0.0-1.0)
+        max_tokens: Maximum tokens to generate
+        response_format: Format specification (e.g., {"type": "json_object"})
+        **kwargs: Additional arguments
+    
+    Returns:
+        Generated text response or None on error
     """
-    logger.error("The 'get_chat_completion' function for the Gemini provider is a placeholder and has not been implemented yet.")
-    # This error is raised to prevent use of an incomplete feature.
-    raise NotImplementedError("Gemini chat completion is not yet supported in this version.")
+    try:
+        # Use Gemini 2.5 Flash for best performance
+        genai_model = genai.GenerativeModel(model)
+        
+        # Prepare content based on input format
+        if prompt_messages:
+            # Convert OpenAI-style messages to Gemini format
+            content_parts = []
+            for msg in prompt_messages:
+                role = msg.get('role', 'user')
+                content = msg.get('content', '')
+                
+                if role == 'system':
+                    # Gemini doesn't have system messages, so we prepend to user message
+                    content_parts.append(f"System: {content}")
+                elif role in ['user', 'assistant']:
+                    content_parts.append(f"{role.title()}: {content}")
+            
+            # Combine all content
+            full_prompt = "\n\n".join(content_parts)
+        elif prompt:
+            full_prompt = prompt
+        else:
+            raise ValueError("Either prompt_messages or prompt must be provided")
+        
+        # Configure generation parameters
+        generation_config = genai.types.GenerationConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+            candidate_count=1
+        )
+        
+        # Handle JSON response format
+        if response_format and response_format.get("type") == "json_object":
+            # Gemini's official JSON mode is activated by setting the response_mime_type.
+            # This is more reliable than instructing it in the prompt.
+            generation_config.response_mime_type = "application/json"
+        
+        # Generate response
+        response = await genai_model.generate_content_async(
+            full_prompt,
+            generation_config=generation_config
+        )
+        
+        result = response.text.strip()
+        logger.info(f"GEMINI CHAT: Generated response with {len(result)} characters")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"GEMINI CHAT ERROR: {e}")
+        return None
+
+async def generate_text_completion(
+    prompt_messages: List[dict] = None,
+    prompt: str = None,
+    model: str = "gemini-2.0-flash-exp",
+    temperature: float = 0.7,
+    max_tokens: int = 1000,
+    response_format: dict = None,
+    **kwargs
+) -> Optional[str]:
+    """
+    Alias for get_chat_completion to maintain compatibility with existing code.
+    """
+    return await get_chat_completion(
+        prompt_messages=prompt_messages,
+        prompt=prompt,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        response_format=response_format,
+        **kwargs
+    )

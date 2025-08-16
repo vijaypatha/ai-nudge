@@ -53,14 +53,13 @@ class UpdateNotesPayload(BaseModel):
 # --- NEW: Pydantic models for the client-centric nudge response ---
 class NudgeResource(BaseModel):
     address: Optional[str] = None
-    price: Optional[int] = None
+    price: Optional[float] = None
     beds: Optional[int] = None
     baths: Optional[int] = None
     attributes: Dict[str, Any] = {}
 
 class ClientNudgeResponse(BaseModel):
-    # This model now mirrors the structure expected by ActionDeck.tsx
-    id: UUID # Use 'id' to match the frontend's CampaignBriefingType
+    id: UUID
     campaign_id: UUID
     headline: str
     campaign_type: str
@@ -287,10 +286,9 @@ async def get_nudges_for_client(
 ):
     """
     Retrieves all active nudges for a single client, safely handling
-    potentially incomplete audience data from the database.
+    potentially incomplete audience data and data type mismatches.
     """
     client_nudges = []
-
     with Session(engine) as session:
         all_draft_campaigns = crm_service.get_new_campaign_briefings_for_user(user_id=current_user.id, session=session)
 
@@ -299,7 +297,6 @@ async def get_nudges_for_client(
                 str(audience_member.get("client_id")) == str(client_id)
                 for audience_member in campaign.matched_audience
             )
-
             if not is_match:
                 continue
             
@@ -311,40 +308,38 @@ async def get_nudges_for_client(
                     session=session
                 )
                 if resource and resource.attributes:
-                    nudge_resource.address = resource.attributes.get("UnparsedAddress")
-                    nudge_resource.price = resource.attributes.get("ListPrice")
-                    nudge_resource.beds = resource.attributes.get("BedroomsTotal")
-                    nudge_resource.baths = resource.attributes.get("BathroomsTotalInteger")
-                    nudge_resource.attributes = resource.attributes
-            
-            # --- THIS IS THE FIX ---
-            # Manually construct the matched_audience to provide default values
-            # for any missing fields, preventing the Pydantic validation error.
-            sanitized_audience = []
-            for member in campaign.matched_audience:
-                sanitized_audience.append(
-                    MatchedClient(
-                        client_id=member.get("client_id"),
-                        client_name=member.get("client_name"),
-                        match_score=member.get("match_score", 0), # Default to 0 if missing
-                        match_reasons=member.get("match_reasons", []) # Default to empty list if missing
-                    )
-                )
-            # --- END FIX ---
+                    # FIX: Safely cast numeric types to prevent validation errors
+                    try:
+                        price = float(resource.attributes.get("ListPrice")) if resource.attributes.get("ListPrice") is not None else None
+                        beds = int(resource.attributes.get("BedroomsTotal")) if resource.attributes.get("BedroomsTotal") is not None else None
+                        baths = int(resource.attributes.get("BathroomsTotalInteger")) if resource.attributes.get("BathroomsTotalInteger") is not None else None
+                        nudge_resource = NudgeResource(
+                            address=resource.attributes.get("UnparsedAddress"),
+                            price=price,
+                            beds=beds,
+                            baths=baths,
+                            attributes=resource.attributes
+                        )
+                    except (ValueError, TypeError):
+                        # If casting fails, still proceed but with empty resource details
+                        logging.warning(f"Could not parse resource attributes for campaign {campaign.id}")
+
+            sanitized_audience = [
+                MatchedClient(
+                    client_id=member.get("client_id"),
+                    client_name=member.get("client_name"),
+                    match_score=member.get("match_score", 0),
+                    match_reasons=member.get("match_reasons", [])
+                ) for member in campaign.matched_audience
+            ]
             
             client_nudge = ClientNudgeResponse(
-                id=campaign.id,
-                campaign_id=campaign.id,
-                headline=campaign.headline,
-                campaign_type=campaign.campaign_type,
-                resource=nudge_resource,
-                key_intel=campaign.key_intel,
-                original_draft=campaign.original_draft,
-                edited_draft=campaign.edited_draft,
-                matched_audience=sanitized_audience # Use the sanitized list
+                id=campaign.id, campaign_id=campaign.id, headline=campaign.headline,
+                campaign_type=campaign.campaign_type, resource=nudge_resource,
+                key_intel=campaign.key_intel, original_draft=campaign.original_draft,
+                edited_draft=campaign.edited_draft, matched_audience=sanitized_audience
             )
             client_nudges.append(client_nudge)
-
     return client_nudges
 
 @router.put("/{client_id}", response_model=Client)

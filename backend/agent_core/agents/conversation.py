@@ -5,7 +5,9 @@ from typing import Dict, Any, List, Optional
 import uuid
 import json
 import logging
+import asyncio
 from datetime import datetime, timezone
+from sqlmodel import Session
 
 from data.models.user import User
 from data.models.resource import Resource
@@ -421,3 +423,125 @@ async def draft_campaign_step_message(realtor: User, client: Client, prompt: str
 
     # Return the generated content and the original delay_days for scheduling
     return ai_draft, delay_days
+
+
+# Replace the existing draft_consolidated_nudge_with_commentary function with this
+
+def _trim_resource_for_prompt(resource: Resource) -> Dict[str, Any]:
+    """A helper function to extract only the essential data from a verbose resource object."""
+    attrs = resource.attributes
+    return {
+        "id": str(resource.id),
+        "address": attrs.get("UnparsedAddress", "N/A"),
+        "price": attrs.get("ListPrice"),
+        "beds": attrs.get("BedroomsTotal"),
+        "baths": attrs.get("BathroomsTotalInteger"),
+        "sqft": attrs.get("LivingArea"),
+        "remarks_snippet": (attrs.get("PublicRemarks") or "")[:250] + "..."
+    }
+
+async def draft_consolidated_nudge_with_commentary(
+    realtor: User,
+    client: Client,
+    matches_to_process: List[Resource],
+    total_matches_found: int,
+    session: Session
+) -> Dict[str, Any]:
+    """
+    FINAL VERSION: Generates personalized commentaries for a curated list of matches.
+    Uses a two-tiered AI approach for quality and speed.
+    """
+    from backend.agent_core.brain.market_context import get_context_for_resource
+    from backend.agent_core import llm_client
+
+    logging.info(f"CONVERSATION AGENT: Processing {len(matches_to_process)} curated matches for client {client.id}...")
+
+    # --- Step 1: Define Payloads for Two-Tiered AI Analysis ---
+    tier1_matches = matches_to_process[:5]  # Deep analysis for top 5
+    tier2_matches = matches_to_process[5:]  # Faster analysis for the rest
+
+    client_tags = (client.user_tags or []) + (client.ai_tags or [])
+    client_persona = "Investor" if "investor" in [tag.lower() for tag in client_tags] else "Homebuyer"
+    client_motivation = client.preferences.get('ai_summary', 'find a suitable property.')
+
+    # --- Step 2: Concurrently Generate All AI Content ---
+    commentary_map = {}
+    curation_rationale = "Top matches were selected based on relevance."
+    summary_draft = f"Hi {client.full_name.split(' ')[0]}, I've curated the top {len(matches_to_process)} properties for you from recent market activity."
+
+    try:
+        tasks = []
+        # Task for Tier 1 (Deep Analysis)
+        if tier1_matches:
+            properties_for_ai_t1 = [{
+                "details": _trim_resource_for_prompt(res),
+                "market_context": get_context_for_resource(res, realtor, session)
+            } for res in tier1_matches]
+            
+            prompt_t1 = f"""
+            You are an expert real estate co-pilot for {realtor.full_name}. Your client is {client.full_name} ({client_persona}).
+            Their core motivation is: "{client_motivation}"
+            Generate a JSON object with:
+            1. 'curation_rationale': A summary FOR THE AGENT explaining why these are the top matches based on the client's motivation.
+            2. 'commentaries': A list of insightful, one-sentence commentaries FOR THE CLIENT.
+            **RULES:** You MUST connect property features to the client's core motivation. Be direct and data-driven. DO NOT use cliches like "gem" or "stunning."
+            PROPERTIES: {json.dumps(properties_for_ai_t1, indent=2)}
+            REQUIRED JSON (no markdown): {{"curation_rationale": "<...>", "commentaries": [{{"id": "<id>", "commentary": "<...>"}}]}}
+            """
+            tasks.append(llm_client.get_chat_completion(prompt=prompt_t1, json_response=True))
+
+        # Task for Tier 2 (Fast Analysis)
+        if tier2_matches:
+            properties_for_ai_t2 = [_trim_resource_for_prompt(res) for res in tier2_matches]
+            prompt_t2 = f"""
+            You are an expert real estate co-pilot. For each property in the list below, write a single, concise sentence highlighting its most appealing feature for an {client_persona}.
+            **RULES:** Be direct. No fluff.
+            PROPERTIES: {json.dumps(properties_for_ai_t2, indent=2)}
+            REQUIRED JSON (no markdown): {{"commentaries": [{{"id": "<id>", "commentary": "<...>"}}]}}
+            """
+            tasks.append(llm_client.get_chat_completion(prompt=prompt_t2, json_response=True))
+        
+        # Task for Final Summary Draft
+        summary_prompt = f"""
+        You are an expert real estate co-pilot for {realtor.full_name}.
+        Draft a concise, professional SMS summary for {client.full_name} ({client_persona}).
+        - A total of {total_matches_found} properties were found.
+        - You have curated the top {len(matches_to_process)} for their review in a private portal.
+        - Emphasize your role as a curator who has saved them time.
+        - Write under 160 characters. DO NOT use emojis.
+        """
+        tasks.append(llm_client.get_chat_completion(prompt=summary_prompt))
+
+        # Run all AI calls in parallel
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # --- Step 3: Process AI Results ---
+        # Process Tier 1 results
+        if tier1_matches and not isinstance(results[0], Exception) and results[0]:
+            res_t1 = json.loads(results[0])
+            for item in res_t1.get("commentaries", []): commentary_map[item['id']] = item['commentary']
+            curation_rationale = res_t1.get("curation_rationale", curation_rationale)
+        
+        # Process Tier 2 results
+        if tier2_matches and not isinstance(results[1], Exception) and results[1]:
+            res_t2 = json.loads(results[1])
+            for item in res_t2.get("commentaries", []): commentary_map[item['id']] = item['commentary']
+
+        # Process Summary result
+        if not isinstance(results[-1], Exception) and results[-1]:
+            summary_draft = results[-1].strip()
+
+    except Exception as e:
+        logging.error(f"CONVERSATION AGENT: Batch generation failed. Error: {e}", exc_info=True)
+
+    # --- Step 4: Assemble Final Response ---
+    ordered_commentaries = [
+        commentary_map.get(str(res.id), "This is a strong match based on your preferences.") 
+        for res in matches_to_process
+    ]
+    
+    return {
+        "commentaries": ordered_commentaries,
+        "summary_draft": summary_draft,
+        "curation_rationale": curation_rationale
+    }

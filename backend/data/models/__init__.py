@@ -1,27 +1,25 @@
-# FILE: backend/data/models/__init__.py
+# File Path: backend/data/models/__init__.py
 
-# This file ensures that all models are imported and made available
-# through the 'data.models' package, creating a single source of truth.
-
-from .user import User
-from .client import Client
-from .message import Message, ScheduledMessage
-from .campaign import CampaignBriefing
-from .resource import Resource, ContentResource
+from .user import User, UserType, UserUpdate
+from .client import Client, ClientCreate, ClientUpdate, ClientIntakeSurvey
+from .message import Message, ScheduledMessage, MessageStatus, MessageDirection
+from .resource import Resource, ResourceCreate, ContentResource, ContentResourceCreate, ContentResourceUpdate, ResourceStatus
+from .campaign import CampaignBriefing, CampaignUpdate, CampaignStatus, MatchedClient
+from .faq import Faq 
 from .event import MarketEvent, PipelineRun
-from .faq import Faq
 from .feedback import NegativePreference
+from .survey import SurveyQuestion, SurveyQuestionCreate, SurveyQuestionUpdate
+from .portal import PortalComment, CommenterType
+
 
 __all__ = [
-    "User",
-    "Client",
-    "Message",
-    "ScheduledMessage",
-    "CampaignBriefing",
-    "Resource",
-    "ContentResource",
-    "MarketEvent",
-    "PipelineRun",
+    "User", "UserType", "UserUpdate",
+    "Client", "ClientCreate", "ClientUpdate", "ClientIntakeSurvey",
+    "Message", "ScheduledMessage", "MessageStatus", "MessageDirection",
+    "Resource", "ResourceCreate", "ContentResource", "ContentResourceCreate", "ContentResourceUpdate", "ResourceStatus",
+    "CampaignBriefing", "CampaignUpdate", "CampaignStatus", "MatchedClient",
     "Faq",
+    "MarketEvent", "PipelineRun",
     "NegativePreference",
+    "SurveyQuestion", "SurveyQuestionCreate", "SurveyQuestionUpdate", "PortalComment", "CommenterType"
 ]

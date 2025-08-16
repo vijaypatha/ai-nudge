@@ -90,3 +90,4 @@ pytz==2024.1
 alembic
 faiss-cpu
 pytest-cov
+nanoid

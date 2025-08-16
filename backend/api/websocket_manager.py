@@ -47,24 +47,24 @@ class ConnectionManager:
     async def connect_user(self, websocket: WebSocket, user_id: str):
         """
         Accepts a new user connection and adds it to this process's local connection pool.
-        The "last-one-in-wins" logic is still included to handle browser tab refreshes gracefully.
+        Allows up to 2 connections per user to handle browser refreshes gracefully.
         """
-        # This check prevents having multiple connections for the same user in the *same process*.
-        if user_id in self.user_connections and self.user_connections[user_id]:
-            existing_connections = list(self.user_connections[user_id])
-            logging.warning(f"WS RECONCILE: User {user_id} has old connections in this process. Closing them.")
-            for conn in existing_connections:
+        # Check if there are existing connections for this user
+        existing_connections = list(self.user_connections.get(user_id, set()))
+        
+        # If we have more than 1 existing connection, close the oldest ones
+        if len(existing_connections) >= 2:
+            logging.warning(f"WS RECONCILE: User {user_id} has {len(existing_connections)} connections. Closing oldest.")
+            # Close all but the most recent connection
+            for conn in existing_connections[:-1]:
                 try:
-                    # Await the close operation to ensure it completes.
-                    await conn.close(code=1012, reason="A new connection was established.")
+                    await conn.close(code=1012, reason="Multiple connections detected, keeping newest.")
                 except RuntimeError:
-                    # This can happen if the connection is already dead.
                     logging.info(f"WS RECONCILE: Could not close an already dead connection for user {user_id}.")
-                    pass
-            self.user_connections[user_id].clear()
+            # Keep only the most recent connection
+            self.user_connections[user_id] = {existing_connections[-1]}
 
-        # The websocket endpoint is responsible for `await websocket.accept()`.
-        # This method just tracks the accepted connection.
+        # Add the new connection
         self.user_connections[user_id].add(websocket)
         logging.info(f"WS CONNECT (USER): New connection for user_id: {user_id} added to local manager.")
 

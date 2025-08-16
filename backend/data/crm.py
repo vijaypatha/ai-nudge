@@ -26,10 +26,67 @@ from .models.message import ScheduledMessage, Message, MessageStatus, MessageDir
 import uuid
 from agent_core.agents import profiler as profiler_agent
 
-
 import asyncio
 import os
 
+# --- [NEW] Synthesis Helper Function ---
+async def _run_synthesis_and_update_client(client: Client, user: User, session: Session) -> Client:
+    """
+    The core synthesis logic. Gathers all text, calls the profiler agent,
+    updates the client object, and triggers the Instant Match Nudge.
+    """
+    logging.info(f"CRM SYNTHESIS: Running profile synthesis for client {client.id}")
+    client_role = "buyer"
+    if user.vertical == "real_estate":
+        if client.user_tags and any("seller" in t.lower() for t in client.user_tags): client_role = "seller"
+    elif user.vertical == "therapy": client_role = "client"
+    notes = client.notes or ""
+    all_tags = sorted(list(set((client.user_tags or []) + (client.ai_tags or []))))
+    tags_text = f"Tags: {', '.join(all_tags)}"
+    survey_text = ""
+    if client.intake_surveys:
+        completed_surveys = [s for s in client.intake_surveys if s.completed_at and s.responses]
+        if completed_surveys:
+            latest_survey = sorted(completed_surveys, key=lambda s: s.completed_at, reverse=True)[0]
+            survey_text = f"Latest Survey Responses: {json.dumps(latest_survey.responses)}"
+    full_text_to_analyze = "\n---\n".join(filter(None, [notes, tags_text, survey_text]))
+    synthesized_data = await profiler_agent.synthesize_client_profile(text_to_analyze=full_text_to_analyze, user_vertical=user.vertical, client_role=client_role)
+    if synthesized_data:
+        client.preferences = synthesized_data.get("preferences", {})
+        flag_modified(client, "preferences")
+        ai_summary = synthesized_data.get("ai_summary", "")
+        actionable_intel = synthesized_data.get("actionable_intel", [])
+        summary_note = f"AI Summary ({datetime.now(timezone.utc).strftime('%Y-%m-%d')}):\n{ai_summary}"
+        if actionable_intel: summary_note += f"\n\nActionable Intel: {', '.join(actionable_intel)}"
+        if client.notes and "AI Summary" in client.notes: client.notes = summary_note + "\n\n---\n\n" + client.notes.split("\n\n---\n\n", 1)[-1]
+        else: client.notes = summary_note + "\n\n---\n\n" + (client.notes or "")
+        logging.info(f"CRM SYNTHESIS: Successfully updated client {client.id} with synthesized profile.")
+    else: logging.warning(f"CRM SYNTHESIS: Synthesis agent returned no data for client {client.id}.")
+    await semantic_service.update_client_embedding(client, session)
+    session.add(client)
+    session.commit()
+    session.refresh(client)
+
+    # --- THIS IS THE FIX ---
+    # Trigger the "Instant Match" workflow in the background.
+    try:
+        from agent_core.brain import nudge_engine
+        logging.info(f"CRM: Synthesis complete for client {client.id}. Triggering consolidated nudge generation.")
+        # We run this in the background so it doesn't block the API response
+        asyncio.create_task(
+            nudge_engine._create_or_update_consolidated_nudge(
+                client=client, 
+                user=user, 
+                session=session, 
+                source="synthesis_update"
+            )
+        )
+    except ImportError:
+        logging.error("CRM: Could not import nudge_engine. Is the agent_core package installed correctly?")
+    except Exception as e:
+        logging.error(f"CRM: Failed to trigger consolidated nudge for client {client.id}: {e}", exc_info=True)
+
+    return client
 # --- User Functions ---
 
 def get_user_by_id(user_id: uuid.UUID, session: Optional[Session] = None) -> Optional[User]:
@@ -111,55 +168,25 @@ def format_phone_number(phone: str) -> str:
     return phone
 
 async def create_or_update_client(user_id: uuid.UUID, client_data: ClientCreate) -> Tuple[Client, bool]:
-    """
-    MODIFIED: Creates a new client or updates an existing one, ensuring new clients
-    always have a non-null preferences object. It then calls the semantic_service
-    to generate the initial composite embedding for the client.
-    """
     with Session(engine) as session:
-        if client_data.phone:
-            client_data.phone = format_phone_number(client_data.phone)
-        
+        if client_data.phone: client_data.phone = format_phone_number(client_data.phone)
         existing_client = find_strong_duplicate(session, user_id, client_data)
-        
-        target_client, is_new = (None, False)
-
+        is_new = False
         if existing_client:
             update_dict = client_data.model_dump(exclude_unset=True)
             for key, value in update_dict.items():
-                if hasattr(existing_client, key):
-                    setattr(existing_client, key, value)
-            target_client, is_new = existing_client, False
+                if hasattr(existing_client, key): setattr(existing_client, key, value)
+            target_client = existing_client
         else:
             client_dict = client_data.model_dump()
-            # --- THIS IS THE FIX ---
-            # Ensure the preferences field is an empty dictionary by default for new clients.
-            if 'preferences' not in client_dict or client_dict['preferences'] is None:
-                client_dict['preferences'] = {}
-            
+            if 'preferences' not in client_dict or client_dict['preferences'] is None: client_dict['preferences'] = {}
             new_client = Client(id=uuid.uuid4(), user_id=user_id, **client_dict)
             target_client, is_new = new_client, True
 
         session.add(target_client)
-        session.commit()
-        session.refresh(target_client)
-        
-        logging.info(f"CRM: {'Created new' if is_new else 'Updated existing'} client {target_client.id}. Now generating initial embedding.")
-        
+        session.commit(); session.refresh(target_client)
         await semantic_service.update_client_embedding(target_client, session)
-        session.commit()
-        session.refresh(target_client)
-
-        if is_new:
-            skip_immediate_processing = os.getenv("SKIP_IMMEDIATE_CONTACT_PROCESSING", "false").lower() == "true"
-            if not skip_immediate_processing:
-                try:
-                    from celery_tasks import process_new_contact_async
-                    process_new_contact_async.delay(str(target_client.id), str(user_id))
-                    logging.info(f"CRM: Queued async processing for new client {target_client.full_name}")
-                except Exception as e:
-                    logging.error(f"CRM: Error queuing async processing for new client {target_client.id}: {e}")
-            
+        session.commit(); session.refresh(target_client)
         return target_client, is_new
 
 def get_client_by_id(client_id: uuid.UUID, user_id: uuid.UUID, session: Optional[Session] = None) -> Optional[Client]:
@@ -228,62 +255,71 @@ def get_all_clients(user_id: uuid.UUID, session: Optional[Session] = None) -> Li
 
 def get_client_nudge_summaries(user_id: uuid.UUID, session: Session) -> List[Dict[str, Any]]:
     """
-    Generates a summary for each client that has active nudges.
-    The summary includes the client's name, total nudge count, and a
-    breakdown of nudges by campaign type.
+    MODIFIED: Generates a summary for each client with active nudges.
+    It now specifically finds the ID of the single consolidated nudge.
     """
     clients = get_all_clients(user_id=user_id)
-    client_map = {str(client.id): {"client_name": client.full_name, "nudges": []} for client in clients}
+    client_map = {
+        str(client.id): {
+            "client_name": client.full_name,
+            "consolidated_nudge_id": None,
+            "other_nudge_count": 0,
+            "nudge_type_counts": {}
+        } for client in clients
+    }
 
-    # Fetch all draft campaigns (active nudges) for the user at once
     draft_campaigns = get_new_campaign_briefings_for_user(user_id=user_id, session=session)
 
-    # Distribute the campaigns to the clients they are matched with
     for campaign in draft_campaigns:
-        for audience_member in campaign.matched_audience:
-            client_id_str = str(audience_member.get("client_id"))
-            if client_id_str in client_map:
-                client_map[client_id_str]["nudges"].append(campaign)
+        client_id_str = str(campaign.client_id)
+        if client_id_str not in client_map:
+            continue
 
-    # Process the map to create the final summary list
+        nudge_type = campaign.campaign_type
+        if nudge_type == "consolidated_initial_matches":
+            client_map[client_id_str]["consolidated_nudge_id"] = campaign.id
+        else:
+            client_map[client_id_str]["other_nudge_count"] += 1
+        
+        # We still count all types for display purposes
+        client_map[client_id_str]["nudge_type_counts"][nudge_type] = client_map[client_id_str]["nudge_type_counts"].get(nudge_type, 0) + 1
+
     summaries = []
     for client_id, data in client_map.items():
-        if not data["nudges"]:
-            continue  # Skip clients with no active nudges
+        # --- THIS IS THE FIX ---
+        # It now correctly sums the counts of all nudge types to get an accurate total.
+        total_nudges = sum(data["nudge_type_counts"].values())
+        if total_nudges == 0:
+            continue
 
-        nudge_type_counts = {}
-        for nudge in data["nudges"]:
-            nudge_type = nudge.campaign_type
-            nudge_type_counts[nudge_type] = nudge_type_counts.get(nudge_type, 0) + 1
-        
         summaries.append({
             "client_id": client_id,
             "client_name": data["client_name"],
-            "total_nudges": len(data["nudges"]),
-            "nudge_type_counts": nudge_type_counts
+            "consolidated_nudge_id": str(data["consolidated_nudge_id"]) if data["consolidated_nudge_id"] else None,
+            "total_nudges": total_nudges,
+            "nudge_type_counts": data["nudge_type_counts"]
         })
 
-    # Sort by the total number of nudges, descending
     summaries.sort(key=lambda x: x["total_nudges"], reverse=True)
     return summaries
     
 async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUID) -> tuple[Optional[Client], bool]:
     """
-    MODIFIED: Generically updates a client, but now ALSO runs the profiler agent
-    to extract structured preferences if the notes were updated. The old rescore task
-    has been removed.
+    Generically updates a client and triggers a full profile re-synthesis
+    if notes, preferences, tags, or survey status have changed.
     """
-    notes_were_updated = False
-
     with Session(engine) as session:
+        user = session.get(User, user_id)
         client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
-        if not client:
+        if not client or not user:
             return None, False
 
         update_dict = update_data.model_dump(exclude_unset=True)
-
-        if 'notes' in update_dict:
-            notes_were_updated = True
+        
+        # --- THIS IS THE FIX ---
+        # The logic is now corrected. Any update that includes preferences,
+        # notes, tags, OR the survey completion status will correctly trigger a re-synthesis.
+        needs_resynthesis = any(k in update_dict for k in ['notes', 'preferences', 'user_tags', 'intake_survey_completed'])
 
         for key, value in update_dict.items():
             if key == 'phone' and value:
@@ -295,33 +331,17 @@ async def update_client(client_id: UUID, update_data: ClientUpdate, user_id: UUI
                 flag_modified(client, 'preferences')
             else:
                 setattr(client, key, value)
-
+        
         session.add(client)
-
-        if notes_were_updated:
-            logging.info(f"CRM: Notes updated for client {client.id}, running profiler agent.")
-            user = session.get(User, user_id)
-            user_vertical = user.vertical if user else "general"
-            all_text_to_analyze = f"Notes: {client.notes}\nTags: {', '.join(client.user_tags or [])} {', '.join(client.ai_tags or [])}"
-            extracted_prefs = await profiler_agent.extract_preferences_from_text(all_text_to_analyze, user_vertical)
-
-            if extracted_prefs:
-                logging.info(f"CRM: Profiler extracted preferences from notes: {extracted_prefs}")
-                if client.preferences is None:
-                    client.preferences = {}
-                client.preferences.update(extracted_prefs)
-                flag_modified(client, "preferences")
+        
+        if needs_resynthesis:
+            # The session is passed into the synthesis function to ensure all operations
+            # happen within the same transaction, which is crucial for data consistency.
+            client = await _run_synthesis_and_update_client(client, user, session)
 
         session.commit()
         session.refresh(client)
-
-        if notes_were_updated or 'preferences' in update_dict or 'user_tags' in update_dict:
-            logging.info(f"CRM: Client data changed. Updating embedding for client {client.id}.")
-            await semantic_service.update_client_embedding(client, session)
-            session.commit()
-            session.refresh(client)
-
-        return client, notes_were_updated
+        return client, needs_resynthesis
 
 async def delete_client(client_id: UUID, user_id: UUID) -> bool:
     """
@@ -382,93 +402,50 @@ def update_last_interaction(client_id: uuid.UUID, user_id: uuid.UUID, session: O
             return client
 
 async def update_client_preferences(client_id: uuid.UUID, preferences: Dict[str, Any], user_id: uuid.UUID) -> Optional[Client]:
-    """Overwrites the 'preferences' and calls semantic_service to regenerate the embedding."""
-    with Session(engine) as session:
-        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
-        if client:
-            client.preferences = preferences
-            session.add(client)
-            await semantic_service.update_client_embedding(client, session)
-            session.commit()
-            session.refresh(client)
-            return client
-        return None
+    """MODIFIED: This now routes through the main update_client function to ensure AI synthesis is triggered."""
+    update_payload = ClientUpdate(preferences=preferences)
+    updated_client, _ = await update_client(client_id=client_id, update_data=update_payload, user_id=user_id)
+    return updated_client
 
 async def update_client_tags(client_id: uuid.UUID, tags: List[str], user_id: uuid.UUID) -> Optional[Client]:
-    """Overwrites 'user_tags' and calls semantic_service to regenerate the embedding."""
-    with Session(engine) as session:
-        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
-        if client:
-            client.user_tags = tags
-            session.add(client)
-            await semantic_service.update_client_embedding(client, session)
-            session.commit()
-            session.refresh(client)
-            return client
-        return None
+    """MODIFIED: This now routes through the main update_client function to ensure AI synthesis is triggered."""
+    update_payload = ClientUpdate(user_tags=tags)
+    updated_client, _ = await update_client(client_id=client_id, update_data=update_payload, user_id=user_id)
+    return updated_client
 
 async def update_client_notes(client_id: UUID, notes: str, user_id: UUID) -> Optional[Client]:
-    """Overwrites 'notes' and calls semantic_service to regenerate the embedding."""
-    with Session(engine) as session:
-        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
-        if client:
-            client.notes = notes
-            session.add(client)
-            await semantic_service.update_client_embedding(client, session)
-            session.commit()
-            session.refresh(client)
-            return client
-        return None
+    """MODIFIED: This now routes through the main update_client function to ensure AI synthesis is triggered."""
+    update_payload = ClientUpdate(notes=notes)
+    updated_client, _ = await update_client(client_id=client_id, update_data=update_payload, user_id=user_id)
+    return updated_client
 
 async def update_client_intel(client_id: UUID, user_id: UUID, tags_to_add: Optional[List[str]] = None, notes_to_add: Optional[str] = None) -> Optional[Client]:
     """
-    Appends notes/tags, extracts preferences, regenerates embedding, but
-    REMOVES the old rescore task trigger.
+    Appends AI-suggested notes/tags and triggers a full re-synthesis.
     """
     with Session(engine) as session:
-        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
-        if not client:
-            logging.warning(f"CRM: update_client_intel called for non-existent client {client_id}")
-            return None
-
         user = session.get(User, user_id)
-        if not user:
-            logging.error(f"CRM: Could not find user {user_id} during intel update for client {client_id}")
+        client = session.exec(select(Client).where(Client.id == client_id, Client.user_id == user_id)).first()
+        if not client or not user:
             return None
 
-        user_vertical = user.vertical or "general"
         profile_was_updated = False
-
         if tags_to_add:
             client.ai_tags = sorted(list(set(client.ai_tags or []).union(set(tags_to_add))))
             flag_modified(client, "ai_tags")
             profile_was_updated = True
-            logging.info(f"CRM: Updated AI tags for client {client.id}")
 
         if notes_to_add:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            new_note_entry = f"Note from AI ({timestamp}):\n{notes_to_add}"
-            client.notes = f"{client.notes}\n\n---\n\n{new_note_entry}" if client.notes else new_note_entry
-
-            all_text_to_analyze = f"Notes: {client.notes}\nTags: {', '.join(client.user_tags or [])} {', '.join(client.ai_tags or [])}"
-            extracted_prefs = await profiler_agent.extract_preferences_from_text(all_text_to_analyze, user_vertical)
-
-            if extracted_prefs:
-                logging.info(f"CRM: Profiler extracted preferences: {extracted_prefs}")
-                if client.preferences is None:
-                    client.preferences = {}
-                client.preferences.update(extracted_prefs)
-                flag_modified(client, "preferences")
-                logging.info(f"CRM: Marked 'preferences' as modified for client {client.id}. New state: {client.preferences}")
+            new_note_entry = f"Note from AI ({timestamp}): {notes_to_add}"
+            client.notes = f"{client.notes}\n{new_note_entry}" if client.notes else new_note_entry
             profile_was_updated = True
 
         if profile_was_updated:
-            session.add(client)
-            await semantic_service.update_client_embedding(client, session)
-
+            client = await _run_synthesis_and_update_client(client, user, session)
+        
         session.commit()
         session.refresh(client)
-        logging.info(f"CRM: Intel update complete and committed for client {client.id}. Final preferences: {client.preferences}")
         return client
 
 async def add_client_tags(client_id: uuid.UUID, tags_to_add: List[str], user_id: uuid.UUID) -> Optional[Client]:
@@ -1274,6 +1251,46 @@ def get_resource_by_entity_id(entity_id: str, session: Session) -> Optional[Reso
     return session.exec(statement).first()
 
 
+def find_or_create_consolidated_nudge(client_id: UUID, user_id: UUID, session: Session) -> CampaignBriefing:
+    """
+    Finds the 'living' consolidated nudge for a client, or creates it if it doesn't exist.
+    This is the core of the new "upsert" logic.
+    """
+    from .models.campaign import CampaignBriefing, CampaignStatus
+    from .models.client import Client
+
+    statement = select(CampaignBriefing).where(CampaignBriefing.client_id == client_id, CampaignBriefing.campaign_type == "consolidated_initial_matches")
+    existing_nudge = session.exec(statement).first()
+    if existing_nudge:
+        logging.info(f"NUDGE_ENGINE: Found existing consolidated nudge {existing_nudge.id} for client {client_id}")
+        return existing_nudge
+
+    logging.info(f"NUDGE_ENGINE: No consolidated nudge found for client {client_id}. Creating a new one.")
+    client = session.get(Client, client_id)
+    if not client:
+        raise ValueError(f"Client with ID {client_id} not found.")
+
+    # --- THIS IS THE FIX (from your analysis) ---
+    # The Client model has 'full_name', not 'first_name'. We derive it here.
+    first_name = client.full_name.split()[0] if client.full_name else "there"
+
+    new_nudge = CampaignBriefing(
+        user_id=user_id,
+        client_id=client_id,
+        campaign_type="consolidated_initial_matches",
+        headline=f"Initial Matches for {client.full_name}",
+        key_intel={"matched_resource_ids": []},
+        original_draft=f"Hi {first_name}, based on our conversation, here are some initial properties I found for you. Let me know what you think!",
+        status=CampaignStatus.DRAFT,
+        source="consolidated_engine"
+    )
+
+    session.add(new_nudge)
+    session.flush()
+    session.refresh(new_nudge)
+    logging.info(f"NUDGE_ENGINE: Created new consolidated nudge {new_nudge.id} for client {client_id}")
+    return new_nudge
+
 def does_nudge_exist_for_client_and_resource(client_id: uuid.UUID, resource_id: uuid.UUID, session: Session, event_type: str) -> bool:
     """
     Checks if a nudge (CampaignBriefing) of a specific type already exists
@@ -1282,16 +1299,12 @@ def does_nudge_exist_for_client_and_resource(client_id: uuid.UUID, resource_id: 
     """
     statement = select(CampaignBriefing).where(
         CampaignBriefing.triggering_resource_id == resource_id,
-        CampaignBriefing.campaign_type == event_type
+        CampaignBriefing.campaign_type == event_type,
+        CampaignBriefing.client_id == client_id
     )
     
-    briefings = session.exec(statement).all()
-    
-    for briefing in briefings:
-        for audience_member in briefing.matched_audience:
-            if audience_member.get("client_id") == str(client_id):
-                return True
-    return False
+    briefing = session.exec(statement).first()
+    return briefing is not None
 
 def get_clients_in_batches(user_id: uuid.UUID, session: Session, batch_size: int = 500, page: int = 1) -> List[Client]:
     """

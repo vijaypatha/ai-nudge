@@ -6,6 +6,7 @@ from typing import List, Optional, TYPE_CHECKING, Dict, Any
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 from sqlmodel import SQLModel, Field, Relationship, Column, JSON
+from .portal import PortalComment
 
 if TYPE_CHECKING:
     from .user import User
@@ -35,6 +36,8 @@ class Resource(SQLModel, table=True):
     # --- Relationships ---
     user: Optional["User"] = Relationship(back_populates="resources")
     campaigns: List["CampaignBriefing"] = Relationship(back_populates="triggering_resource")
+    portal_comments: List["PortalComment"] = Relationship(back_populates="resource")
+    
 
 class ResourceCreate(SQLModel):
     """Defines the structure for creating a new resource."""

@@ -188,8 +188,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     const IntelSidebarContent = () => (
         <>
             <DynamicTaggingCard client={selectedClient} onUpdate={handleClientUpdate} />
-            <ClientIntelCard client={selectedClient} onUpdate={handleClientUpdate} onReplan={() => {}} displayConfig={displayConfig} />
-            
+            <ClientIntelCard client={selectedClient} onUpdate={handleClientUpdate} />            
             {/* --- [NEW] Render the Interactive Search Card --- */}
             <InteractiveSearchCard 
                 onSearch={handleInteractiveSearch}

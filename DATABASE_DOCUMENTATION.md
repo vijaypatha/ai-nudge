@@ -1,5 +1,7 @@
 # AI Nudge Database Documentation
 
+**Last Updated**: 08/15/2025
+
 ## Database Overview
 
 **Database Name**: `ai_nudge` (PostgreSQL)  
@@ -22,7 +24,7 @@ postgresql://postgres:password123@db:5432/realestate_db
 
 ## Database Tables
 
-The application contains **12 main tables**:
+The application contains **15 main tables**:
 
 ### 1. `user` Table
 **Purpose**: Stores user account information and preferences
@@ -45,6 +47,9 @@ The application contains **12 main tables**:
 - `faq_auto_responder_enabled` (Boolean)
 - `twilio_phone_number` (String, indexed)
 - `timezone` (String, indexed)
+- `intake_survey_enabled` (Boolean, default=True) - **NEW**: Enable/disable intake surveys
+- `intake_survey_auto_send` (Boolean, default=True) - **NEW**: Auto-send intake surveys
+- `intake_survey_delay_hours` (Integer, default=24) - **NEW**: Delay before sending survey
 
 ### 2. `client` Table
 **Purpose**: Stores client/contact information
@@ -61,6 +66,8 @@ The application contains **12 main tables**:
 - `preferences` (JSON) - Client preferences
 - `last_interaction` (String)
 - `timezone` (String)
+- `intake_survey_completed` (Boolean, default=False, indexed) - **NEW**: Survey completion status
+- `intake_survey_sent_at` (String) - **NEW**: When survey was sent
 
 ### 3. `message` Table
 **Purpose**: Stores all messages (sent and received)
@@ -112,6 +119,7 @@ The application contains **12 main tables**:
 - `status` (Enum: DRAFT, ACTIVE, PAUSED, COMPLETED, CANCELLED, DISMISSED, indexed)
 - `created_at` (DateTime)
 - `updated_at` (DateTime, auto-updated)
+- `source` (String, indexed) - **NEW**: Source of the campaign briefing
 
 ### 6. `resource` Table
 **Purpose**: Stores various resources (properties, content, etc.)
@@ -196,6 +204,46 @@ The application contains **12 main tables**:
 - `source_campaign_id` (UUID, indexed) - ID of dismissed campaign
 - `created_at` (DateTime)
 
+### 13. `clientintakesurvey` Table - **NEW**
+**Purpose**: Stores client intake survey responses and processing
+**Key Fields**:
+- `id` (UUID, Primary Key)
+- `client_id` (UUID, Foreign Key to client.id, indexed)
+- `user_id` (UUID, Foreign Key to user.id, indexed)
+- `survey_type` (String, indexed) - Type of survey (e.g., "real_estate_buyer")
+- `survey_version` (String, default="1.0") - Survey version
+- `completed_at` (String) - When survey was completed
+- `responses` (JSON) - Raw survey responses
+- `processed` (Boolean, default=False, indexed) - Whether responses have been processed
+- `preferences_extracted` (JSON) - Extracted preferences from responses
+- `tags_generated` (JSON) - AI-generated tags from responses
+
+### 14. `surveyquestion` Table - **NEW**
+**Purpose**: Stores user-defined survey questions for client intake
+**Key Fields**:
+- `id` (UUID, Primary Key)
+- `user_id` (UUID, Foreign Key to user.id, indexed)
+- `survey_type` (String, indexed) - Survey type this question belongs to
+- `question_text` (String) - The actual question
+- `question_type` (Enum: TEXT, TEXTAREA, MULTIPLE_CHOICE, CHECKBOXES, SCALE, indexed)
+- `options` (JSON) - Available options for multiple choice/checkbox questions
+- `is_required` (Boolean, default=False) - Whether question is required
+- `placeholder` (String) - Placeholder text for input fields
+- `help_text` (String) - Additional help text
+- `preference_key` (String) - Key for extracting preferences
+- `display_order` (Integer, default=0) - Order of question display
+
+### 15. `portalcomment` Table - **NEW**
+**Purpose**: Stores comments made within the client portal on resources
+**Key Fields**:
+- `id` (UUID, Primary Key)
+- `user_id` (UUID, Foreign Key to user.id, indexed)
+- `client_id` (UUID, Foreign Key to client.id, indexed)
+- `resource_id` (UUID, Foreign Key to resource.id, indexed)
+- `commenter_type` (Enum: AGENT, CLIENT) - Who made the comment
+- `comment_text` (String) - The comment content
+- `created_at` (DateTime) - When comment was created
+
 ## Database Relationships
 
 ### Primary Relationships:
@@ -207,15 +255,20 @@ The application contains **12 main tables**:
 - **User** → **ContentResource** (One-to-Many)
 - **User** → **MarketEvent** (One-to-Many)
 - **User** → **Faq** (One-to-Many)
+- **User** → **SurveyQuestion** (One-to-Many) - **NEW**
+- **User** → **PortalComment** (One-to-Many) - **NEW**
 
 - **Client** → **Message** (One-to-Many)
 - **Client** → **ScheduledMessage** (One-to-Many)
 - **Client** → **CampaignBriefing** (One-to-Many)
 - **Client** → **NegativePreference** (One-to-Many)
+- **Client** → **ClientIntakeSurvey** (One-to-Many) - **NEW**
+- **Client** → **PortalComment** (One-to-Many) - **NEW**
 
 - **Message** → **CampaignBriefing** (One-to-Many) - AI drafts
 - **CampaignBriefing** → **ScheduledMessage** (One-to-Many)
 - **Resource** → **CampaignBriefing** (One-to-Many) - Triggering resources
+- **Resource** → **PortalComment** (One-to-Many) - **NEW**
 
 ## Database Features
 
@@ -240,7 +293,18 @@ The application contains **12 main tables**:
 - DateTime fields are indexed for time-based queries
 - Composite indexes on frequently queried combinations
 
-### 5. Migration History
+### 5. Survey System - **NEW**
+- **Client Intake Surveys**: Automated survey system for gathering client preferences
+- **Custom Survey Questions**: Users can define their own survey questions
+- **Survey Processing**: AI-powered extraction of preferences and tags from responses
+- **Survey Configuration**: Per-user settings for survey behavior
+
+### 6. Client Portal System - **NEW**
+- **Interactive Comments**: Clients and agents can comment on shared resources
+- **Resource Sharing**: Secure portal for sharing resources with clients
+- **Feedback Collection**: Structured feedback collection from clients
+
+### 7. Migration History
 The database uses Alembic for migrations with the following key migrations:
 - `ea68fcacaed1_initial_database_schema.py` - Initial schema
 - `357f39f135c0_add_explicit_tablename_to_.py` - Explicit table names
@@ -252,15 +316,19 @@ The database uses Alembic for migrations with the following key migrations:
 - `remove_flexmls_oauth_token_fields.py` - Cleanup of OAuth fields
 - `add_negativepreference_table.py` - User feedback
 - `e0664be3e4b6_add_globalmlsevent_table.py` - Global MLS events
+- `cbe7cd5783fa_add_source_column_to_campaignbriefing.py` - **NEW**: Campaign source tracking
+- `add_client_intake_survey_table.py` - **NEW**: Client intake survey system
+- `8d8a21dcd8ba_add_survey_and_portal_models.py` - **NEW**: Portal and survey models
+- `447f04b9000c_create_surveyquestion_table.py` - **NEW**: Survey question system
 
 ## Database Statistics
 
-- **Total Tables**: 12
-- **Primary Tables**: 12 (all main tables)
-- **Total Indexes**: 50+ (including composite indexes)
-- **JSON Fields**: 15+ across all tables
+- **Total Tables**: 15 (increased from 12)
+- **Primary Tables**: 15 (all main tables)
+- **Total Indexes**: 60+ (including composite indexes)
+- **JSON Fields**: 20+ across all tables
 - **UUID Primary Keys**: All tables
-- **Foreign Key Relationships**: 20+ relationships
+- **Foreign Key Relationships**: 25+ relationships
 
 ## Database Architecture Patterns
 
@@ -286,6 +354,12 @@ The database uses Alembic for migrations with the following key migrations:
 - `campaignbriefing` for AI-generated content
 - Celery integration for async processing
 
+### 5. Survey & Portal System - **NEW**
+- **Survey Pipeline**: Automated survey sending, response collection, and processing
+- **Portal Interaction**: Client-agent communication through shared resources
+- **Preference Extraction**: AI-powered analysis of survey responses
+- **Custom Question Support**: User-defined survey questions with various types
+
 ## Database Security
 
 - UUID primary keys prevent enumeration attacks
@@ -303,4 +377,4 @@ The database uses Alembic for migrations with the following key migrations:
 
 ---
 
-*This documentation covers the complete database structure of the AI Nudge application as of the current codebase state.* 
+*This documentation covers the complete database structure of the AI Nudge application as of 08/15/2025.* 

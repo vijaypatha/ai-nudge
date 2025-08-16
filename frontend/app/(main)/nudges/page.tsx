@@ -1,6 +1,4 @@
 // frontend/app/(main)/nudges/page.tsx
-// --- FINAL VERSION: Fetches client summaries for the new client-centric view ---
-
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -9,25 +7,20 @@ import { useAppContext, Client, ScheduledMessage, User } from '@/context/AppCont
 import { Tabs, TabOption } from '@/components/ui/Tabs';
 import { motion, AnimatePresence } from 'framer-motion';
 
-import { OpportunityNudgesView, DisplayConfig } from '@/components/nudges/OpportunityNudgesView';
+// --- THIS IS THE FIX ---
+// The correct, shared ClientNudgeSummary type is now imported.
+import { OpportunityNudgesView, DisplayConfig, ClientNudgeSummary } from '@/components/nudges/OpportunityNudgesView';
 import { ScheduledNudgesView } from '@/components/nudges/ScheduledNudgesView';
 import { InstantNudgeView } from '@/components/nudges/InstantNudgeView';
 
-// Define the structure for the client summary data from the new API endpoint
-interface ClientNudgeSummary {
-    client_id: string;
-    client_name: string;
-    total_nudges: number;
-    nudge_type_counts: Record<string, number>;
-}
-
-// Import the CampaignBriefing type from AppContext
-import { CampaignBriefing } from '@/context/AppContext';
+// --- THIS IS THE FIX ---
+// The incorrect, local definition has been removed.
 
 export default function NudgesPage() {
     const { user, api, loading, socket } = useAppContext();
 
-    // State now holds client summaries instead of individual nudges
+    // --- THIS IS THE FIX ---
+    // The state now uses the correct, imported ClientNudgeSummary type.
     const [clientSummaries, setClientSummaries] = useState<ClientNudgeSummary[]>([]);
     const [displayConfig, setDisplayConfig] = useState<DisplayConfig>({});
     const [isNudgesLoading, setIsNudgesLoading] = useState(true);
@@ -47,7 +40,6 @@ export default function NudgesPage() {
     ];
 
     const fetchClientSummaries = useCallback(() => {
-        // Use the new, more efficient client-summary endpoint
         api.get('/api/campaigns/client-summaries')
             .then(data => {
                 setClientSummaries(data.client_summaries || []);
@@ -79,16 +71,13 @@ export default function NudgesPage() {
             .finally(() => setIsScheduledLoading(false));
     }, [api]);
 
-    // Initial data fetch on component mount
     useEffect(() => {
         fetchClientSummaries();
         fetchClients();
     }, [fetchClientSummaries, fetchClients]);
     
-    // Real-time update logic
     useEffect(() => {
         if (!socket) return;
-
         const handleNudgeUpdate = (event: MessageEvent) => {
             try {
                 const data = JSON.parse(event.data);
@@ -100,9 +89,7 @@ export default function NudgesPage() {
                 console.error("WebSocket: Failed to parse message data", error);
             }
         };
-
         socket.addEventListener('message', handleNudgeUpdate);
-
         return () => {
             socket.removeEventListener('message', handleNudgeUpdate);
         };
@@ -114,33 +101,6 @@ export default function NudgesPage() {
             fetchClients();
         }
     }, [activeTab, refetchScheduled, fetchClients]);
-
-    const handleAction = async (briefing: CampaignBriefing, action: 'dismiss' | 'send') => {
-        try {
-            if (action === 'send') {
-                const updatePayload = {
-                    edited_draft: briefing.edited_draft || briefing.original_draft,
-                    matched_audience: briefing.matched_audience,
-                    status: 'active' as const
-                };
-                
-                // --- THIS IS THE FIX ---
-                // The incorrect test-debug line has been removed.
-                // The code now proceeds directly to the correct API calls.
-                
-                await api.put(`/api/campaigns/${briefing.id}`, updatePayload);
-                await api.post(`/api/campaigns/${briefing.id}/send`, {});
-    
-            } else {
-                await api.put(`/api/campaigns/${briefing.id}`, { status: 'dismissed' as const });
-            }
-            // After an action, refetch the summaries to update the client grid
-            fetchClientSummaries();
-        } catch (error) {
-            console.error(`Failed to ${action} nudge:`, error);
-            alert(`Error: Could not ${action} the nudge.`);
-        }
-    };
 
     return (
         <main className="flex-1 p-6 sm:p-8 overflow-y-auto">
@@ -164,9 +124,7 @@ export default function NudgesPage() {
                         <OpportunityNudgesView
                             clientSummaries={clientSummaries}
                             isLoading={isNudgesLoading}
-                            onAction={handleAction}
-                            // onBriefingUpdate is now managed inside the ActionDeck
-                            onBriefingUpdate={() => {}}
+                            onAction={fetchClientSummaries}
                             displayConfig={displayConfig}
                         />
                     )}

@@ -1,5 +1,5 @@
 # File Path: backend/agent_core/agents/profiler.py
-# PURPOSE: An AI agent responsible for understanding client notes and extracting structured data dynamically.
+# PURPOSE: An AI agent responsible for synthesizing a complete client profile against a canonical schema.
 
 import logging
 import json
@@ -7,55 +7,87 @@ from typing import Dict, Any
 
 from agent_core import llm_client
 
-async def extract_preferences_from_text(text: str, user_vertical: str = "general") -> Dict[str, Any]:
+# Define the canonical schemas directly in the agent for clarity and control.
+# These were finalized in our previous discussion.
+CANONICAL_SCHEMAS = {
+    "real_estate_buyer": {
+        "objective": "str", "budget_max": "int", "preapproval_status": "str",
+        "min_bedrooms": "int", "max_bedrooms": "int", "min_bathrooms": "float", "max_bathrooms": "float",
+        "min_sqft": "int", "min_acreage": "float", "max_hoa_fee": "int", "min_year_built": "int",
+        "property_types": "List[str]", "locations": "List[str]", "must_haves": "List[str]",
+        "deal_breakers": "List[str]", "timeline": "str", "urgency_level": "str"
+    },
+    "real_estate_seller": {
+        "property_address": "str", "property_type": "str", "bedrooms": "int", "bathrooms": "float",
+        "sqft": "int", "acreage": "float", "year_built": "int", "property_condition": "str",
+        "features_and_upgrades": "List[str]", "desired_sale_price": "int", "bottom_line_price": "int",
+        "timeline_to_sell": "str", "ideal_closing_date": "str", "motivation_for_selling": "str",
+        "is_occupied": "str", "remaining_mortgage": "int"
+    },
+
+    "therapy_client": {
+        "primary_concerns": "List[str]",
+        "therapy_experience": "str",
+        "client_goals": "List[str]",
+        "preferred_approaches": "List[str]",
+        "session_frequency": "str",
+        "urgency_level": "str"
+    },
+    # Add other vertical schemas here
+}
+
+async def synthesize_client_profile(
+    text_to_analyze: str,
+    user_vertical: str,
+    client_role: str # e.g., "buyer" or "seller"
+) -> Dict[str, Any]:
     """
-    Dynamically extracts ANY preferences mentioned in client notes and conversations.
-    No pre-defined fields - adapts to whatever is actually mentioned in the text.
-    
-    Args:
-        text: The full text of the client's notes, tags, and conversation history.
-        user_vertical: The professional's vertical (real_estate, therapy, etc.) for context.
+    Synthesizes a client's profile by analyzing text and populating a canonical schema.
     
     Returns:
-        A dictionary containing dynamically discovered preferences, or an empty dictionary if none are found.
+        A dictionary containing the 'ai_summary', 'actionable_intel', and structured 'preferences'.
     """
-    if not text or not text.strip():
+    if not text_to_analyze or not text_to_analyze.strip():
         return {}
 
-    # Dynamic prompt that adapts to any vertical and discovers what's mentioned
+    schema_key = f"{user_vertical}_{client_role}"
+    schema = CANONICAL_SCHEMAS.get(schema_key)
+
+    if not schema:
+        logging.warning(f"PROFILER AGENT: No canonical schema found for key '{schema_key}'.")
+        return {}
+
+    schema_json_string = json.dumps(schema, indent=2)
+
     prompt = f"""
-    You are analyzing client notes and conversations for a {user_vertical} professional.
-    
-    Extract ALL preferences, requirements, or important details mentioned in the text.
-    Return as JSON with FLAT keys (no nesting) based on what you actually find.
-    
-    Examples of what to look for (but don't limit yourself to these):
-    - Budget information (any format: max_price, budget_range, etc.)
-    - Location preferences (cities, neighborhoods, areas, proximity to things)
-    - Feature requirements (bedrooms, bathrooms, amenities, specific features)
-    - Personal preferences (style, approach, frequency, timing, etc.)
-    - Deal-breakers or must-haves
-    - Any other specific requirements, preferences, or important details
-    
-    Important:
-    - Only extract information that is explicitly mentioned in the text
-    - Use FLAT descriptive keys (no nested objects)
-    - Don't make assumptions or infer values not present
-    - Return valid JSON with whatever preferences you discover
-    - Use simple key names like: min_sqft, home_office, budget_max, etc.
-    
+    You are an expert AI assistant for a {user_vertical} professional. Your task is to synthesize all available information about a client into a clean, structured profile.
+
+    Analyze the provided text, which includes notes, conversation history, and survey answers.
+    Your response MUST be a single JSON object with three top-level keys:
+    1.  "ai_summary": A concise, 1-2 sentence summary of the client's current situation and goals.
+    2.  "actionable_intel": A list of short, critical, time-sensitive action items. Examples: ["Appointment Requested", "Client is frustrated"]. If none, return an empty list.
+    3.  "preferences": A JSON object that STRICTLY follows the canonical schema provided below.
+
+    CANONICAL SCHEMA FOR "preferences":
+    {schema_json_string}
+
+    RULES:
+    - Populate the "preferences" object using only information explicitly found in the text.
+    - If a value for a field is not found, omit the key entirely. Do NOT invent data.
+    - Convert numerical values (like budget or sqft) to integers, removing any symbols or commas.
+    - The entire output must be a single, valid JSON object.
+
     Text to analyze:
     ---
-    {text}
+    {text_to_analyze}
     ---
-    
-    Return ONLY valid JSON with FLAT descriptive keys based on the content found.
+
+    Return ONLY the structured JSON object.
     """
 
-    logging.info(f"PROFILER AGENT: Extracting dynamic preferences for {user_vertical} vertical...")
+    logging.info(f"PROFILER AGENT: Synthesizing profile against schema '{schema_key}'...")
 
     try:
-        # Get dynamic response from LLM
         response_text = await llm_client.get_chat_completion(
             prompt,
             temperature=0.0,
@@ -66,13 +98,19 @@ async def extract_preferences_from_text(text: str, user_vertical: str = "general
             logging.warning("PROFILER AGENT: Received an empty response from the LLM.")
             return {}
 
-        extracted_data = json.loads(response_text)
-        logging.info(f"PROFILER AGENT: Successfully extracted dynamic preferences: {extracted_data}")
-        return extracted_data
+        synthesized_data = json.loads(response_text)
+        
+        # Basic validation
+        if not all(k in synthesized_data for k in ["ai_summary", "actionable_intel", "preferences"]):
+            logging.error(f"PROFILER AGENT: LLM response was missing required top-level keys. Response: {response_text}")
+            return {}
+
+        logging.info(f"PROFILER AGENT: Successfully synthesized client profile.")
+        return synthesized_data
 
     except json.JSONDecodeError as e:
         logging.error(f"PROFILER AGENT: Failed to decode JSON from LLM response: {e}\nResponse text: {response_text}", exc_info=True)
         return {}
     except Exception as e:
-        logging.error(f"PROFILER AGENT: An unexpected error occurred during preference extraction: {e}", exc_info=True)
+        logging.error(f"PROFILER AGENT: An unexpected error occurred during profile synthesis: {e}", exc_info=True)
         return {}
