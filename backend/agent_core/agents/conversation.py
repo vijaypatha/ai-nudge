@@ -1,4 +1,4 @@
-# File Path: backend/agent_core/agents/conversation.py
+# FILE: backend/agent_core/agents/conversation.py
 # --- FINAL, COMPLETE, AND CORRECTED VERSION ---
 
 from typing import Dict, Any, List, Optional
@@ -13,7 +13,7 @@ from data.models.user import User
 from data.models.resource import Resource
 from data.models.campaign import MatchedClient
 from data.models.message import Message, MessageDirection
-from integrations import openai as openai_service
+from integrations import gemini as gemini_service
 from data import crm as crm_service
 from workflow.relationship_playbooks import IntentType
 from data.models.client import Client
@@ -24,7 +24,6 @@ PROFESSIONAL_TITLES = {
     "therapy": "therapist",
 }
 
-# This function remains unchanged.
 async def draft_instant_nudge_message(
     realtor: User,
     topic: str,
@@ -43,29 +42,27 @@ async def draft_instant_nudge_message(
             logging.error(f"CONVERSATION AGENT: Could not apply style guide. Error: {e}")
 
     professional_title = PROFESSIONAL_TITLES.get(realtor.vertical, "professional")
-    base_prompt_intro = f"You are an expert assistant for {realtor.full_name}, a {professional_title}. Your assistant name is 'Co-Pilot'.{style_prompt_addition}"
-
-    prompt = f"""
-    {base_prompt_intro}
+    
+    system_prompt = f"""
+    You are an expert assistant for {realtor.full_name}, a {professional_title}. Your assistant name is 'Co-Pilot'.{style_prompt_addition}
     Your task is to draft a friendly, professional, and engaging SMS message for a client.
     The topic or goal of the message is: "{topic}"
+    
     Instructions:
     1. Draft a master SMS message. Use the placeholder `[Client Name]` for personalization.
     2. The tone should be warm and helpful, appropriate for the agent's profession.
     3. The message should be concise and end with an open-ended question to encourage a reply.
-
-    Draft the SMS message now:
     """
+    
+    prompt_messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": "Draft the SMS message now:"}]
 
-    ai_draft = await openai_service.generate_text_completion(
-        prompt_messages=[{"role": "user", "content": prompt}],
-        model="gpt-4o-mini"
+    ai_draft = await gemini_service.generate_text_completion(
+        prompt_messages=prompt_messages
     )
 
     return ai_draft or f"Hi [Client Name], I was just thinking about you and wanted to reach out regarding {topic}."
 
 
-# --- MODIFIED: Prompt is refined for better balance and smarter suggestions. ---
 async def generate_recommendation_slate(
     realtor: User,
     client_id: uuid.UUID,
@@ -96,20 +93,11 @@ async def generate_recommendation_slate(
       ]
     }
     """
-    prompt = f"""
+    
+    system_prompt = f"""
     You are an AI Co-Pilot for {realtor.full_name}, an expert in their field.
-    Analyze the latest incoming message from a client named {client_name} and generate a structured JSON object of recommended actions.
-
-    ## CONTEXT
-    - Client Name: {client_name}
-    - Existing Client Tags: {client_tags}
-    - Conversation History (most recent first):
-    """
-    for message in reversed(conversation_history):
-        direction = "Client" if message.direction == "inbound" else "Agent"
-        prompt += f"- {direction}: {message.content}\n"
-    prompt += f"\n## LATEST INCOMING MESSAGE FROM {client_name}:\n\"{incoming_message.content}\"\n"
-    prompt += f"""
+    Your task is to analyze the latest incoming message from a client and generate a structured JSON object of recommended actions.
+    
     ## INSTRUCTIONS
     1.  **Analyze ONLY the LATEST INCOMING MESSAGE** in the context of the history.
     2.  **You MUST ALWAYS generate a helpful SMS response draft.** This is your primary function. Your response should be encouraging and move the conversation forward.
@@ -124,19 +112,40 @@ async def generate_recommendation_slate(
         - Any information that helps understand the client better
     4.  **For tags**: ALWAYS suggest 1-3 relevant tags that would help categorize or understand the client. Examples: "first-time buyer", "relocating", "anxiety", "parenting", "work stress", "high school", "job change", "moving", "family", "stress", "excited", "concerned"
     5.  **For notes**: ALWAYS write a concise, actionable note that summarizes key information from the message. Focus on what's new or important.
-    4.  **Format your entire output** as a single, valid JSON object following the schema provided.
+    6.  **Format your entire output** as a single, valid JSON object following the schema provided.
 
     ## JSON OUTPUT SCHEMA
     ```json
     {json_schema}
     ```
-    Now, generate the JSON output:
     """
 
+    conversation_str = ""
+    for message in reversed(conversation_history):
+        direction = "Client" if message.direction == "inbound" else "Agent"
+        conversation_str += f"- {direction}: {message.content}\n"
+
+    user_prompt = f"""
+    ## CONTEXT
+    - Client Name: {client_name}
+    - Existing Client Tags: {client_tags}
+    - Conversation History (most recent first):
+    {conversation_str}
+    
+    ## LATEST INCOMING MESSAGE FROM {client_name}:
+    "{incoming_message.content}"
+
+    Now, generate the JSON output:
+    """
+    
+    prompt_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+
     logging.info(f"CO-PILOT AGENT: Sending prompt to LLM for client {client_id}.")
-    raw_response = await openai_service.generate_text_completion(
-        prompt_messages=[{"role": "user", "content": prompt}],
-        model="gpt-4o-mini",
+    raw_response = await gemini_service.generate_text_completion(
+        prompt_messages=prompt_messages,
         response_format={"type": "json_object"}
     )
     if not raw_response: return {}
@@ -156,8 +165,6 @@ async def draft_outbound_campaign_message(
 ) -> str:
     """
     Uses a live LLM to draft a personalized outbound message for a campaign.
-    This function is now vertical-agnostic by operating on a generic Resource.
-    --- MODIFIED: Added robust fallbacks for potentially null property attributes. ---
     """
     logging.info(f"CONVERSATION AGENT (OUTBOUND): Drafting message for event '{event_type}'...")
     style_prompt_addition = ""
@@ -170,7 +177,7 @@ async def draft_outbound_campaign_message(
 
     professional_title = PROFESSIONAL_TITLES.get(realtor.vertical, "professional")
     base_prompt_intro = f"You are an expert assistant for a {professional_title}.{style_prompt_addition}"
-    prompt = ""
+    prompt_messages = []
     final_draft = ""
 
     if event_type == "content_suggestion" and resource and resource.attributes:
@@ -185,7 +192,7 @@ async def draft_outbound_campaign_message(
              logging.warning(f"CONVERSATION AGENT: 'content_suggestion' resource for user {realtor.id} is missing a title. Aborting specific message generation.")
              return "Hi [Client Name], I came across some information I thought you might find interesting. Let me know if you'd like me to send it over."
 
-        base_message_prompt = f"""
+        system_prompt = f"""
         {base_prompt_intro}
         You are an empathetic, supportive, and professional therapist drafting a personalized SMS message to your client, {client_name}.
         The purpose is to share a helpful article or video related to a topic relevant to them, making the message personal and directly about the content.
@@ -204,13 +211,13 @@ async def draft_outbound_campaign_message(
         Example 1: "Hey [Client Name]! I came across this article on managing anxiety that reminded me of our last chat. Hope it offers some helpful perspective!"
         Example 2: "Hi [Client Name]! Just saw this great video about positive parenting techniques and immediately thought of you. Hope it's insightful!"
         """
-        llm_response = await openai_service.generate_text_completion(
-            prompt_messages=[
-                {"role": "system", "content": base_message_prompt},
-                {"role": "user", "content": "Draft the SMS message now:"}
-            ],
-            model="gpt-4o-mini"
-        )
+        prompt_messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "Draft the SMS message now:"}
+        ]
+        
+        llm_response = await gemini_service.generate_text_completion(prompt_messages=prompt_messages)
+        
         if llm_response:
             final_draft = llm_response.strip()
         else:
@@ -228,9 +235,6 @@ async def draft_outbound_campaign_message(
         beds = attrs.get("BedroomsTotal", "N/A")
         baths = attrs.get("BathroomsTotalInteger", "N/A")
         sqft = attrs.get("LivingArea")
-        
-        # --- THIS IS THE FIX for the TypeError ---
-        # Provide a safe fallback for remarks BEFORE using it in the f-string.
         remarks = attrs.get("PublicRemarks") or ""
 
         price_display = f"${price:,.0f}" if isinstance(price, (int, float)) else "Contact for pricing"
@@ -264,7 +268,7 @@ async def draft_outbound_campaign_message(
                 if context_parts:
                     client_context = f" based on {', '.join(set(context_parts))}"
         
-        prompt = f"""
+        system_prompt = f"""
         {base_prompt_intro}
         A 'listing_announcement' event has occurred.
         Draft a SHORT, compelling property announcement message (under 200 characters).
@@ -292,36 +296,40 @@ async def draft_outbound_campaign_message(
         - For location: "Hi [Client Name], new property in your preferred area! {address} - {beds}bd/{baths}ba, {price_display}. Great location match."
         - Generic: "Hi [Client Name], thought of you for this {address} property! {address} - {beds}bd/{baths}ba, {price_display}. Let me know if you'd like to see it."
         """
-    elif event_type == "recency_nudge":
-        client_name = matched_audience[0].client_name
-        prompt = f"""
-        {base_prompt_intro}
-        A 'recency_nudge' event has occurred. This means the client, {client_name}, hasn't been contacted in a while.
-        Your task is to draft a short, friendly, and low-pressure SMS message to check in.
-        - Start with a warm greeting.
-        - Mention it's been a little while and you were thinking of them.
-        - Ask a simple, open-ended question like "How have you been?" or "How are things?".
-        - Keep it brief and casual. Avoid sounding salesy or demanding.
-        - The goal is to simply restart the conversation.
-        """
-    elif resource:
-        prompt = f"""
-        {base_prompt_intro}
-        A '{event_type}' event occurred.
-        A relevant resource was found, with these attributes: {json.dumps(resource.attributes, indent=2) if resource else "{}"}
-        Draft a generic but relevant message to share this with a client.
-        """
-    else:
-        prompt = f"A '{event_type}' event occurred. Draft a generic check-in message for a client."
-
-    llm_response = await openai_service.generate_text_completion(
-        prompt_messages=[
-            {"role": "system", "content": prompt},
+        prompt_messages = [
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": "Draft the message now:"}
-        ],
-        model="gpt-4o-mini"
-    )
+        ]
+    
+    else: # Fallback for other event types
+        if event_type == "recency_nudge":
+            client_name = matched_audience[0].client_name
+            system_prompt = f"""
+            {base_prompt_intro}
+            A 'recency_nudge' event has occurred. This means the client, {client_name}, hasn't been contacted in a while.
+            Your task is to draft a short, friendly, and low-pressure SMS message to check in.
+            - Start with a warm greeting.
+            - Mention it's been a little while and you were thinking of them.
+            - Ask a simple, open-ended question like "How have you been?" or "How are things?".
+            - Keep it brief and casual. Avoid sounding salesy or demanding.
+            - The goal is to simply restart the conversation.
+            """
+        elif resource:
+            system_prompt = f"""
+            {base_prompt_intro}
+            A '{event_type}' event occurred.
+            A relevant resource was found, with these attributes: {json.dumps(resource.attributes, indent=2) if resource else "{}"}
+            Draft a generic but relevant message to share this with a client.
+            """
+        else:
+            system_prompt = f"A '{event_type}' event occurred. Draft a generic check-in message for a client."
+        
+        prompt_messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "Draft the message now:"}
+        ]
 
+    llm_response = await gemini_service.generate_text_completion(prompt_messages=prompt_messages)
     return llm_response.strip() if llm_response else ""
 
 
@@ -340,7 +348,7 @@ async def detect_conversational_intent(message_content: str, user: User) -> Opti
 
     You MUST respond with EXACTLY ONE of these classifications:
 
-    - "LONG_TERM_NURTURE": Client expresses future intent with timeline 2+ months OR shows buying/selling signals but   not immediate urgency
+    - "LONG_TERM_NURTURE": Client expresses future intent with timeline 2+ months OR shows buying/selling signals but not immediate urgency
     - "SHORT_TERM_LEAD": Client shows immediate urgency (under 2 months) OR requests immediate action
     - "NONE": Casual conversation with no strategic opportunity
 
@@ -363,22 +371,20 @@ async def detect_conversational_intent(message_content: str, user: User) -> Opti
     Do NOT add explanation, punctuation, or other text. Response must be a single keyword only.
     """
 
-    prompt = f"Client message: '{message_content}'"
+    prompt_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Client message: '{message_content}'"}
+    ]
 
     try:
-        response = await openai_service.generate_text_completion(
-            prompt_messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            model="gpt-4o-mini"
-        )
+        response = await gemini_service.generate_text_completion(prompt_messages=prompt_messages)
+        if not response: return None
 
-        detected_intent = response.strip().upper()
-        logging.info(f"CONVERSATION AGENT (INTENT): Raw LLM response: '{response}'. Parsed intent: '{detected_intent}'")
+        detected_intent_str = response.strip().upper()
+        logging.info(f"CONVERSATION AGENT (INTENT): Raw LLM response: '{response}'. Parsed intent: '{detected_intent_str}'")
 
-        if detected_intent in ["LONG_TERM_NURTURE", "SHORT_TERM_LEAD"]:
-            return detected_intent
+        if detected_intent_str in [IntentType.LONG_TERM_NURTURE.value, IntentType.SHORT_TERM_LEAD.value]:
+            return IntentType(detected_intent_str)
         return None
 
     except Exception as e:
@@ -386,7 +392,6 @@ async def detect_conversational_intent(message_content: str, user: User) -> Opti
         return None
 
 
-# This is the correct, final version of this function. The duplicate has been removed.
 async def draft_campaign_step_message(realtor: User, client: Client, prompt: str, delay_days: int) -> tuple[str, int]:
     """
     Uses an LLM to generate the full message content for a single step in a campaign playbook.
@@ -402,30 +407,27 @@ async def draft_campaign_step_message(realtor: User, client: Client, prompt: str
             logging.error(f"CONVERSATION AGENT: Could not apply style guide. Error: {e}")
             
     professional_title = PROFESSIONAL_TITLES.get(realtor.vertical, "professional")
-    full_prompt = f"""
+    system_prompt = f"""
     You are an AI assistant for {realtor.full_name}, a {professional_title}.
     Your task is to draft a personalized, ready-to-send SMS message to a client named {client.full_name}.
     Use the client's first name, {client.full_name.split(' ')[0]}, for personalization.
     {style_prompt_addition}
 
     Instructions for this message: {prompt}
-
-    Draft the complete SMS message now:
     """
+    
+    prompt_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "Draft the complete SMS message now:"}
+    ]
 
-    ai_draft = await openai_service.generate_text_completion(
-        prompt_messages=[{"role": "user", "content": full_prompt}],
-        model="gpt-4o-mini"
-    )
+    ai_draft = await gemini_service.generate_text_completion(prompt_messages=prompt_messages)
 
     if not ai_draft:
         ai_draft = f"Hi {client.full_name.split(' ')[0]}, just checking in."
 
-    # Return the generated content and the original delay_days for scheduling
     return ai_draft, delay_days
 
-
-# Replace the existing draft_consolidated_nudge_with_commentary function with this
 
 def _trim_resource_for_prompt(resource: Resource) -> Dict[str, Any]:
     """A helper function to extract only the essential data from a verbose resource object."""
@@ -448,93 +450,93 @@ async def draft_consolidated_nudge_with_commentary(
     session: Session
 ) -> Dict[str, Any]:
     """
-    FINAL, STABLE VERSION: Generates personalized commentaries by calling the AI
-    sequentially to ensure reliability and avoid rate-limiting issues.
+    Generates personalized commentaries for all curated matches using a structured prompt.
     """
     from backend.agent_core.brain.market_context import get_context_for_resource
-    from backend.agent_core import llm_client
+    import json
 
     logging.info(f"CONVERSATION AGENT: Processing {len(matches_to_process)} curated matches for client {client.id}...")
 
-    # --- Initialize default values ---
-    commentary_map = {}
-    curation_rationale = "Top matches were selected based on relevance."
-    summary_draft = f"Hi {client.full_name.split(' ')[0]}, I've curated the top {len(matches_to_process)} properties for you from recent market activity."
-
+    properties_for_ai = []
+    for resource in matches_to_process:
+        context = get_context_for_resource(resource, realtor, session)
+        properties_for_ai.append({
+            "details": _trim_resource_for_prompt(resource),
+            "context": context
+        })
+    
     client_tags = (client.user_tags or []) + (client.ai_tags or [])
     client_persona = "Investor" if "investor" in [tag.lower() for tag in client_tags] else "Homebuyer"
     client_motivation = client.preferences.get('ai_summary', 'find a suitable property.')
-
-    # --- Step 1: Tier 1 AI Call (Deep Analysis for Top 5) ---
-    tier1_matches = matches_to_process[:5]
-    if tier1_matches:
-        properties_for_ai_t1 = [{
-            "details": _trim_resource_for_prompt(res),
-            "market_context": get_context_for_resource(res, realtor, session)
-        } for res in tier1_matches]
-        
-        prompt_t1 = f"""
-        You are an expert real estate co-pilot for {realtor.full_name}. Your client is {client.full_name} ({client_persona}).
-        Their core motivation is: "{client_motivation}"
-        Generate a JSON object with:
-        1. 'curation_rationale': A summary FOR THE AGENT explaining why these are the top matches.
-        2. 'commentaries': A list of insightful, one-sentence commentaries FOR THE CLIENT for EACH property.
-        RULES: You MUST connect property features to the client's core motivation. Be direct. DO NOT use cliches like "gem."
-        PROPERTIES: {json.dumps(properties_for_ai_t1, indent=2)}
-        REQUIRED JSON (no markdown): {{"curation_rationale": "<...>", "commentaries": [{{"id": "<id>", "commentary": "<...>"}}]}}
-        """
-        try:
-            logging.info("CONVERSATION AGENT: Making Tier 1 AI call for deep commentary...")
-            raw_t1_response = await llm_client.get_chat_completion(prompt=prompt_t1, json_response=True)
-            if raw_t1_response:
-                t1_data = json.loads(raw_t1_response)
-                for item in t1_data.get("commentaries", []): commentary_map[item['id']] = item['commentary']
-                curation_rationale = t1_data.get("curation_rationale", curation_rationale)
-        except Exception as e:
-            logging.error(f"CONVERSATION AGENT: Tier 1 AI call failed. Error: {e}", exc_info=True)
-
-    # --- Step 2: Tier 2 AI Call (Fast Analysis for Matches 6-10) ---
-    tier2_matches = matches_to_process[5:]
-    if tier2_matches:
-        properties_for_ai_t2 = [_trim_resource_for_prompt(res) for res in tier2_matches]
-        prompt_t2 = f"""
-        You are an expert real estate co-pilot. For each property in the list below, write a single, concise sentence highlighting its most appealing feature for an {client_persona}.
-        RULES: Be direct. No fluff.
-        PROPERTIES: {json.dumps(properties_for_ai_t2, indent=2)}
-        REQUIRED JSON (no markdown): {{"commentaries": [{{"id": "<id>", "commentary": "<...>"}}]}}
-        """
-        try:
-            logging.info("CONVERSATION AGENT: Making Tier 2 AI call for fast commentary...")
-            raw_t2_response = await llm_client.get_chat_completion(prompt=prompt_t2, json_response=True)
-            if raw_t2_response:
-                t2_data = json.loads(raw_t2_response)
-                for item in t2_data.get("commentaries", []): commentary_map[item['id']] = item['commentary']
-        except Exception as e:
-            logging.error(f"CONVERSATION AGENT: Tier 2 AI call failed. Error: {e}", exc_info=True)
-
-    # --- Step 3: Final AI Call for Summary Draft ---
-    summary_prompt = f"""
-    You are an expert real estate co-pilot for {realtor.full_name}.
-    Draft a concise, professional SMS summary for {client.full_name} ({client_persona}) about finding {total_matches_found} new property matches and curating the top {len(matches_to_process)} for their review.
-    - Emphasize your role as a curator who has saved them time.
-    - Write under 160 characters. DO NOT use emojis.
+    
+    json_schema = """
+    {
+      "curation_rationale": "<A 1-2 sentence summary FOR THE AGENT explaining why these properties were chosen.>",
+      "summary_draft": "<A concise, professional SMS summary draft FOR THE CLIENT.>",
+      "commentaries": [
+        { "id": "<property_id_1>", "commentary": "<Your one-sentence insight for property 1>" }
+      ]
+    }
     """
-    try:
-        logging.info("CONVERSATION AGENT: Making final AI call for summary draft...")
-        summary_response = await llm_client.get_chat_completion(prompt=summary_prompt)
-        if summary_response:
-            summary_draft = summary_response.strip()
-    except Exception as e:
-        logging.error(f"CONVERSATION AGENT: Summary draft AI call failed. Error: {e}")
 
-    # --- Step 4: Assemble Final Response ---
-    ordered_commentaries = [
-        commentary_map.get(str(res.id), "This is a strong match based on your preferences.") 
-        for res in matches_to_process
+    system_prompt = f"""
+    You are an expert real estate co-pilot for {realtor.full_name}.
+    Your client is {client.full_name} ({client_persona}).
+    Their core motivation is: "{client_motivation}"
+
+    Your task is to generate a single JSON object with three parts:
+    1. 'curation_rationale': A summary FOR THE AGENT explaining why these properties are a good fit.
+    2. 'summary_draft': A concise, professional SMS message FOR THE CLIENT about the {len(matches_to_process)} curated properties.
+    3. 'commentaries': A list of insightful, one-sentence commentaries FOR THE CLIENT, one for each property.
+
+    **RULES:**
+    - You MUST connect property features to the client's core motivation.
+    - Be direct and data-driven. DO NOT use cliches like "gem" or "stunning."
+    - The summary_draft must be under 160 characters and contain NO emojis.
+    
+    **REQUIRED JSON OUTPUT (no markdown):**
+    {json_schema}
+    """
+    
+    user_prompt = f"""
+    **DATA TO ANALYZE:**
+    {json.dumps(properties_for_ai, indent=2)}
+    """
+    
+    prompt_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
     ]
     
-    return {
-        "commentaries": ordered_commentaries,
-        "summary_draft": summary_draft,
-        "curation_rationale": curation_rationale
-    }
+    try:
+        logging.info("CONVERSATION AGENT: Making single, unified AI call...")
+        raw_response = await gemini_service.get_chat_completion(
+            prompt_messages=prompt_messages, 
+            response_format={"type": "json_object"}
+        )
+        
+        if not raw_response:
+            # If the AI call gracefully returns None, trigger the exception to use the fallback.
+            raise ValueError("AI response was empty or blocked.")
+
+        response_data = json.loads(raw_response)
+        
+        commentary_map = {item['id']: item['commentary'] for item in response_data.get("commentaries", [])}
+        
+        ordered_commentaries = [
+            commentary_map.get(str(res.id), "This is a strong match based on your preferences.") 
+            for res in matches_to_process
+        ]
+        
+        return {
+            "commentaries": ordered_commentaries,
+            "summary_draft": response_data.get("summary_draft", f"Hi {client.full_name.split(' ')[0]}, I've curated {len(matches_to_process)} properties for you."),
+            "curation_rationale": response_data.get("curation_rationale", "Top matches selected based on relevance.")
+        }
+    except Exception as e:
+        logging.error(f"CONVERSATION AGENT: Unified AI call failed. Error: {e}", exc_info=True)
+        return {
+            "commentaries": ["This is an excellent match based on your preferences." for _ in matches_to_process],
+            "summary_draft": f"Hi {client.full_name.split(' ')[0]}, I found {len(matches_to_process)} new properties worth reviewing.",
+            "curation_rationale": "Top matches were selected based on relevance."
+        }

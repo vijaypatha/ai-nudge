@@ -1,5 +1,5 @@
+# FILE: backend/integrations/gemini.py
 # ---
-# File Path: backend/integrations/gemini.py
 # Purpose: Handles all communication with Google's Gemini models.
 # ---
 import os
@@ -72,8 +72,9 @@ Instructions:
 Response:"""
 
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(
+        # Using the updated, stable model
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = await model.generate_content_async(
             prompt,
             generation_config=genai.types.GenerationConfig(
                 temperature=0.2,  # Low temperature for consistency
@@ -82,13 +83,23 @@ Response:"""
             )
         )
         
+        if not response.candidates:
+            finish_reason = "UNKNOWN"
+            try:
+                if response.prompt_feedback:
+                    finish_reason = response.prompt_feedback.block_reason
+            except ValueError:
+                pass
+            logger.warning(f"GEMINI FAQ: Response was blocked or empty. Finish reason: {finish_reason}")
+            return None
+
         result = response.text.strip()
         logging.info(f"GEMINI FAQ: Query '{user_query}' -> Response '{result}'")
         
         return result if result != "NO_MATCH" else None
         
     except Exception as e:
-        logging.error(f"GEMINI FAQ ERROR: {e}")
+        logging.error(f"GEMINI FAQ ERROR: {e}", exc_info=True)
         return None
 
 async def get_chat_completion(
@@ -106,7 +117,7 @@ async def get_chat_completion(
     Args:
         prompt_messages: List of message dicts with 'role' and 'content' keys
         prompt: Single string prompt (alternative to prompt_messages)
-        model: Gemini model to use (default: gemini-2.0-flash-exp)
+        model: Gemini model to use (default: gemini-2.5-flash)
         temperature: Controls randomness (0.0-1.0)
         max_tokens: Maximum tokens to generate
         response_format: Format specification (e.g., {"type": "json_object"})
@@ -116,30 +127,36 @@ async def get_chat_completion(
         Generated text response or None on error
     """
     try:
-        # Use Gemini 2.5 Flash for best performance
-        genai_model = genai.GenerativeModel(model)
+        system_instruction = None
         
-        # Prepare content based on input format
         if prompt_messages:
-            # Convert OpenAI-style messages to Gemini format
-            content_parts = []
+            # Convert OpenAI-style messages to Gemini's preferred structured format
+            gemini_messages = []
             for msg in prompt_messages:
-                role = msg.get('role', 'user')
+                role = msg.get('role')
                 content = msg.get('content', '')
                 
                 if role == 'system':
-                    # Gemini doesn't have system messages, so we prepend to user message
-                    content_parts.append(f"System: {content}")
-                elif role in ['user', 'assistant']:
-                    content_parts.append(f"{role.title()}: {content}")
+                    # Gemini 1.5+ has a dedicated system_instruction
+                    system_instruction = content
+                elif role == 'user':
+                    gemini_messages.append({'role': 'user', 'parts': [content]})
+                elif role == 'assistant' or role == 'model':
+                    gemini_messages.append({'role': 'model', 'parts': [content]})
             
-            # Combine all content
-            full_prompt = "\n\n".join(content_parts)
+            # Use the structured list of messages as the prompt content
+            full_prompt = gemini_messages
         elif prompt:
             full_prompt = prompt
         else:
             raise ValueError("Either prompt_messages or prompt must be provided")
-        
+
+        # Initialize the model with the system instruction if it exists
+        genai_model = genai.GenerativeModel(
+            model,
+            system_instruction=system_instruction
+        )
+
         # Configure generation parameters
         generation_config = genai.types.GenerationConfig(
             temperature=temperature,
@@ -147,17 +164,31 @@ async def get_chat_completion(
             candidate_count=1
         )
         
-        # Handle JSON response format
         if response_format and response_format.get("type") == "json_object":
-            # Gemini's official JSON mode is activated by setting the response_mime_type.
-            # This is more reliable than instructing it in the prompt.
             generation_config.response_mime_type = "application/json"
         
-        # Generate response
+        safety_settings = {
+            'HARM_CATEGORY_HARASSMENT': 'BLOCK_NONE',
+            'HARM_CATEGORY_HATE_SPEECH': 'BLOCK_NONE',
+            'HARM_CATEGORY_SEXUALLY_EXPLICIT': 'BLOCK_NONE',
+            'HARM_CATEGORY_DANGEROUS_CONTENT': 'BLOCK_NONE',
+        }
+
         response = await genai_model.generate_content_async(
             full_prompt,
-            generation_config=generation_config
+            generation_config=generation_config,
+            safety_settings=safety_settings
         )
+        
+        if not response.candidates:
+            finish_reason = "UNKNOWN"
+            try:
+                if response.prompt_feedback:
+                    finish_reason = response.prompt_feedback.block_reason
+            except ValueError:
+                pass
+            logger.warning(f"GEMINI CHAT: Response was blocked or empty. Finish reason: {finish_reason}")
+            return None
         
         result = response.text.strip()
         logger.info(f"GEMINI CHAT: Generated response with {len(result)} characters")
@@ -165,13 +196,13 @@ async def get_chat_completion(
         return result
         
     except Exception as e:
-        logger.error(f"GEMINI CHAT ERROR: {e}")
+        logger.error(f"GEMINI CHAT ERROR: An unexpected error occurred: {e}", exc_info=True)
         return None
 
 async def generate_text_completion(
     prompt_messages: List[dict] = None,
     prompt: str = None,
-    model: str = "gemini-2.0-flash-exp",
+    model: str = "gemini-2.5-flash",
     temperature: float = 0.7,
     max_tokens: int = 1000,
     response_format: dict = None,
