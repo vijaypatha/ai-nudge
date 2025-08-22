@@ -515,10 +515,7 @@ async def draft_consolidated_nudge_with_commentary(
             response_format={"type": "json_object"}
         )
         
-        if not raw_response:
-            # If the AI call gracefully returns None, trigger the exception to use the fallback.
-            raise ValueError("AI response was empty or blocked.")
-
+        # json.loads will naturally fail if raw_response is None, triggering the except block.
         response_data = json.loads(raw_response)
         
         commentary_map = {item['id']: item['commentary'] for item in response_data.get("commentaries", [])}
