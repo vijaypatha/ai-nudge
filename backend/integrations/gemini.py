@@ -1,7 +1,9 @@
 # FILE: backend/integrations/gemini.py
+
 # ---
 # Purpose: Handles all communication with Google's Gemini models.
 # ---
+
 import os
 import json
 import logging
@@ -10,30 +12,18 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Configure the API key from environment variables
-# Ensure you have GOOGLE_API_KEY set in your environment.
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
 if not GOOGLE_API_KEY:
-    # For testing purposes, use a dummy key instead of raising an error
     logger.warning("GOOGLE_API_KEY environment variable not set. Using dummy key for testing.")
     GOOGLE_API_KEY = "test-google-api-key"
 
-# Only configure genai if we have a valid API key
 if GOOGLE_API_KEY and GOOGLE_API_KEY != "test-google-api-key":
     genai.configure(api_key=GOOGLE_API_KEY)
 
 async def get_text_embedding(text: str) -> List[float]:
-    """
-    Generates a vector embedding for a given text using Google's embedding model.
-
-    Args:
-        text: The input string to embed.
-
-    Returns:
-        A list of floats representing the vector embedding.
-    """
+    """Generates a vector embedding for a given text."""
     try:
-        # Use the recommended model for semantic search and retrieval
         result = await genai.embed_content_async(
             model="models/text-embedding-004",
             content=text,
@@ -41,65 +31,43 @@ async def get_text_embedding(text: str) -> List[float]:
         )
         return result['embedding']
     except Exception as e:
-        print(f"GEMINI API ERROR: Could not generate embedding. {e}")
-        # Return a zero-vector on error. The dimension (768) matches the model's output.
+        logger.error(f"LLM CLIENT: Gemini embedding failed: {e}")
         return [0.0] * 768
 
 async def match_faq_with_gemini(user_query: str, faqs: List[dict]) -> Optional[str]:
-    """
-    Use Gemini to match user query against FAQ list and return appropriate response
-    """
+    """Match a user query against FAQ list."""
     if not faqs:
         return None
-    
-    # Create FAQ context as JSON
     faq_context = json.dumps(faqs, indent=2)
-    
-    prompt = f"""You are a helpful customer service assistant. A customer has asked a question, and you have access to a list of frequently asked questions and their answers.
-
-Customer Question: "{user_query}"
-
-Available FAQs:
-{faq_context}
-
-Instructions:
-- If the customer's question matches any FAQ topic, provide the appropriate answer
-- You may combine multiple relevant FAQ answers if needed
-- Keep responses professional, helpful, and under 320 characters for SMS
-- If no FAQ matches the question, respond with exactly "NO_MATCH"
-- Do not make up information not in the FAQs
-
-Response:"""
-
+    prompt = (
+        f"You are a helpful customer service assistant. Your task is to match a user's query to the most relevant FAQ from the list below.\n"
+        f"If you find a relevant FAQ, respond with ONLY the answer from that FAQ.\n"
+        f"If no FAQ is relevant, respond with exactly \"NO_MATCH\".\n"
+        f"FAQs:\n{faq_context}\nUser Query: {user_query}"
+    )
     try:
-        # Using the updated, stable model
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = await model.generate_content_async(
             prompt,
             generation_config=genai.types.GenerationConfig(
-                temperature=0.2,  # Low temperature for consistency
+                temperature=0.2,
                 max_output_tokens=150,
                 candidate_count=1
             )
         )
-        
         if not response.candidates:
-            finish_reason = "UNKNOWN"
-            try:
-                if response.prompt_feedback:
-                    finish_reason = response.prompt_feedback.block_reason
-            except ValueError:
-                pass
-            logger.warning(f"GEMINI FAQ: Response was blocked or empty. Finish reason: {finish_reason}")
+            logger.warning(f"GEMINI FAQ: Response was blocked or empty.")
             return None
-
-        result = response.text.strip()
-        logging.info(f"GEMINI FAQ: Query '{user_query}' -> Response '{result}'")
         
-        return result if result != "NO_MATCH" else None
-        
+        # Safe text extraction - FIXED ALL [0] INDEXING
+        if response.candidates and response.candidates.content and response.candidates.content.parts:
+            result = response.text.strip()
+            return result if result != "NO_MATCH" else None
+        else:
+            logger.warning(f"GEMINI FAQ: No valid response parts. Finish reason: {response.candidates.finish_reason if response.candidates else 'No candidates'}")
+            return None
     except Exception as e:
-        logging.error(f"GEMINI FAQ ERROR: {e}", exc_info=True)
+        logger.error(f"GEMINI FAQ ERROR: {e}")
         return None
 
 async def get_chat_completion(
@@ -111,59 +79,27 @@ async def get_chat_completion(
     response_format: dict = None,
     **kwargs
 ) -> Optional[str]:
-    """
-    Gets a chat completion from Google Gemini 2.5 API.
-    
-    Args:
-        prompt_messages: List of message dicts with 'role' and 'content' keys
-        prompt: Single string prompt (alternative to prompt_messages)
-        model: Gemini model to use (default: gemini-2.5-flash)
-        temperature: Controls randomness (0.0-1.0)
-        max_tokens: Maximum tokens to generate
-        response_format: Format specification (e.g., {"type": "json_object"})
-        **kwargs: Additional arguments
-    
-    Returns:
-        Generated text response or None on error
-    """
+    """Get a chat completion from Google Gemini 2.5 API."""
     try:
         system_instruction = None
-        
         if prompt_messages:
-            # Convert OpenAI-style messages to Gemini's preferred structured format
             gemini_messages = []
             for msg in prompt_messages:
-                role = msg.get('role')
-                content = msg.get('content', '')
-                
+                role, content = msg.get('role'), msg.get('content', '')
                 if role == 'system':
-                    # Gemini 1.5+ has a dedicated system_instruction
                     system_instruction = content
-                elif role == 'user':
-                    gemini_messages.append({'role': 'user', 'parts': [content]})
-                elif role == 'assistant' or role == 'model':
-                    gemini_messages.append({'role': 'model', 'parts': [content]})
-            
-            # Use the structured list of messages as the prompt content
+                elif role in ['user', 'assistant', 'model']:
+                    gemini_messages.append({'role': 'model' if role != 'user' else 'user', 'parts': [content]})
             full_prompt = gemini_messages
         elif prompt:
             full_prompt = prompt
         else:
             raise ValueError("Either prompt_messages or prompt must be provided")
 
-        # Initialize the model with the system instruction if it exists
-        genai_model = genai.GenerativeModel(
-            model,
-            system_instruction=system_instruction
-        )
-
-        # Configure generation parameters
+        genai_model = genai.GenerativeModel(model, system_instruction=system_instruction)
         generation_config = genai.types.GenerationConfig(
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-            candidate_count=1
+            temperature=temperature, max_output_tokens=max_tokens, candidate_count=1
         )
-        
         if response_format and response_format.get("type") == "json_object":
             generation_config.response_mime_type = "application/json"
         
@@ -173,28 +109,23 @@ async def get_chat_completion(
             'HARM_CATEGORY_SEXUALLY_EXPLICIT': 'BLOCK_NONE',
             'HARM_CATEGORY_DANGEROUS_CONTENT': 'BLOCK_NONE',
         }
-
+        
         response = await genai_model.generate_content_async(
-            full_prompt,
-            generation_config=generation_config,
-            safety_settings=safety_settings
+            full_prompt, generation_config=generation_config, safety_settings=safety_settings
         )
         
         if not response.candidates:
-            finish_reason = "UNKNOWN"
-            try:
-                if response.prompt_feedback:
-                    finish_reason = response.prompt_feedback.block_reason
-            except ValueError:
-                pass
-            logger.warning(f"GEMINI CHAT: Response was blocked or empty. Finish reason: {finish_reason}")
+            logger.warning(f"GEMINI CHAT: Response was blocked or empty.")
             return None
         
-        result = response.text.strip()
-        logger.info(f"GEMINI CHAT: Generated response with {len(result)} characters")
-        
-        return result
-        
+        # Safe text extraction with proper error handling - FIXED ALL [0] INDEXING
+        if response.candidates and response.candidates.content and response.candidates.content.parts:
+            return response.text.strip()
+        else:
+            finish_reason = response.candidates.finish_reason if response.candidates else "No candidates"
+            logger.warning(f"GEMINI CHAT: No valid response parts. Finish reason: {finish_reason}")
+            return None
+            
     except Exception as e:
         logger.error(f"GEMINI CHAT ERROR: An unexpected error occurred: {e}", exc_info=True)
         return None
@@ -208,9 +139,7 @@ async def generate_text_completion(
     response_format: dict = None,
     **kwargs
 ) -> Optional[str]:
-    """
-    Alias for get_chat_completion to maintain compatibility with existing code.
-    """
+    """Alias for get_chat_completion to maintain compatibility with existing code."""
     return await get_chat_completion(
         prompt_messages=prompt_messages,
         prompt=prompt,
