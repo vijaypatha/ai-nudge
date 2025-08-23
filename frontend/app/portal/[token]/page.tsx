@@ -159,17 +159,24 @@ export default function PortalPage({ params }: { params: { token: string }}) {
             setPageState('error');
             return;
         }
-        const fetchData = async () => {
+    
+        const fetchDataWithRetry = async (retries = 3) => {
             try {
                 const data = await api.get(`/api/portal/view/${token}`);
                 setPortalData(data);
                 setPageState('loaded');
             } catch (err: any) {
-                if (err.message.includes('403')) setErrorMsg('This portal link is expired or invalid. Please request a new one from your agent.');
-                setPageState('error');
+                if (retries > 0) {
+                    console.warn(`API call failed, retrying in 1 second. Attempts left: ${retries}`);
+                    setTimeout(() => fetchDataWithRetry(retries - 1), 1000);
+                } else {
+                    if (err.message.includes('403')) setErrorMsg('This portal link is expired or invalid. Please request a new one from your agent.');
+                    setPageState('error');
+                }
             }
         };
-        fetchData();
+    
+        fetchDataWithRetry();
     }, [token]);
 
     if (pageState === 'loading') {

@@ -1281,7 +1281,7 @@ def find_or_create_consolidated_nudge(client_id: UUID, user_id: UUID, session: S
         headline=f"Initial Matches for {client.full_name}",
         key_intel={"matched_resource_ids": []},
         original_draft=f"Hi {first_name}, based on our conversation, here are some initial properties I found for you. Let me know what you think!",
-        status=CampaignStatus.DRAFT,
+        status=CampaignStatus.DRAFT.value,
         source="consolidated_engine"
     )
 

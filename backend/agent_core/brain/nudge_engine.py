@@ -18,6 +18,8 @@ from agent_core import llm_client
 from .verticals import VERTICAL_CONFIGS
 from .nudge_engine_utils import calculate_cosine_similarity
 from common.config import get_settings
+from data.models.campaign import CampaignBriefing, CampaignStatus
+from data.models.portal import PortalLink
 
 MATCH_THRESHOLD = 1  # Lowered for better matching with sample data
 FEEDBACK_PENALTY_THRESHOLD = 0.85
@@ -66,7 +68,7 @@ async def _create_campaign_from_event(event: MarketEvent, user: User, resource: 
     new_briefing = CampaignBriefing(
         id=uuid.uuid4(), user_id=user.id, client_id=primary_client_id,
         triggering_resource_id=resource.id, campaign_type=event.event_type,
-        status=CampaignStatus.DRAFT, headline=headline, key_intel=key_intel,
+        status=CampaignStatus.DRAFT.value, headline=headline, key_intel=key_intel,
         original_draft=ai_draft, matched_audience=audience_for_db, source=source
     )
     db_session.add(new_briefing)
@@ -80,9 +82,10 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
     from agent_core.agents import conversation as conversation_agent
     from backend.common.jwt_utils import create_portal_token
     from common.config import get_settings
-    from data.models.portal import PortalLink
     from nanoid import generate as generate_nanoid
     from datetime import datetime, timezone, timedelta
+    from data.models.campaign import CampaignBriefing, CampaignStatus
+    from data.models.portal import PortalLink
 
     vertical_config = VERTICAL_CONFIGS.get(user.vertical, {})
     if not vertical_config: return
@@ -116,6 +119,10 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
             if not batch_results or not batch_results.get("commentaries"):
                 continue
 
+            # 1. Get the existing consolidated nudge or create a new one.
+            nudge = crm_service.find_or_create_consolidated_nudge(client.id, user.id, session)
+
+            # 2. Populate the key_intel with fresh data from the AI.
             final_curated_matches = []
             for i, resource in enumerate(curated_matches_to_process):
                 match_info = next((m for m in potential_new_matches if m['resource'].id == resource.id), None)
@@ -124,44 +131,38 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
                     "reasons": match_info['reasons'] if match_info else [],
                     "agent_commentary": batch_results["commentaries"][i]
                 })
-
-            nudge = crm_service.find_or_create_consolidated_nudge(client.id, user.id, session)
-
-            # --- THIS IS THE NEW SHORT LINK LOGIC ---
-            # 1. Create the long, secure token
-            long_token = create_portal_token(client.id, user.id)
-            # 2. Generate a short, URL-friendly ID
-            short_id = generate_nanoid(size=12)
-            # 3. Create the database record to store the link
-            portal_link = PortalLink(
-                id=short_id, token=long_token, campaign_id=nudge.id,
-                client_id=client.id, user_id=user.id,
-                expires_at=datetime.now(timezone.utc) + timedelta(days=30)
-            )
-            session.add(portal_link)
-            
-            # 4. Build the final, user-friendly URL using the short ID
-            portal_url = f"{get_settings().FRONTEND_APP_URL}/portal/{short_id}"
-            
-            final_draft = f"{batch_results['summary_draft']}\n\nView Your Private Portal:\n{portal_url}"
-
             nudge.key_intel = {
-                "matched_resource_ids": final_curated_matches,
-                "curation_rationale": batch_results.get("curation_rationale")
+                "summary_draft": batch_results["summary_draft"],
+                "curation_rationale": batch_results.get("curation_rationale"),
+                "matched_resource_ids": final_curated_matches
             }
             flag_modified(nudge, "key_intel")
             
+            # 3. Create the PortalLink, linking it to the consolidated nudge's ID.
+            long_token = create_portal_token(client.id, user.id)
+            short_id = generate_nanoid(size=12)
+            portal_link = PortalLink(
+                id=short_id,
+                token=long_token,
+                campaign_id=nudge.id,
+                client_id=client.id,
+                user_id=user.id,
+                created_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                is_active=True
+            )
+            session.add(portal_link)
+            # 4. Update the remaining nudge fields with the new draft and info.
+            portal_url = f"{get_settings().FRONTEND_BASE_URL}/portal/{short_id}"
+            nudge.original_draft = f"{batch_results['summary_draft']}\n\nView Your Private Portal:\n{portal_url}"
             nudge.headline = f"Found {total_matches_found} new matches for {client.full_name}"
-            nudge.original_draft = final_draft
-            nudge.status = CampaignStatus.DRAFT
             session.add(nudge)
-            
+            session.commit()
             logging.info(f"NUDGE_ENGINE (PROACTIVE): Successfully updated nudge {nudge.id} and created short link {short_id}.")
 
         except Exception as e:
             logging.error(f"NUDGE_ENGINE: Main processing loop failed for client {client.id}. Error: {e}", exc_info=True)
 
-    session.commit()
 
 async def _create_or_update_consolidated_nudge(client: Client, user: User, session: Session, source: str):
     """
@@ -204,7 +205,7 @@ async def _create_or_update_consolidated_nudge(client: Client, user: User, sessi
         
         nudge.key_intel['matched_resource_ids'] = top_matches
         nudge.headline = f"Found {len(top_matches)} potential matches for {client.full_name}"
-        nudge.status = CampaignStatus.DRAFT
+        nudge.status = CampaignStatus.DRAFT.value
         flag_modified(nudge, "key_intel")
         
         session.add(nudge)

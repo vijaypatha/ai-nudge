@@ -108,7 +108,12 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
 
     # 1. Find the link record in the database
     link_record = session.get(PortalLink, short_id)
-    if not link_record or not link_record.is_active or link_record.expires_at < datetime.now(timezone.utc):
+    current_time = datetime.now(timezone.utc)
+    expires_at = link_record.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if not link_record or not link_record.is_active or expires_at < current_time:
         raise HTTPException(status_code=404, detail="This portal link is invalid or has expired.")
 
     # 2. Decode the token to get user/client IDs

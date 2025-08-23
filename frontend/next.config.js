@@ -1,7 +1,17 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // --- THIS IS THE FIX ---
+  // The 'rewrites' function must be a top-level key, parallel to 'images'.
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: 'http://backend:8000/api/:path*',
+      },
+    ]
+  },
+
   images: {
-    // --- MODIFIED: Add dangerouslyAllowSVG property ---
     dangerouslyAllowSVG: true,
     remotePatterns: [
       {
