@@ -66,6 +66,8 @@ class PortalDataResponse(BaseModel):
     preferences: Dict[str, Any]
     matches: List[PortalMatch]
     comments: List[PortalComment]
+    agent_name: Optional[str] = None
+    curation_rationale: Optional[str] = None
 
 
 # --- Agent-Facing Endpoint ---
@@ -108,12 +110,8 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
 
     # 1. Find the link record in the database
     link_record = session.get(PortalLink, short_id)
-    current_time = datetime.now(timezone.utc)
-    expires_at = link_record.expires_at
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-
-    if not link_record or not link_record.is_active or expires_at < current_time:
+    expires_at_aware = link_record.expires_at.replace(tzinfo=timezone.utc) if link_record and link_record.expires_at.tzinfo is None else link_record.expires_at if link_record else None
+    if not link_record or not link_record.is_active or not expires_at_aware or expires_at_aware < datetime.now(timezone.utc):
         raise HTTPException(status_code=404, detail="This portal link is invalid or has expired.")
 
     # 2. Decode the token to get user/client IDs
@@ -124,11 +122,12 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
     except ValueError as e:
         raise HTTPException(status_code=403, detail=str(e))
 
-    # 3. Fetch the specific CampaignBriefing this link points to
+    # 3. Fetch all necessary data
     campaign = session.get(CampaignBriefing, link_record.campaign_id)
     client = session.get(Client, client_id)
-    if not campaign or not client or client.user_id != user_id:
-        raise HTTPException(status_code=404, detail="Associated campaign or client not found.")
+    user = session.get(User, user_id)
+    if not campaign or not client or not user or client.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Associated campaign, client, or agent not found.")
 
     # 4. Get the pre-computed, curated list of matches from the campaign
     curated_matches_data = campaign.key_intel.get("matched_resource_ids", [])
@@ -141,12 +140,10 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
         resources = session.exec(select(Resource).where(Resource.id.in_(resource_ids))).all()
         resource_map = {str(r.id): r.attributes for r in resources}
 
-        # Build the final match list for the portal, combining the commentary and resource data
         top_matches = []
         for match_data in curated_matches_data:
             resource_attributes = resource_map.get(match_data["resource_id"])
             if resource_attributes:
-                # Add the pre-generated agent commentary to the attributes for the portal UI
                 resource_attributes["agent_commentary"] = match_data.get("agent_commentary")
                 top_matches.append(PortalMatch(
                     id=UUID(match_data["resource_id"]),
@@ -155,14 +152,16 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
                     reasons=match_data.get("reasons", [])
                 ))
     
-    # Placeholder for future comment-fetching logic
     comments = []
+    curation_rationale = campaign.key_intel.get("curation_rationale")
 
     return PortalDataResponse(
         client_name=client.full_name,
         preferences=client.preferences,
         matches=top_matches,
-        comments=comments
+        comments=comments,
+        agent_name=user.full_name,
+        curation_rationale=curation_rationale
     )
 
 @router.post("/feedback/{token}")
