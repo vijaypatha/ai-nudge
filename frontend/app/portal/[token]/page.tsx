@@ -119,7 +119,27 @@ const PropertyCard: FC<{ match: PortalMatch; token: string; onImageClick: (image
     const handleNextImage = (e: React.MouseEvent) => { e.stopPropagation(); setCurrentImageIndex((prev) => (prev + 1) % allPhotos.length); };
     const handlePrevImage = (e: React.MouseEvent) => { e.stopPropagation(); setCurrentImageIndex((prev) => (prev - 1 + allPhotos.length) % allPhotos.length); };
 
-    //... (feedback handlers remain the same)
+    const handleFeedback = async (action: 'love' | 'like' | 'dislike') => {
+        setFeedback(action);
+        setIsSubmitting(true);
+        try {
+            await api.post(`/api/portal/feedback/${token}`, { resource_id: match.id, action });
+        } catch (e) { console.error(e); } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleCommentSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!comment.trim()) return;
+        setIsSubmitting(true);
+        try {
+            await api.post(`/api/portal/feedback/${token}`, { resource_id: match.id, action: 'comment', comment_text: comment });
+            setComment('');
+        } catch (e) { console.error(e); } finally {
+            setIsSubmitting(false);
+        }
+    };
 
     return (
         <div className="bg-gray-800/50 border border-white/10 rounded-2xl overflow-hidden shadow-lg flex flex-col">
@@ -163,7 +183,26 @@ const PropertyCard: FC<{ match: PortalMatch; token: string; onImageClick: (image
                     </div>
                 )}
 
-                {/* ... (feedback and comment form remains the same) ... */}
+                <div className="mt-auto">
+                    <div className="mt-4 flex justify-around items-center border-t border-white/10 pt-3">
+                        <button onClick={() => handleFeedback('love')} className={`p-2 rounded-full transition-colors ${feedback === 'love' ? 'bg-pink-500/20 text-pink-400' : 'hover:bg-white/10 text-gray-400'}`}><Heart size={20} /></button>
+                        <button onClick={() => handleFeedback('like')} className={`p-2 rounded-full transition-colors ${feedback === 'like' ? 'bg-green-500/20 text-green-400' : 'hover:bg-white/10 text-gray-400'}`}><ThumbsUp size={20} /></button>
+                        <button onClick={() => handleFeedback('dislike')} className={`p-2 rounded-full transition-colors ${feedback === 'dislike' ? 'bg-red-500/20 text-red-400' : 'hover:bg-white/10 text-gray-400'}`}><ThumbsDown size={20} /></button>
+                    </div>
+                    
+                    <form onSubmit={handleCommentSubmit} className="mt-3 flex gap-2">
+                        <input 
+                            type="text"
+                            value={comment}
+                            onChange={(e) => setComment(e.target.value)}
+                            placeholder="Add a comment..."
+                            className="flex-grow bg-gray-700/50 border border-white/10 rounded-full px-4 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-400"
+                        />
+                        <button type="submit" disabled={isSubmitting} className="p-2 bg-cyan-500 text-white rounded-full hover:bg-cyan-600 disabled:opacity-50">
+                            {isSubmitting ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                        </button>
+                    </form>
+                </div>
             </div>
         </div>
     );
@@ -238,7 +277,7 @@ export default function PortalPage({ params }: { params: { token: string }}) {
                 {portalData.curation_rationale && (
                      <section className="mb-12 max-w-3xl mx-auto">
                         <div className="bg-gray-800/50 border border-white/10 rounded-xl p-6">
-                            <h2 className="text-xl font-semibold mb-3 text-cyan-400">A note from {portalData.agent_name}</h2>
+                            <h2 className="text-xl font-semibold mb-3 text-cyan-400">A Note From Your Agent</h2>
                             <p className="text-gray-300 whitespace-pre-wrap">{portalData.curation_rationale}</p>
                         </div>
                     </section>
