@@ -480,26 +480,25 @@ async def draft_consolidated_nudge_with_commentary(
     """
 
     system_prompt = f"""
-    You are an expert real estate co-pilot for {realtor.full_name}.
-    Your client is {client.full_name} ({client_persona}).
-    Their core motivation is: "{client_motivation}"
+    You are a helpful assistant for {realtor.full_name}.
+    You're helping {client.full_name} ({client_persona}) with their goal: "{client_motivation}"
 
-    Your task is to generate a single JSON object with three parts:
-    1. 'curation_rationale': A summary FOR THE AGENT explaining why these properties are a good fit.
-    2. 'summary_draft': A concise, professional SMS message FOR THE CLIENT about the {len(matches_to_process)} curated properties.
-    3. 'commentaries': A list of insightful, one-sentence commentaries FOR THE CLIENT, one for each property.
+    Generate a JSON object with three parts:
+    1. 'curation_rationale': Brief explanation of why these listings match their needs.
+    2. 'summary_draft': Short, professional message about the {len(matches_to_process)} listings found.
+    3. 'commentaries': One helpful comment per listing explaining its benefits.
 
-    **RULES:**
-    - You MUST connect property features to the client's core motivation.
-    - Be direct and data-driven. DO NOT use cliches like "gem" or "stunning."
-    - The summary_draft must be under 160 characters and contain NO emojis.
+    **GUIDELINES:**
+    - Focus on practical features and benefits.
+    - Use clear, factual language.
+    - Keep summary under 160 characters, no emojis.
     
-    **REQUIRED JSON OUTPUT (no markdown):**
+    **REQUIRED JSON OUTPUT:**
     {json_schema}
     """
     
     user_prompt = f"""
-    **DATA TO ANALYZE:**
+    **LISTINGS TO REVIEW:**
     {json.dumps(properties_for_ai, indent=2)}
     """
     
@@ -515,7 +514,10 @@ async def draft_consolidated_nudge_with_commentary(
             response_format={"type": "json_object"}
         )
         
-        # json.loads will naturally fail if raw_response is None, triggering the except block.
+        # Gracefully handle empty LLM responses before attempting to parse JSON.
+        if not raw_response:
+            raise ValueError("LLM service returned an empty or invalid response.")
+
         response_data = json.loads(raw_response)
         
         commentary_map = {item['id']: item['commentary'] for item in response_data.get("commentaries", [])}
@@ -530,8 +532,8 @@ async def draft_consolidated_nudge_with_commentary(
             "summary_draft": response_data.get("summary_draft", f"Hi {client.full_name.split(' ')[0]}, I've curated {len(matches_to_process)} properties for you."),
             "curation_rationale": response_data.get("curation_rationale", "Top matches selected based on relevance.")
         }
-    except Exception as e:
-        logging.error(f"CONVERSATION AGENT: Unified AI call failed. Error: {e}", exc_info=True)
+    except (json.JSONDecodeError, ValueError, TypeError) as e:
+        logging.error(f"CONVERSATION AGENT: Unified AI call failed or could not be parsed. Error: {e}", exc_info=True)
         return {
             "commentaries": ["This is an excellent match based on your preferences." for _ in matches_to_process],
             "summary_draft": f"Hi {client.full_name.split(' ')[0]}, I found {len(matches_to_process)} new properties worth reviewing.",

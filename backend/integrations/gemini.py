@@ -59,12 +59,12 @@ async def match_faq_with_gemini(user_query: str, faqs: List[dict]) -> Optional[s
             logger.warning(f"GEMINI FAQ: Response was blocked or empty.")
             return None
         
-        # Safe text extraction - FIXED ALL [0] INDEXING
-        if response.candidates and response.candidates.content and response.candidates.content.parts:
+        # Safe text extraction - FIXED: Added [0] indexing
+        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
             result = response.text.strip()
             return result if result != "NO_MATCH" else None
         else:
-            logger.warning(f"GEMINI FAQ: No valid response parts. Finish reason: {response.candidates.finish_reason if response.candidates else 'No candidates'}")
+            logger.warning(f"GEMINI FAQ: No valid response parts. Finish reason: {response.candidates[0].finish_reason if response.candidates else 'No candidates'}")
             return None
     except Exception as e:
         logger.error(f"GEMINI FAQ ERROR: {e}")
@@ -75,7 +75,7 @@ async def get_chat_completion(
     prompt: str = None,
     model: str = "gemini-2.5-flash",
     temperature: float = 0.7,
-    max_tokens: int = 1000,
+    max_tokens: int = 4097,
     response_format: dict = None,
     **kwargs
 ) -> Optional[str]:
@@ -118,11 +118,11 @@ async def get_chat_completion(
             logger.warning(f"GEMINI CHAT: Response was blocked or empty.")
             return None
         
-        # Safe text extraction with proper error handling - FIXED ALL [0] INDEXING
-        if response.candidates and response.candidates.content and response.candidates.content.parts:
+        # Safe text extraction with proper error handling - FIXED: Added [0] indexing
+        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
             return response.text.strip()
         else:
-            finish_reason = response.candidates.finish_reason if response.candidates else "No candidates"
+            finish_reason = response.candidates[0].finish_reason if response.candidates else "No candidates"
             logger.warning(f"GEMINI CHAT: No valid response parts. Finish reason: {finish_reason}")
             return None
             
@@ -135,7 +135,7 @@ async def generate_text_completion(
     prompt: str = None,
     model: str = "gemini-2.5-flash",
     temperature: float = 0.7,
-    max_tokens: int = 1000,
+    max_tokens: int = 4097,
     response_format: dict = None,
     **kwargs
 ) -> Optional[str]:
