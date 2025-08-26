@@ -31,6 +31,27 @@ async def generate_embedding(text: str) -> List[float]:
         logger.error(f"LLM CLIENT: Failed to generate embedding: {e}")
         return [0.0] * 768
 
+async def generate_embeddings_batched(texts: List[str]) -> List[List[float]]:
+    """
+    Generates embeddings for a batch of texts using the configured LLM provider.
+    Returns a list of zero-vectors if the API is not available or text list is empty.
+    """
+    if not texts:
+        return []
+    
+    settings = get_settings()
+    try:
+        if settings.LLM_PROVIDER == "openai":
+            return await _generate_openai_embeddings_batched(texts)
+        elif settings.LLM_PROVIDER == "gemini":
+            return await _generate_gemini_embeddings_batched(texts)
+        else:
+            logger.error(f"LLM CLIENT: Unsupported provider '{settings.LLM_PROVIDER}'")
+            return [[0.0] * 768] * len(texts)
+    except Exception as e:
+        logger.error(f"LLM CLIENT: Failed to generate batch embeddings: {e}")
+        return [[0.0] * 768] * len(texts)
+
 async def _generate_openai_embedding(text: str) -> List[float]:
     """Generates embedding using OpenAI API with proper error handling."""
     try:
@@ -48,6 +69,24 @@ async def _generate_gemini_embedding(text: str) -> List[float]:
     except Exception as e:
         logger.error(f"LLM CLIENT: Gemini embedding failed: {e}")
         return [0.0] * 768
+
+async def _generate_openai_embeddings_batched(texts: List[str]) -> List[List[float]]:
+    """Generates embeddings for a batch of texts using OpenAI."""
+    try:
+        from integrations.openai import get_text_embeddings_batched
+        return await get_text_embeddings_batched(texts)
+    except Exception as e:
+        logger.error(f"LLM CLIENT: OpenAI batch embedding failed: {e}")
+        return [[0.0] * 1536] * len(texts)
+
+async def _generate_gemini_embeddings_batched(texts: List[str]) -> List[List[float]]:
+    """Generates embeddings for a batch of texts using Gemini."""
+    try:
+        from integrations.gemini import get_text_embeddings_batched
+        return await get_text_embeddings_batched(texts)
+    except Exception as e:
+        logger.error(f"LLM CLIENT: Gemini batch embedding failed: {e}")
+        return [[0.0] * 768] * len(texts)
 
 async def get_chat_completion(
     prompt: str,

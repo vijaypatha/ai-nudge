@@ -25,13 +25,13 @@ MATCH_THRESHOLD = 1  # Lowered for better matching with sample data
 FEEDBACK_PENALTY_THRESHOLD = 0.85
 FEEDBACK_PENALTY_FACTOR = 0.1
 
-async def score_event_against_client(client: Client, event: MarketEvent, resource: Resource, vertical_config: dict, session: Session) -> Tuple[int, List[str]]:
+async def score_event_against_client(client: Client, event: MarketEvent, resource: Resource, vertical_config: dict, session: Session, resource_embedding: Optional[List[float]] = None) -> Tuple[int, List[str]]:
+    """
+    Scores a market event for a client.
+    MODIFIED: Now accepts a pre-computed embedding to avoid redundant API calls.
+    """
     scorer_function = vertical_config.get("scorer")
     if not scorer_function: return 0, []
-    
-    resource_embedding = None
-    if resource.resource_type == "property" and resource.attributes.get('PublicRemarks'):
-        resource_embedding = await llm_client.generate_embedding(resource.attributes['PublicRemarks'])
     
     score, reasons = scorer_function(client, event, resource_embedding, vertical_config)
     
@@ -95,11 +95,28 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
         logging.info("NUDGE_ENGINE (PROACTIVE): No clients to match against.")
         return
 
+    # --- BATCH EMBEDDING GENERATION ---
+    # 1. Collect all resource texts that need an embedding.
+    resources_to_embed = [
+        res for res in new_resources 
+        if res.resource_type == "property" and res.attributes.get('PublicRemarks')
+    ]
+    texts_to_embed = [res.attributes['PublicRemarks'] for res in resources_to_embed]
+
+    # 2. Generate embeddings in a single batch call.
+    embeddings = []
+    if texts_to_embed:
+        embeddings = await llm_client.generate_embeddings_batched(texts_to_embed)
+    
+    # 3. Create a map of resource ID -> embedding for easy lookup.
+    resource_embedding_map = {res.id: emb for res, emb in zip(resources_to_embed, embeddings)}
+
     for client in clients:
         potential_new_matches = []
         for resource in new_resources:
             event = MarketEvent(event_type="new_listing", payload=resource.attributes, entity_id=resource.entity_id)
-            score, reasons = await score_event_against_client(client, event, resource, vertical_config, session)
+            embedding = resource_embedding_map.get(resource.id)
+            score, reasons = await score_event_against_client(client, event, resource, vertical_config, session, resource_embedding=embedding)
             if score >= MATCH_THRESHOLD:
                 potential_new_matches.append({ "resource": resource, "score": score, "reasons": reasons })
         
@@ -187,12 +204,26 @@ async def _create_or_update_consolidated_nudge(client: Client, user: User, sessi
 
         logging.info(f"NUDGE_ENGINE (REACTIVE): Scoring {len(active_resources)} active resources for client {client.id}.")
         
+        # --- BATCH EMBEDDING GENERATION ---
+        resources_to_embed = [
+            res for res in active_resources 
+            if res.resource_type == "property" and res.attributes.get('PublicRemarks')
+        ]
+        texts_to_embed = [res.attributes['PublicRemarks'] for res in resources_to_embed]
+        
+        embeddings = []
+        if texts_to_embed:
+            embeddings = await llm_client.generate_embeddings_batched(texts_to_embed)
+
+        resource_embedding_map = {res.id: emb for res, emb in zip(resources_to_embed, embeddings)}
+
         matches = []
         for resource in active_resources:
             # --- THIS IS THE FIX ---
             # Create a synthetic MarketEvent for the scorer, which expects it.
             event = MarketEvent(event_type="new_listing", payload=resource.attributes, entity_id=resource.entity_id)
-            score, reasons = await score_event_against_client(client, event, resource, vertical_config, session)
+            embedding = resource_embedding_map.get(resource.id)
+            score, reasons = await score_event_against_client(client, event, resource, vertical_config, session, resource_embedding=embedding)
             
             if score >= MATCH_THRESHOLD:
                 matches.append({"resource_id": str(resource.id), "score": score, "reasons": reasons})

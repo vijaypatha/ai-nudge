@@ -1,6 +1,7 @@
 # File Path: backend/integrations/openai.py
 # PURPOSE: Integration functions for interacting with the OpenAI API.
 
+import asyncio
 import logging
 from typing import List, Optional, Dict, Any
 from functools import lru_cache
@@ -10,6 +11,9 @@ import httpx
 from common.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# OpenAI API has a limit on the number of documents per batch request.
+OPENAI_BATCH_SIZE = 100 # A safe and common batch size
 
 @lru_cache()
 def get_async_client() -> AsyncOpenAI:
@@ -42,6 +46,41 @@ async def get_text_embedding(text: str) -> List[float]:
     except (OpenAIError, ValueError) as e:
         logger.error(f"OPENAI INTEGRATION: Error getting text embedding: {e}", exc_info=True)
         return [0.0] * 1536
+
+async def _embed_chunk(chunk: List[str]) -> List[List[float]]:
+    """Helper to embed a single chunk with OpenAI and handle errors."""
+    try:
+        client = get_async_client()
+        response = await client.embeddings.create(
+            model="text-embedding-3-small",
+            input=chunk
+        )
+        return [item.embedding for item in response.data]
+    except (OpenAIError, ValueError) as e:
+        logger.error(f"OPENAI INTEGRATION: Error embedding a chunk: {e}")
+        return [[0.0] * 1536] * len(chunk)
+
+async def get_text_embeddings_batched(texts: List[str]) -> List[List[float]]:
+    """
+    Gets embeddings for texts, handling API batch size limits with concurrent chunk processing.
+    """
+    if not texts:
+        return []
+
+    tasks = [
+        _embed_chunk(texts[i:i + OPENAI_BATCH_SIZE])
+        for i in range(0, len(texts), OPENAI_BATCH_SIZE)
+    ]
+    chunk_results = await asyncio.gather(*tasks)
+
+    all_embeddings = [embedding for chunk in chunk_results for embedding in chunk]
+
+    if len(all_embeddings) != len(texts):
+        logger.error("LLM CLIENT: Mismatch in OpenAI batch embedding results length. Returning all zero-vectors.")
+        return [[0.0] * 1536] * len(texts)
+
+    return all_embeddings
+
 
 async def get_chat_completion(
     messages: list,

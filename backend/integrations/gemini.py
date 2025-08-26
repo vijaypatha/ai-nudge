@@ -6,11 +6,15 @@
 
 import os
 import json
+import asyncio
 import logging
 import google.generativeai as genai
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Gemini API has a limit on the number of documents per batch request.
+GEMINI_BATCH_SIZE = 100
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
@@ -33,6 +37,40 @@ async def get_text_embedding(text: str) -> List[float]:
     except Exception as e:
         logger.error(f"LLM CLIENT: Gemini embedding failed: {e}")
         return [0.0] * 768
+
+async def _embed_chunk(chunk: List[str]) -> List[List[float]]:
+    """Helper to embed a single chunk and handle errors gracefully."""
+    try:
+        result = await genai.embed_content_async(
+            model="models/text-embedding-004",
+            content=chunk,
+            task_type="RETRIEVAL_DOCUMENT"
+        )
+        return result['embedding']
+    except Exception as e:
+        logger.error(f"LLM CLIENT: Gemini embedding for a chunk failed: {e}")
+        return [[0.0] * 768] * len(chunk)
+
+async def get_text_embeddings_batched(texts: List[str]) -> List[List[float]]:
+    """Generates vector embeddings for texts, handling API batch size limits with concurrent chunk processing."""
+    if not texts:
+        return []
+
+    # Create and run concurrent tasks for each chunk
+    tasks = [
+        _embed_chunk(texts[i:i + GEMINI_BATCH_SIZE])
+        for i in range(0, len(texts), GEMINI_BATCH_SIZE)
+    ]
+    chunk_results = await asyncio.gather(*tasks)
+
+    # Flatten the list of lists into a single list of embeddings
+    all_embeddings = [embedding for chunk in chunk_results for embedding in chunk]
+
+    if len(all_embeddings) != len(texts):
+        logger.error("LLM CLIENT: Mismatch in Gemini batch embedding results length. Returning all zero-vectors.")
+        return [[0.0] * 768] * len(texts)
+
+    return all_embeddings
 
 async def match_faq_with_gemini(user_query: str, faqs: List[dict]) -> Optional[str]:
     """Match a user query against FAQ list."""
