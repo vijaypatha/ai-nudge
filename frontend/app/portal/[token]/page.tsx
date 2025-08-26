@@ -4,6 +4,7 @@
 'use client';
 
 import { useState, useEffect, FC } from 'react';
+import { format } from 'date-fns';
 import Image from 'next/image';
 import { Heart, ThumbsUp, ThumbsDown, Send, Loader2, AlertTriangle, X } from 'lucide-react';
 
@@ -27,7 +28,10 @@ interface PortalMatch {
         PublicRemarks?: string;
         Media?: MediaItem[];
         agent_commentary?: string;
+        curation_date?: string; // New field for versioning
     };
+    status: string;
+    mls_status?: string;
 }
 
 interface PortalData {
@@ -37,6 +41,16 @@ interface PortalData {
     comments: any[];
     agent_name?: string;
     curation_rationale?: string;
+}
+
+// --- Helper function to group matches by date ---
+const groupMatchesByDate = (matches: PortalMatch[]) => {
+    return matches.reduce((acc, match) => {
+        const date = format(new Date(match.attributes.curation_date!), 'MMMM d, yyyy');
+        if (!acc[date]) acc[date] = [];
+        acc[date].push(match);
+        return acc;
+    }, {} as Record<string, PortalMatch[]>);
 }
 
 // --- API Client ---
@@ -119,6 +133,22 @@ const PropertyCard: FC<{ match: PortalMatch; token: string; onImageClick: (image
     const handleNextImage = (e: React.MouseEvent) => { e.stopPropagation(); setCurrentImageIndex((prev) => (prev + 1) % allPhotos.length); };
     const handlePrevImage = (e: React.MouseEvent) => { e.stopPropagation(); setCurrentImageIndex((prev) => (prev - 1 + allPhotos.length) % allPhotos.length); };
 
+    // --- NEW: Status Banner Logic ---
+    const StatusBanner = () => {
+        const statusText = match.mls_status || match.status;
+        if (!statusText || statusText.toLowerCase() === 'active') return null;
+
+        const statusColor = statusText.toLowerCase().includes('sold') ? 'bg-red-600'
+            : statusText.toLowerCase().includes('pending') ? 'bg-orange-500'
+            : 'bg-gray-600';
+
+        return (
+            <div className={`absolute top-2 left-2 ${statusColor} text-white text-xs font-bold px-2 py-1 rounded-md z-10`}>
+                {statusText.toUpperCase()}
+            </div>
+        );
+    };
+
     const handleFeedback = async (action: 'love' | 'like' | 'dislike') => {
         setFeedback(action);
         setIsSubmitting(true);
@@ -144,6 +174,7 @@ const PropertyCard: FC<{ match: PortalMatch; token: string; onImageClick: (image
     return (
         <div className="bg-gray-800/50 border border-white/10 rounded-2xl overflow-hidden shadow-lg flex flex-col">
             <div className="relative w-full h-48 group cursor-pointer" onClick={() => onImageClick(allPhotos, currentImageIndex)}>
+                <StatusBanner />
                 <Image src={imageUrl} alt={`Image of ${attr.UnparsedAddress}`} layout="fill" objectFit="cover" />
                 {allPhotos.length > 1 && (
                     <>
@@ -265,6 +296,8 @@ export default function PortalPage({ params }: { params: { token: string }}) {
         );
     }
 
+    const matchesByDate = groupMatchesByDate(portalData.matches);
+
     return (
         <div className="min-h-screen bg-gray-900 text-white font-sans">
             {isLightboxOpen && <Lightbox images={lightboxImages} startIndex={lightboxStartIndex} onClose={handleCloseLightbox} />}
@@ -294,11 +327,16 @@ export default function PortalPage({ params }: { params: { token: string }}) {
                 </section>
                 
                 <section>
-                    <h2 className="text-2xl font-semibold text-center mb-8">Your Curated Matches</h2>
-                    {portalData.matches.length > 0 ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                            {portalData.matches.map(match => (
-                                <PropertyCard key={match.id} match={match} token={token} onImageClick={handleOpenLightbox} />
+                    <h2 className="text-3xl font-bold text-center mb-12">Your Curated Matches</h2>
+                    {Object.keys(matchesByDate).length > 0 ? (
+                        <div className="space-y-12">
+                            {Object.entries(matchesByDate).map(([date, matches]) => (
+                                <div key={date}>
+                                    <h3 className="text-lg font-semibold text-gray-400 mb-6 pl-2 border-l-4 border-cyan-500">Matches Found on {date}</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                                        {matches.map(match => <PropertyCard key={match.id} match={match} token={token} onImageClick={handleOpenLightbox} />)}
+                                    </div>
+                                </div>
                             ))}
                         </div>
                     ) : (

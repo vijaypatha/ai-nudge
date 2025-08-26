@@ -58,6 +58,8 @@ class PortalMatch(BaseModel):
     id: UUID
     attributes: Dict[str, Any]
     score: int
+    status: str # NEW: To pass the resource's internal status (e.g., ACTIVE)
+    mls_status: Optional[str] = None # NEW: To pass the user-facing MLS status (e.g., Pending, Sold)
     reasons: List[str]
 
 class PortalDataResponse(BaseModel):
@@ -129,36 +131,53 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
     if not campaign or not client or not user or client.user_id != user_id:
         raise HTTPException(status_code=404, detail="Associated campaign, client, or agent not found.")
 
-    # 4. Get the pre-computed, curated list of matches from the campaign
-    curated_matches_data = campaign.key_intel.get("matched_resource_ids", [])
+    # --- MODIFICATION START: Fetch all active curations (campaigns) for the client ---
+    # 4. Find all active consolidated campaigns for this client, newest first.
+    statement = select(CampaignBriefing).where(
+        CampaignBriefing.client_id == client_id,
+        CampaignBriefing.campaign_type == "consolidated_initial_matches",
+        CampaignBriefing.status == "draft" # Assuming 'draft' means active for the portal
+    ).order_by(CampaignBriefing.created_at.desc())
     
-    # 5. Hydrate the resource data for the frontend
-    resource_ids = [UUID(match["resource_id"]) for match in curated_matches_data]
-    if not resource_ids:
-        top_matches = []
-    else:
-        resources = session.exec(select(Resource).where(Resource.id.in_(resource_ids))).all()
-        resource_map = {str(r.id): r.attributes for r in resources}
+    active_campaigns = session.exec(statement).all()
 
-        top_matches = []
+    all_matches = []
+    # 5. Process each campaign to build a flat list of matches, adding creation date.
+    for camp in active_campaigns:
+        curated_matches_data = camp.key_intel.get("matched_resource_ids", [])
+        resource_ids = [UUID(match["resource_id"]) for match in curated_matches_data]
+        
+        if not resource_ids:
+            continue
+
+        resources = session.exec(select(Resource).where(Resource.id.in_(resource_ids))).all()
+        resource_map = {str(r.id): r for r in resources}
+
         for match_data in curated_matches_data:
-            resource_attributes = resource_map.get(match_data["resource_id"])
-            if resource_attributes:
-                resource_attributes["agent_commentary"] = match_data.get("agent_commentary")
-                top_matches.append(PortalMatch(
-                    id=UUID(match_data["resource_id"]),
-                    attributes=resource_attributes,
-                    score=match_data.get("score", 0),
-                    reasons=match_data.get("reasons", [])
-                ))
-    
+            resource = resource_map.get(match_data["resource_id"])
+            if resource:
+                # Add campaign-specific data to the resource attributes
+                resource.attributes["agent_commentary"] = match_data.get("agent_commentary")
+                resource.attributes["curation_date"] = camp.created_at.isoformat()
+                all_matches.append(
+                    PortalMatch(
+                        id=resource.id,
+                        attributes=resource.attributes,
+                        score=match_data.get("score", 0),
+                        reasons=match_data.get("reasons", []),
+                        status=resource.status.value,
+                        mls_status=resource.attributes.get("MlsStatus")
+                    )
+                )
+    # --- MODIFICATION END ---
+
     comments = []
-    curation_rationale = campaign.key_intel.get("curation_rationale")
+    # Use the rationale from the most recent campaign
+    curation_rationale = active_campaigns[0].key_intel.get("curation_rationale") if active_campaigns else "Welcome to your portal!"
 
     return PortalDataResponse(
         client_name=client.full_name,
-        preferences=client.preferences,
-        matches=top_matches,
+        matches=all_matches, # Return the combined list
         comments=comments,
         agent_name=user.full_name,
         curation_rationale=curation_rationale
