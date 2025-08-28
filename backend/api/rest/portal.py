@@ -24,6 +24,7 @@ from data.models.user import User
 from data.models.client import Client
 from data.models.resource import Resource, ResourceType, ResourceStatus
 from data.models.portal import PortalComment, CommenterType
+from data.models.portal import PortalLink
 from data.models.event import MarketEvent
 
 # Core services and logic
@@ -184,9 +185,9 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
         curation_rationale=curation_rationale
     )
 
-@router.post("/feedback/{token}")
+@router.post("/feedback/{short_id}")
 async def submit_portal_feedback(
-    token: str, 
+    short_id: str,
     payload: PortalFeedbackPayload, 
     session: Session = Depends(get_session)
 ):
@@ -194,7 +195,14 @@ async def submit_portal_feedback(
     Public endpoint for the client to submit feedback (likes, dislikes, comments)
     from the portal. This feedback is used to automatically update the client's
     profile, triggering the reactive "Instant Match" pipeline.
+    MODIFIED: Now accepts the short_id and looks up the full token.
     """
+    # 1. Find the link record to get the full token
+    link_record = session.get(PortalLink, short_id)
+    expires_at_aware = link_record.expires_at.replace(tzinfo=timezone.utc) if link_record and link_record.expires_at.tzinfo is None else link_record.expires_at if link_record else None
+    if not link_record or not link_record.is_active or not expires_at_aware or expires_at_aware < datetime.now(timezone.utc):
+        raise HTTPException(status_code=403, detail="This feedback link is invalid or has expired.")
+    token = link_record.token
     try:
         # Securely decode the token to identify the client
         token_payload = decode_portal_token(token)
@@ -209,19 +217,26 @@ async def submit_portal_feedback(
     if not client or not user:
         raise HTTPException(status_code=404, detail="Client not found")
 
+    # --- MODIFICATION START: Fetch resource to add context to the note ---
+    resource = session.get(Resource, payload.resource_id)
+    if not resource:
+        logger.warning(f"PORTAL API: Feedback submitted for a non-existent resource ID: {payload.resource_id}")
+        # Even if the resource is gone, we can still log the comment for the client.
+        address = "an unknown property"
+    else:
+        address = resource.attributes.get("UnparsedAddress", "a property")
+    # --- MODIFICATION END ---
+
     note_to_add = None
     # If the client left a comment, save it and format it as a note
     if payload.comment_text:
-        new_comment = PortalComment(
-            user_id=user_id, client_id=client_id, resource_id=payload.resource_id,
-            commenter_type=CommenterType.CLIENT, comment_text=payload.comment_text
-        )
+        new_comment = PortalComment(user_id=user_id, client_id=client_id, resource_id=payload.resource_id, commenter_type=CommenterType.CLIENT, comment_text=payload.comment_text)
         session.add(new_comment)
-        note_to_add = f"Client commented on a portal property: '{payload.comment_text}'"
+        note_to_add = f"Client commented on '{address}': '{payload.comment_text}'"
 
     # If the client used a feedback button (love, like, dislike), format it as a note
     elif payload.action in ["love", "like", "dislike"]:
-        note_to_add = f"Client feedback on a portal property: '{payload.action.upper()}'"
+        note_to_add = f"Client feedback on '{address}': '{payload.action.upper()}'"
         if payload.reason:
             note_to_add += f" Reason: {payload.reason}"
 

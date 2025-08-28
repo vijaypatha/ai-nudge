@@ -14,6 +14,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from agent_core import semantic_service
 from .models.feedback import NegativePreference
+from .models.portal import PortalComment, CommenterType
 
 from agent_core.deduplication.deduplication_engine import find_strong_duplicate
 
@@ -1409,8 +1410,8 @@ async def process_new_contact_for_existing_events(client: Client, user_id: UUID)
 
 def get_relationship_timeline_for_client(client_id: UUID, user_id: UUID, limit: int = 5) -> Optional[List[Dict[str, Any]]]:
     """
-    Constructs a timeline of recent MESSAGE interactions for a client.
-    Based on user feedback, this no longer includes nudge events.
+    Constructs a unified timeline of recent interactions for a client, including
+    messages and portal feedback.
     """
     with Session(engine) as session:
         # Verify the client belongs to the user
@@ -1419,20 +1420,38 @@ def get_relationship_timeline_for_client(client_id: UUID, user_id: UUID, limit: 
             return None 
 
         timeline = []
-
-        # Get recent messages
+        
+        # 1. Get recent messages
         messages = session.exec(
             select(Message)
             .where(Message.client_id == client_id)
             .order_by(Message.created_at.desc())
-            .limit(limit)
+            .limit(20) # Fetch a larger pool to sort from
         ).all()
 
         for msg in messages:
             event_type = "message_inbound" if msg.direction == MessageDirection.INBOUND else "message_outbound"
             description = "You received a message" if event_type == "message_inbound" else "You sent a message"
             entity = msg.content[:45] + '...' if len(msg.content) > 45 else msg.content
-            timeline.append({"type": event_type, "date": msg.created_at, "description": description, "entity": entity})
+            timeline.append({"type": event_type, "date": msg.created_at, "description": description, "entity": entity, "entity_id": msg.id})
 
-        # The timeline is already sorted by date from the query
-        return timeline
+        # 2. Get recent portal feedback (comments)
+        comments = session.exec(
+            select(PortalComment)
+            .where(PortalComment.client_id == client_id, PortalComment.commenter_type == CommenterType.CLIENT)
+            .options(selectinload(PortalComment.resource)) # Eager load the resource
+            .order_by(PortalComment.created_at.desc())
+            .limit(20) # Fetch a larger pool to sort from
+        ).all()
+
+        for comment in comments:
+            if comment.resource:
+                address = comment.resource.attributes.get("UnparsedAddress", "a property")
+                description = f"Commented on {address}"
+                entity = f'"{comment.comment_text}"'
+                timeline.append({"type": "portal_comment", "date": comment.created_at, "description": description, "entity": entity, "entity_id": comment.resource.id})
+
+        # 3. Sort all events chronologically and take the most recent
+        timeline.sort(key=lambda x: x["date"], reverse=True)
+        
+        return timeline[:limit]
