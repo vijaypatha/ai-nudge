@@ -177,6 +177,7 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
 
     return PortalDataResponse(
         client_name=client.full_name,
+        preferences=client.preferences,
         matches=all_matches, # Return the combined list
         comments=comments,
         agent_name=user.full_name,
