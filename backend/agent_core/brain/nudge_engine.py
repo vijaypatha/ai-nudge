@@ -13,6 +13,7 @@ from data.models.user import User
 from data.models.client import Client
 from data.models.resource import Resource, ResourceStatus
 from data import crm as crm_service
+from common.async_utils import run_async_in_new_loop
 from agent_core.agents import conversation as conversation_agent
 from agent_core import llm_client
 from .verticals import VERTICAL_CONFIGS
@@ -67,7 +68,7 @@ async def _create_campaign_from_event(event: MarketEvent, user: User, resource: 
     
     new_briefing = CampaignBriefing(
         id=uuid.uuid4(), user_id=user.id, client_id=primary_client_id,
-        triggering_resource_id=resource.id, campaign_type=event.event_type,
+        triggering_resource_id=resource.id, campaign_type=event.event_type, # This is for single-event nudges
         status=CampaignStatus.DRAFT.value, headline=headline, key_intel=key_intel,
         original_draft=ai_draft, matched_audience=audience_for_db, source=source
     )
@@ -76,8 +77,8 @@ async def _create_campaign_from_event(event: MarketEvent, user: User, resource: 
 
 async def find_and_update_matches_for_all_clients(user: User, new_resources: List[Resource], session: Session):
     """
-    FINAL VERSION: Finds matches, curates a top 10 list, generates AI content,
-    and creates a secure, short portal link.
+    MODIFIED: Finds matches and creates a NEW, versioned campaign briefing (curation)
+    for each client with new matches. It no longer overwrites old ones.
     """
     from agent_core.agents import conversation as conversation_agent
     from backend.common.jwt_utils import create_portal_token
@@ -137,23 +138,26 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
                 continue
 
             # 1. Get the existing consolidated nudge or create a new one.
-            nudge = crm_service.find_or_create_consolidated_nudge(client.id, user.id, session)
+            # --- MODIFICATION: We now ALWAYS create a new campaign for versioning ---
+            nudge = CampaignBriefing(
+                user_id=user.id,
+                client_id=client.id,
+                campaign_type="consolidated_initial_matches",
+                status=CampaignStatus.DRAFT.value,
+                source="consolidated_engine_v2"
+            )
 
             # 2. Populate the key_intel with fresh data from the AI.
             final_curated_matches = []
             for i, resource in enumerate(curated_matches_to_process):
                 match_info = next((m for m in potential_new_matches if m['resource'].id == resource.id), None)
-                final_curated_matches.append({
-                    "resource_id": str(resource.id), "score": match_info['score'] if match_info else 0,
-                    "reasons": match_info['reasons'] if match_info else [],
-                    "agent_commentary": batch_results["commentaries"][i]
-                })
+                commentary = batch_results["commentaries"][i] if batch_results.get("commentaries") else "Selected based on relevance."
+                final_curated_matches.append({"resource_id": str(resource.id), "score": match_info['score'] if match_info else 0, "reasons": match_info['reasons'] if match_info else [], "agent_commentary": commentary})
             nudge.key_intel = {
                 "summary_draft": batch_results["summary_draft"],
                 "curation_rationale": batch_results.get("curation_rationale"),
                 "matched_resource_ids": final_curated_matches
             }
-            flag_modified(nudge, "key_intel")
             
             # 3. Create the PortalLink, linking it to the consolidated nudge's ID.
             long_token = create_portal_token(client.id, user.id)
@@ -171,10 +175,12 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
             session.add(portal_link)
             # 4. Update the remaining nudge fields with the new draft and info.
             portal_url = f"{get_settings().FRONTEND_BASE_URL}/portal/{short_id}"
-            nudge.original_draft = f"{batch_results['summary_draft']}\n\nView Your Private Portal:\n{portal_url}"
+            summary_draft = batch_results.get("summary_draft", f"Hi {client.full_name.split()[0]}, I found some new properties for you to review.")
+            nudge.original_draft = f"{summary_draft}\n\nView Your Private Portal:\n{portal_url}"
             nudge.headline = f"Found {total_matches_found} new matches for {client.full_name}"
             session.add(nudge)
             session.commit()
+            session.refresh(nudge) # Refresh to get the ID for logging
             logging.info(f"NUDGE_ENGINE (PROACTIVE): Successfully updated nudge {nudge.id} and created short link {short_id}.")
 
         except Exception as e:
@@ -185,7 +191,8 @@ async def _create_or_update_consolidated_nudge(client: Client, user: User, sessi
     """
     The core logic for the "Living" Consolidated Nudge, used by the REACTIVE pipeline.
     Finds or creates the consolidated nudge, re-scores all active resources,
-    and updates the nudge with the top matches.
+    and updates the nudge with the top matches. THIS IS NOW THE LEGACY PATH and should be
+    updated to use versioning like the proactive pipeline.
     """
     logging.info(f"NUDGE_ENGINE (REACTIVE): Updating consolidated nudge for client {client.id} from source '{source}'.")
     
