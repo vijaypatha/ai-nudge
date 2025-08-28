@@ -137,14 +137,13 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
             if not batch_results or not batch_results.get("commentaries"):
                 continue
 
-            # 1. Get the existing consolidated nudge or create a new one.
-            # --- MODIFICATION: We now ALWAYS create a new campaign for versioning ---
+            # --- MODIFICATION: ALWAYS create a new campaign for versioning ---
             nudge = CampaignBriefing(
                 user_id=user.id,
                 client_id=client.id,
                 campaign_type="consolidated_initial_matches",
                 status=CampaignStatus.DRAFT.value,
-                source="consolidated_engine_v2"
+                source="consolidated_engine_v3" # Mark new version
             )
 
             # 2. Populate the key_intel with fresh data from the AI.
@@ -159,7 +158,9 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
                 "matched_resource_ids": final_curated_matches
             }
             
-            # 3. Create the PortalLink, linking it to the consolidated nudge's ID.
+            # 3. Create the PortalLink, linking it to the new nudge's ID.
+            session.add(nudge)
+            session.flush() # Flush to assign an ID to the new nudge
             long_token = create_portal_token(client.id, user.id)
             short_id = generate_nanoid(size=12)
             portal_link = PortalLink(
@@ -178,10 +179,8 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
             summary_draft = batch_results.get("summary_draft", f"Hi {client.full_name.split()[0]}, I found some new properties for you to review.")
             nudge.original_draft = f"{summary_draft}\n\nView Your Private Portal:\n{portal_url}"
             nudge.headline = f"Found {total_matches_found} new matches for {client.full_name}"
-            session.add(nudge)
             session.commit()
-            session.refresh(nudge) # Refresh to get the ID for logging
-            logging.info(f"NUDGE_ENGINE (PROACTIVE): Successfully updated nudge {nudge.id} and created short link {short_id}.")
+            logging.info(f"NUDGE_ENGINE (PROACTIVE): Successfully CREATED nudge {nudge.id} and created short link {short_id}.")
 
         except Exception as e:
             logging.error(f"NUDGE_ENGINE: Main processing loop failed for client {client.id}. Error: {e}", exc_info=True)

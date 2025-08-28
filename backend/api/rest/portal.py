@@ -59,7 +59,7 @@ class PortalMatch(BaseModel):
     id: UUID
     attributes: Dict[str, Any]
     score: int
-    status: str # NEW: To pass the resource's internal status (e.g., ACTIVE)
+    status: str
     mls_status: Optional[str] = None # NEW: To pass the user-facing MLS status (e.g., Pending, Sold)
     reasons: List[str]
 
@@ -67,7 +67,7 @@ class PortalDataResponse(BaseModel):
     """Defines the complete data structure for the client portal view."""
     client_name: str
     preferences: Dict[str, Any]
-    matches: List[PortalMatch]
+    matches: List[Dict[str, Any]] # Changed to support grouping
     comments: List[PortalComment]
     agent_name: Optional[str] = None
     curation_rationale: Optional[str] = None
@@ -133,7 +133,7 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
         raise HTTPException(status_code=404, detail="Associated campaign, client, or agent not found.")
 
     # --- MODIFICATION START: Fetch all active curations (campaigns) for the client ---
-    # 4. Find all active consolidated campaigns for this client, newest first.
+    # 4. Find all active consolidated campaigns for this client.
     statement = select(CampaignBriefing).where(
         CampaignBriefing.client_id == client_id,
         CampaignBriefing.campaign_type == "consolidated_initial_matches",
@@ -142,45 +142,49 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
     
     active_campaigns = session.exec(statement).all()
 
-    all_matches = []
-    # 5. Process each campaign to build a flat list of matches, adding creation date.
+    # 5. Process each campaign to build a grouped list of matches.
+    grouped_matches = []
+    all_resource_ids = []
     for camp in active_campaigns:
         curated_matches_data = camp.key_intel.get("matched_resource_ids", [])
         resource_ids = [UUID(match["resource_id"]) for match in curated_matches_data]
-        
-        if not resource_ids:
-            continue
+        all_resource_ids.extend(resource_ids)
+        grouped_matches.append({
+            "curation_date": camp.created_at.isoformat(),
+            "matches": curated_matches_data
+        })
 
-        resources = session.exec(select(Resource).where(Resource.id.in_(resource_ids))).all()
+    # 6. Hydrate all unique resources in a single query
+    if not all_resource_ids:
+        hydrated_matches = []
+    else:
+        resources = session.exec(select(Resource).where(Resource.id.in_(list(set(all_resource_ids))))).all()
         resource_map = {str(r.id): r for r in resources}
+        
+        # Get all comments for these resources in one query
+        comments_query = session.exec(select(PortalComment).where(PortalComment.resource_id.in_(list(set(all_resource_ids))))).all()
+        comments_map = {}
+        for comment in comments_query:
+            if str(comment.resource_id) not in comments_map:
+                comments_map[str(comment.resource_id)] = []
+            comments_map[str(comment.resource_id)].append(comment.model_dump(mode='json'))
 
-        for match_data in curated_matches_data:
-            resource = resource_map.get(match_data["resource_id"])
-            if resource:
-                # Add campaign-specific data to the resource attributes
-                resource.attributes["agent_commentary"] = match_data.get("agent_commentary")
-                resource.attributes["curation_date"] = camp.created_at.isoformat()
-                all_matches.append(
-                    PortalMatch(
-                        id=resource.id,
-                        attributes=resource.attributes,
-                        score=match_data.get("score", 0),
-                        reasons=match_data.get("reasons", []),
-                        status=resource.status.value,
-                        mls_status=resource.attributes.get("MlsStatus")
-                    )
-                )
-    # --- MODIFICATION END ---
+        # Inject hydrated data back into the grouped structure
+        for group in grouped_matches:
+            for match in group["matches"]:
+                resource = resource_map.get(match["resource_id"])
+                if resource:
+                    match["resource"] = resource.model_dump()
+                    match["resource"]["comments"] = comments_map.get(match["resource_id"], [])
 
-    comments = []
     # Use the rationale from the most recent campaign
     curation_rationale = active_campaigns[0].key_intel.get("curation_rationale") if active_campaigns else "Welcome to your portal!"
 
     return PortalDataResponse(
         client_name=client.full_name,
         preferences=client.preferences,
-        matches=all_matches, # Return the combined list
-        comments=comments,
+        matches=grouped_matches,
+        comments=[], # Comments are now nested in each match
         agent_name=user.full_name,
         curation_rationale=curation_rationale
     )

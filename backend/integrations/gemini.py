@@ -85,13 +85,23 @@ async def match_faq_with_gemini(user_query: str, faqs: List[dict]) -> Optional[s
     )
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        # --- MODIFICATION: Add safety settings to prevent false positive blocks ---
+        safety_settings = {
+            'HARM_CATEGORY_HARASSMENT': 'BLOCK_NONE',
+            'HARM_CATEGORY_HATE_SPEECH': 'BLOCK_NONE',
+            'HARM_CATEGORY_SEXUALLY_EXPLICIT': 'BLOCK_NONE',
+            'HARM_CATEGORY_DANGEROUS_CONTENT': 'BLOCK_NONE',
+        }
+        
         response = await model.generate_content_async(
             prompt,
             generation_config=genai.types.GenerationConfig(
                 temperature=0.2,
                 max_output_tokens=150,
                 candidate_count=1
-            )
+            ),
+            safety_settings=safety_settings
         )
         if not response.candidates:
             logger.warning(f"GEMINI FAQ: Response was blocked or empty.")
