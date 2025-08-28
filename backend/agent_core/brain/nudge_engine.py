@@ -142,6 +142,7 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
                 user_id=user.id,
                 client_id=client.id,
                 campaign_type="consolidated_initial_matches",
+                headline=f"Found {total_matches_found} new matches for {client.full_name}", # MODIFICATION: Restore the headline
                 status=CampaignStatus.DRAFT.value,
                 source="consolidated_engine_v3" # Mark new version
             )
@@ -178,7 +179,6 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
             portal_url = f"{get_settings().FRONTEND_BASE_URL}/portal/{short_id}"
             summary_draft = batch_results.get("summary_draft", f"Hi {client.full_name.split()[0]}, I found some new properties for you to review.")
             nudge.original_draft = f"{summary_draft}\n\nView Your Private Portal:\n{portal_url}"
-            nudge.headline = f"Found {total_matches_found} new matches for {client.full_name}"
             session.commit()
             logging.info(f"NUDGE_ENGINE (PROACTIVE): Successfully CREATED nudge {nudge.id} and created short link {short_id}.")
 
