@@ -37,6 +37,8 @@ async def _run_synthesis_and_update_client(client: Client, user: User, session: 
     updates the client object, and triggers the Instant Match Nudge.
     """
     logging.info(f"CRM SYNTHESIS: Running profile synthesis for client {client.id}")
+    client_id = client.id # Capture IDs before any potential session issues
+    user_id = user.id
     client_role = "buyer"
     if user.vertical == "real_estate":
         if client.user_tags and any("seller" in t.lower() for t in client.user_tags): client_role = "seller"
@@ -74,13 +76,9 @@ async def _run_synthesis_and_update_client(client: Client, user: User, session: 
         from agent_core.brain import nudge_engine
         logging.info(f"CRM: Synthesis complete for client {client.id}. Triggering consolidated nudge generation.")
         # We run this in the background so it doesn't block the API response
+        # --- MODIFICATION: Pass IDs instead of full objects to the async task ---
         asyncio.create_task(
-            nudge_engine._create_or_update_consolidated_nudge(
-                client=client, 
-                user=user, 
-                session=session, 
-                source="synthesis_update"
-            )
+            trigger_consolidated_nudge_for_client(client_id=client_id, user_id=user_id)
         )
     except ImportError:
         logging.error("CRM: Could not import nudge_engine. Is the agent_core package installed correctly?")
@@ -88,6 +86,28 @@ async def _run_synthesis_and_update_client(client: Client, user: User, session: 
         logging.error(f"CRM: Failed to trigger consolidated nudge for client {client.id}: {e}", exc_info=True)
 
     return client
+
+async def trigger_consolidated_nudge_for_client(client_id: UUID, user_id: UUID):
+    """
+    A wrapper to safely call the nudge engine from a background task.
+    It creates a new database session to ensure all objects are properly bound.
+    """
+    from .database import engine
+    from agent_core.brain import nudge_engine
+    
+    # Create a new, independent session for this background task
+    with Session(engine) as session:
+        try:
+            client = session.get(Client, client_id)
+            user = session.get(User, user_id)
+            if not client or not user:
+                logging.error(f"CRM ASYNC: Could not find client {client_id} or user {user_id} for nudge generation.")
+                return
+            
+            await nudge_engine._create_or_update_consolidated_nudge(client, user, session, "synthesis_update")
+        except Exception as e:
+            logging.error(f"CRM ASYNC: Consolidated nudge task failed for client {client_id}: {e}", exc_info=True)
+
 # --- User Functions ---
 
 def get_user_by_id(user_id: uuid.UUID, session: Optional[Session] = None) -> Optional[User]:
