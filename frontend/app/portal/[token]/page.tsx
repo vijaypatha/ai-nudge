@@ -17,6 +17,13 @@ interface MediaItem {
     MediaURL: string;
 }
 
+interface PortalComment {
+    id: string;
+    commenter_type: 'agent' | 'client';
+    comment_text: string;
+    created_at: string;
+}
+
 interface PortalMatch {
     id: string;
     attributes: {
@@ -28,30 +35,27 @@ interface PortalMatch {
         PublicRemarks?: string;
         Media?: MediaItem[];
         agent_commentary?: string;
-        curation_date?: string; // New field for versioning
     };
     status: string;
     mls_status?: string;
+    comments: PortalComment[];
+}
+
+interface GroupedMatch {
+    curation_date: string;
+    matches: { resource: PortalMatch; [key: string]: any }[];
 }
 
 interface PortalData {
     client_name: string;
     preferences: PortalPreferences;
-    matches: PortalMatch[];
+    matches: GroupedMatch[];
     comments: any[];
     agent_name?: string;
     curation_rationale?: string;
 }
 
-// --- Helper function to group matches by date ---
-const groupMatchesByDate = (matches: PortalMatch[]) => {
-    return matches.reduce((acc, match) => {
-        const date = format(new Date(match.attributes.curation_date!), 'MMMM d, yyyy');
-        if (!acc[date]) acc[date] = [];
-        acc[date].push(match);
-        return acc;
-    }, {} as Record<string, PortalMatch[]>);
-}
+
 
 // --- API Client ---
 const api = {
@@ -119,14 +123,15 @@ const PreferenceChip: FC<{ label: string; value: any }> = ({ label, value }) => 
     );
 };
 
-const PropertyCard: FC<{ match: PortalMatch; token: string; onImageClick: (images: MediaItem[], index: number) => void }> = ({ match, token, onImageClick }) => {
+const PropertyCard: FC<{ resource: PortalMatch; token: string; onImageClick: (images: MediaItem[], index: number) => void }> = ({ resource, token, onImageClick }) => {
     const [feedback, setFeedback] = useState<'love' | 'like' | 'dislike' | null>(null);
     const [comment, setComment] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [localComments, setLocalComments] = useState<PortalComment[]>(resource.comments || []);
     const [isExpanded, setIsExpanded] = useState(false);
     const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
-    const attr = match.attributes;
+    const attr = resource.attributes;
     const allPhotos = attr.Media?.filter(m => m.MediaURL) || [];
     const imageUrl = allPhotos.length > 0 ? allPhotos[currentImageIndex].MediaURL : `https://placehold.co/600x400/1A1D24/FFFFFF?text=${attr.UnparsedAddress?.split(',')[0]}`;
     
@@ -135,11 +140,11 @@ const PropertyCard: FC<{ match: PortalMatch; token: string; onImageClick: (image
 
     // --- NEW: Status Banner Logic ---
     const StatusBanner = () => {
-        const statusText = match.mls_status || match.status;
+        const statusText = resource.mls_status || resource.status;
         if (!statusText || statusText.toLowerCase() === 'active') return null;
 
-        const statusColor = statusText.toLowerCase().includes('sold') ? 'bg-red-600'
-            : statusText.toLowerCase().includes('pending') ? 'bg-orange-500'
+        const statusColor = statusText.toLowerCase().includes('sold') || statusText.toLowerCase().includes('closed') ? 'bg-red-600'
+            : statusText.toLowerCase().includes('pending') || statusText.toLowerCase().includes('under contract') ? 'bg-orange-500'
             : 'bg-gray-600';
 
         return (
@@ -153,7 +158,7 @@ const PropertyCard: FC<{ match: PortalMatch; token: string; onImageClick: (image
         setFeedback(action);
         setIsSubmitting(true);
         try {
-            await api.post(`/api/portal/feedback/${token}`, { resource_id: match.id, action });
+            await api.post(`/api/portal/feedback/${token}`, { resource_id: resource.id, action });
         } catch (e) { console.error(e); } finally {
             setIsSubmitting(false);
         }
@@ -164,8 +169,15 @@ const PropertyCard: FC<{ match: PortalMatch; token: string; onImageClick: (image
         if (!comment.trim()) return;
         setIsSubmitting(true);
         try {
-            await api.post(`/api/portal/feedback/${token}`, { resource_id: match.id, action: 'comment', comment_text: comment });
+            await api.post(`/api/portal/feedback/${token}`, { resource_id: resource.id, action: 'comment', comment_text: comment });
             setComment('');
+            // Optimistically update the UI with the new comment
+            setLocalComments(prev => [...prev, {
+                id: `temp-${Date.now()}`,
+                commenter_type: 'client',
+                comment_text: comment,
+                created_at: new Date().toISOString()
+            }]);
         } catch (e) { console.error(e); } finally {
             setIsSubmitting(false);
         }
@@ -296,8 +308,6 @@ export default function PortalPage({ params }: { params: { token: string }}) {
         );
     }
 
-    const matchesByDate = groupMatchesByDate(portalData.matches);
-
     return (
         <div className="min-h-screen bg-gray-900 text-white font-sans">
             {isLightboxOpen && <Lightbox images={lightboxImages} startIndex={lightboxStartIndex} onClose={handleCloseLightbox} />}
@@ -328,13 +338,15 @@ export default function PortalPage({ params }: { params: { token: string }}) {
                 
                 <section>
                     <h2 className="text-3xl font-bold text-center mb-12">Your Curated Matches</h2>
-                    {Object.keys(matchesByDate).length > 0 ? (
+                    {portalData.matches.length > 0 ? (
                         <div className="space-y-12">
-                            {Object.entries(matchesByDate).map(([date, matches]) => (
-                                <div key={date}>
-                                    <h3 className="text-lg font-semibold text-gray-400 mb-6 pl-2 border-l-4 border-cyan-500">Matches Found on {date}</h3>
+                            {portalData.matches.map((group: any) => (
+                                <div key={group.curation_date}>
+                                    <h3 className="text-lg font-semibold text-gray-400 mb-6 pl-2 border-l-4 border-cyan-500">
+                                        Matches Found on {format(new Date(group.curation_date), 'MMMM d, yyyy')}
+                                    </h3>
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                                        {matches.map(match => <PropertyCard key={match.id} match={match} token={token} onImageClick={handleOpenLightbox} />)}
+                                        {group.matches.map((match: any) => <PropertyCard key={match.resource.id} resource={match.resource} token={token} onImageClick={handleOpenLightbox} />)}
                                     </div>
                                 </div>
                             ))}
