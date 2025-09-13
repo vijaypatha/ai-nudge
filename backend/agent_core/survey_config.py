@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 from data.models.user import User
 # NOTE: The import of UserSurveyQuestion is now moved inside the get_survey_config function
 
-class QuestionType(Enum):
+class QuestionType(str, Enum):
     TEXT = "text"
     NUMBER = "number"
     SELECT = "select"

@@ -2,7 +2,7 @@
 
 from typing import List, Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
-from sqlmodel import SQLModel, Field, Relationship, JSON, Column
+from sqlmodel import SQLModel, Field, Relationship, JSON, Column, Enum
 from agent_core.survey_config import QuestionType
 
 if TYPE_CHECKING:
@@ -22,7 +22,10 @@ class SurveyQuestion(SQLModel, table=True):
     
     # The actual question content and configuration
     question_text: str
-    question_type: QuestionType = Field(default=QuestionType.TEXT)
+    question_type: QuestionType = Field(
+    default=QuestionType.TEXT,
+    sa_column=Column(Enum(QuestionType, values_callable=lambda x: [e.value for e in x]))
+)
     options: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
     is_required: bool = Field(default=False)
     placeholder: Optional[str] = Field(default=None)
