@@ -4,7 +4,15 @@ import { useState, useEffect } from 'react';
 import { SurveyTemplate } from '@/app/(main)/surveys/page';
 import { Eye, Plus, Trash2, GripVertical, Save, Loader2, Info } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
-import { QuestionType } from '@/../backend/agent_core/survey_config'; // A trick to share enum
+// Define QuestionType enum for frontend
+export enum QuestionType {
+  TEXT = "text",
+  NUMBER = "number", 
+  SELECT = "select",
+  MULTI_SELECT = "multi_select",
+  RANGE = "range",
+  BOOLEAN = "boolean"
+}
 
 // Define a more specific Question type for the frontend
 interface Question {
@@ -46,7 +54,7 @@ const QuestionEditor = ({ question, onSave, onDelete, onCancel, isSaving, isDele
              {/* Add more form fields here to edit other properties like type, options, etc. */}
             <div className="flex justify-end gap-2 pt-4 border-t border-white/20">
                 <button onClick={onCancel} className="px-3 py-1 text-xs font-semibold bg-white/10 rounded-md">Cancel</button>
-                <button onClick={handleDelete} disabled={isDeleting} className="px-3 py-1 text-xs font-semibold bg-red-500/20 text-red-400 rounded-md flex items-center gap-1.5">
+                <button onClick={onDelete} disabled={isDeleting} className="px-3 py-1 text-xs font-semibold bg-red-500/20 text-red-400 rounded-md flex items-center gap-1.5">
                    {isDeleting ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 size={14}/>} Delete
                 </button>
                 <button onClick={handleSave} disabled={isSaving} className="px-3 py-1 text-xs font-semibold bg-primary-action text-brand-dark rounded-md flex items-center gap-1.5">

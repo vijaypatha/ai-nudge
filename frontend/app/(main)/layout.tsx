@@ -15,7 +15,7 @@ import { useSidebar } from '@/context/SidebarContext';
 import { Avatar } from '@/components/ui/Avatar';
 import { MagicSearchBar } from '@/components/ui/MagicSearchBar';
 import { ConversationListItem } from '@/components/conversation/ConversationListItem';
-import { MessageCircleHeart, Users, Zap, User as UserIcon, Menu, RefreshCw, Clock, TrendingUp } from "lucide-react";
+import { MessageCircleHeart, Users, Zap, User as UserIcon, Menu, RefreshCw, Clock, TrendingUp, ClipboardList } from "lucide-react";
 
 // Pipeline Status Indicator Component
 const PipelineStatusIndicator = () => {
@@ -187,6 +187,9 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                         )}
                         <Link href="/nudges" className={clsx("flex items-center gap-3 p-2.5 rounded-lg transition-colors", pathname === '/nudges' ? 'bg-brand-accent/10 border border-brand-accent/30 text-brand-accent font-semibold' : 'text-brand-text-muted hover:bg-white/5')}>
                             <Zap className="w-5 h-5" /> My AI Nudges
+                        </Link>
+                        <Link href="/surveys" className={clsx("flex items-center gap-3 p-2.5 rounded-lg transition-colors", pathname.startsWith('/surveys') ? 'bg-brand-accent/10 border border-brand-accent/30 text-brand-accent font-semibold' : 'text-brand-text-muted hover:bg-white/5')}>
+                            <ClipboardList className="w-5 h-5" /> Survey Library
                         </Link>
                     </nav>
 
