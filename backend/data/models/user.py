@@ -73,7 +73,7 @@ class User(SQLModel, table=True):
     content_resources: List["ContentResource"] = Relationship(back_populates="user")
     client_surveys: List["ClientIntakeSurvey"] = Relationship(back_populates="user")
     # --- NEW RELATIONSHIP ---
-    custom_survey_questions: List["SurveyQuestion"] = Relationship(back_populates="user")
+    survey_templates: List["SurveyTemplate"] = Relationship(back_populates="user")
 
 class UserUpdate(SQLModel):
     """Defines all updatable fields for a user."""
