@@ -1,3 +1,6 @@
+// app/(main)/surveys/[templateId]/page.tsx
+// Purpose: Survey builder page for creating and editing surveys
+
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';

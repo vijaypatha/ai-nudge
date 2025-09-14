@@ -1,3 +1,6 @@
+// app/(main)/surveys/page.tsx
+// Purpose: Survey library page for creating and editing surveys
+
 'use client';
 
 import { useState, useEffect } from 'react';

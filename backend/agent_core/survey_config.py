@@ -254,50 +254,14 @@ SURVEY_REGISTRY: Dict[str, SurveyConfig] = {
 def get_survey_config(survey_type: str, user: User, session: Session) -> Optional[SurveyConfig]:
     """
     Get survey configuration by type.
-    MODIFIED: Returns the user's custom questions if they exist, otherwise falls back to the system default.
+    NOTE: The custom question logic was moved to a new template-based system in Phase 1.
+    This function now only returns the default system survey configs for legacy workflows.
     """
-    from data.models.survey import SurveyQuestion as UserSurveyQuestion
-
-    # 1. Check if the user has any custom questions for this survey type.
-    custom_questions_stmt = (
-        select(UserSurveyQuestion)
-        .where(UserSurveyQuestion.user_id == user.id, UserSurveyQuestion.survey_type == survey_type)
-        .order_by(UserSurveyQuestion.display_order)
-    )
-    custom_questions = session.exec(custom_questions_stmt).all()
-
+    # The logic to fetch custom questions by `survey_type` was removed as part of the
+    # Phase 1 migration to templates. This function now correctly falls back to the
+    # hardcoded default configurations, which will be replaced in Phase 2.
     default_config = SURVEY_REGISTRY.get(survey_type)
-    if not default_config:
-        return None
-
-    # 2. If custom questions exist, use them exclusively.
-    # The frontend is responsible for the initial "cloning" of defaults.
-    if custom_questions:
-        questions_from_db = [
-            SurveyQuestion(
-                id=str(q.id),
-                type=q.question_type,
-                question=q.question_text,
-                required=q.is_required,
-                options=q.options or [],
-                placeholder=q.placeholder,
-                help_text=q.help_text,
-                preference_key=q.preference_key,
-            )
-            for q in custom_questions
-        ]
-        # Use the default title/description but the user's custom questions.
-        return SurveyConfig(
-            survey_type=default_config.survey_type,
-            title=default_config.title,
-            description=default_config.description,
-            questions=questions_from_db,
-            estimated_time=default_config.estimated_time,
-        )
-    
-    # 3. If no custom questions exist, return the hardcoded system default.
-    else:
-        return default_config
+    return default_config
     
 def get_available_surveys(user: User) -> List[str]:
     """Get a list of available survey types filtered by the user's vertical."""

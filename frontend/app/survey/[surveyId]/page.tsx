@@ -1,3 +1,5 @@
+// app/survey/[surveyId]/page.tsx
+// Purpose: Public survey page for clients to fill out surveys
 'use client';
 
 import { useState, useEffect } from 'react';
