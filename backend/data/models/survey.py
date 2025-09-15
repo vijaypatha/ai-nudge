@@ -35,7 +35,7 @@ class SurveyQuestion(SQLModel, table=True):
     template_id: UUID = Field(foreign_key="surveytemplate.id", index=True)
     
     question_text: str
-    question_type: QuestionType = Field(sa_column=Column(Enum(QuestionType)))
+    question_type: QuestionType = Field(sa_column=Column(Enum(QuestionType, native_enum=False)))
     options: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
     is_required: bool = Field(default=False)
     placeholder: Optional[str] = Field(default=None)

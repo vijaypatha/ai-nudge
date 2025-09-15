@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlmodel import Session, select
 from pydantic import BaseModel
+import sqlalchemy as sa
 
 from data.database import get_session
 from data.models.user import User
