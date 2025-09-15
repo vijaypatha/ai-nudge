@@ -51,29 +51,21 @@ class Client(SQLModel, table=True):
 
 class ClientIntakeSurvey(SQLModel, table=True):
     """
-    Stores client responses to intake questionnaires to gather initial preferences.
-    This addresses the cold start problem by providing structured data for AI personalization.
+    Stores a client's instance of a survey, linked to a specific SurveyTemplate.
+    This tracks who received which survey and their responses.
     """
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     client_id: UUID = Field(foreign_key="client.id", index=True)
     user_id: UUID = Field(foreign_key="user.id", index=True)
-    
-    # Survey metadata
-    survey_type: str = Field(index=True)  # "real_estate_buyer", "real_estate_seller", "therapy", etc.
-    survey_version: str = Field(default="1.0")
+    template_id: UUID = Field(foreign_key="surveytemplate.id", index=True)
+
     completed_at: Optional[str] = Field(default=None)
-    
-    # Survey responses stored as structured JSON
     responses: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    
-    # Processing status
     processed: bool = Field(default=False, index=True)
-    preferences_extracted: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    tags_generated: List[str] = Field(default_factory=list, sa_column=Column(JSON))
-    
-    # Relationships
+
     client: "Client" = Relationship(back_populates="intake_surveys")
     user: "User" = Relationship(back_populates="client_surveys")
+    template: "SurveyTemplate" = Relationship() # No back_populates needed on this side
 
 
 class ClientCreate(SQLModel):

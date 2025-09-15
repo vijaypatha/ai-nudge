@@ -11,7 +11,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 // --- FIX: Import the timezone detection utility ---
 import { detectUserTimezone } from '../../utils/timezone';
-
+import { SurveyTemplate } from '@/app/(main)/surveys/page';
+import { Paperclip } from 'lucide-react';
 
 interface InstantNudgeViewProps {
     clients: Client[];
@@ -33,6 +34,21 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
     const [filterTags, setFilterTags] = useState<string[]>([]);
     const [scheduleDateTime, setScheduleDateTime] = useState('');
     const [isScheduling, setIsScheduling] = useState(false);
+    const [surveyTemplates, setSurveyTemplates] = useState<SurveyTemplate[]>([]);
+    const [showSurveyModal, setShowSurveyModal] = useState(false);
+    const [attachedSurvey, setAttachedSurvey] = useState<SurveyTemplate | null>(null);
+
+    useEffect(() => {
+        const fetchSurveyTemplates = async () => {
+            try {
+                const templates = await api.get('/api/surveys/templates');
+                setSurveyTemplates(templates);
+            } catch (error) {
+                console.error("Failed to fetch survey templates:", error);
+            }
+        };
+        fetchSurveyTemplates();
+    }, [api]);
 
     useEffect(() => {
         setFilteredClients(clients);
@@ -113,24 +129,47 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
     };
 
     const handleSendInstantNudge = async () => {
-        if (selectedClients.size === 0 || !message.trim()) {
-            alert("Please select at least one recipient and write a message.");
+        if (selectedClients.size === 0) {
+            alert("Please select at least one recipient.");
             return;
         }
+
+        const isSurveyOnly = attachedSurvey && !message.trim();
+        if (!isSurveyOnly && !message.trim()) {
+            alert("Please write a message or attach a survey.");
+            return;
+        }
+
         setIsSending(true);
-        const recipients = Array.from(selectedClients);
-        const sendPromises = recipients.map(clientId =>
-            api.post('/api/campaigns/messages/send-now', { client_id: clientId, content: message })
-        );
+
         try {
-            await Promise.all(sendPromises);
-            alert(`Successfully sent message to ${recipients.length} client(s).`);
+            if (attachedSurvey) {
+                await api.post('/api/surveys/send-bulk', {
+                    template_id: attachedSurvey.id,
+                    client_ids: Array.from(selectedClients)
+                });
+                if (message.trim()) { // Also send a custom message if provided
+                    const sendPromises = Array.from(selectedClients).map(clientId =>
+                        api.post('/api/campaigns/messages/send-now', { client_id: clientId, content: message })
+                    );
+                    await Promise.all(sendPromises);
+                }
+                alert(`Successfully sent survey '${attachedSurvey.name}' to ${selectedClients.size} client(s).`);
+            } else {
+                const sendPromises = Array.from(selectedClients).map(clientId =>
+                    api.post('/api/campaigns/messages/send-now', { client_id: clientId, content: message })
+                );
+                await Promise.all(sendPromises);
+                alert(`Successfully sent message to ${selectedClients.size} client(s).`);
+            }
+
             setSelectedClients(new Set());
             setMessage('');
             setTopic('');
+            setAttachedSurvey(null);
         } catch (error) {
             console.error("Failed to send instant nudge:", error);
-            alert("An error occurred while sending the message. Please check the console.");
+            alert("An error occurred while sending. Please check the console.");
         } finally {
             setIsSending(false);
         }
@@ -150,7 +189,7 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
             setIsScheduling(false);
             return;
         }
-        
+
         try {
             // FIX: Get the user's timezone from context, with a fallback to browser detection.
             // The backend /bulk endpoint requires this field.
@@ -180,7 +219,7 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 items-start">
-            <motion.section 
+            <motion.section
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
@@ -210,7 +249,7 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
                                 <div className="flex justify-center items-center p-8 text-brand-text-muted"><Loader2 className="animate-spin mr-2" /> Searching...</div>
                             ) : filteredClients.length === 0 ? (
                                 <div className="flex flex-col text-center items-center p-8 text-brand-text-muted">
-                                    <Users size={32} className="mb-2"/>
+                                    <Users size={32} className="mb-2" />
                                     <p className="font-semibold">No Clients Found</p>
                                     <p className="text-sm">Try adjusting your search or filters.</p>
                                 </div>
@@ -223,7 +262,7 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
                                                 <div className={clsx("w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center", selectedClients.has(client.id) ? "bg-primary-action border-primary-action" : "border-white/20")}>
                                                     {selectedClients.has(client.id) && <Send size={12} className="text-brand-dark" />}
                                                 </div>
-                                                <Avatar name={client.full_name} className="w-8 h-8 text-xs"/>
+                                                <Avatar name={client.full_name} className="w-8 h-8 text-xs" />
                                                 <span className="font-medium truncate">{client.full_name}</span>
                                             </label>
                                         </div>
@@ -234,7 +273,7 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
                     </div>
                 </div>
             </motion.section>
-            <motion.section 
+            <motion.section
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
@@ -247,7 +286,7 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
                 <div className="p-6 bg-brand-primary border border-white/10 rounded-xl space-y-5">
                     <div>
                         <label className="text-sm font-semibold text-brand-text-muted" htmlFor="topic">Topic / Goal (for AI draft)</label>
-                        <input id="topic" type="text" value={topic} onChange={e => setTopic(e.target.value)} placeholder="e.g., End of quarter market update" className="w-full mt-2 bg-black/20 border border-white/20 rounded-lg p-3"/>
+                        <input id="topic" type="text" value={topic} onChange={e => setTopic(e.target.value)} placeholder="e.g., End of quarter market update" className="w-full mt-2 bg-black/20 border border-white/20 rounded-lg p-3" />
                     </div>
                     <div>
                         <label className="text-sm font-semibold text-brand-text-muted" htmlFor="message">Message</label>
@@ -258,49 +297,85 @@ export const InstantNudgeView: FC<InstantNudgeViewProps> = ({ clients, onSchedul
                             {isDrafting ? <Loader2 size={20} className="animate-spin" /> : <Bot size={20} />}
                             {isDrafting ? 'Drafting...' : 'Draft with AI'}
                         </button>
-                        
+
+                        <button onClick={() => setShowSurveyModal(true)} className="flex items-center justify-center gap-2 p-3 bg-white/10 rounded-lg font-semibold hover:bg-white/20 disabled:opacity-50 w-full transition-colors">
+                            <Paperclip size={20} />
+                            {attachedSurvey ? `Attached: ${attachedSurvey.name}` : 'Attach Survey'}
+                        </button>
+
                         <div className="h-px bg-white/10"></div>
 
                         <AnimatePresence mode="wait">
-                        {scheduleDateTime ? (
-                            <motion.div key="schedule" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
-                                <label className="text-sm font-semibold text-brand-text-muted">Schedule for later</label>
-                                <input 
-                                    type="datetime-local" 
-                                    value={scheduleDateTime}
-                                    onChange={e => setScheduleDateTime(e.target.value)}
-                                    className="p-3 w-full bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
-                                />
-                                <p className="text-xs text-gray-400">
-                                    This message will be sent to clients at the specified time in your local timezone ({user?.timezone || detectUserTimezone()}).
-                                </p>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button onClick={() => setScheduleDateTime('')} className="p-3 bg-white/10 rounded-lg font-semibold hover:bg-white/20 w-full">Cancel</button>
-                                    <button onClick={handleScheduleInstantNudge} disabled={isScheduling || selectedClients.size === 0 || !message.trim()} className="p-3 bg-cyan-500 text-brand-dark rounded-lg font-semibold hover:bg-cyan-400 disabled:opacity-50 whitespace-nowrap w-full flex items-center justify-center gap-2">
-                                        {isScheduling ? <Loader2 size={20} className="animate-spin" /> : <Calendar size={20} />}
-                                        {isScheduling ? 'Scheduling...' : `Confirm (${selectedClients.size})`}
+                            {scheduleDateTime ? (
+                                <motion.div key="schedule" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
+                                    <label className="text-sm font-semibold text-brand-text-muted">Schedule for later</label>
+                                    <input
+                                        type="datetime-local"
+                                        value={scheduleDateTime}
+                                        onChange={e => setScheduleDateTime(e.target.value)}
+                                        className="p-3 w-full bg-black/20 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
+                                    />
+                                    <p className="text-xs text-gray-400">
+                                        This message will be sent to clients at the specified time in your local timezone ({user?.timezone || detectUserTimezone()}).
+                                    </p>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button onClick={() => setScheduleDateTime('')} className="p-3 bg-white/10 rounded-lg font-semibold hover:bg-white/20 w-full">Cancel</button>
+                                        <button onClick={handleScheduleInstantNudge} disabled={isScheduling || selectedClients.size === 0 || !message.trim()} className="p-3 bg-cyan-500 text-brand-dark rounded-lg font-semibold hover:bg-cyan-400 disabled:opacity-50 whitespace-nowrap w-full flex items-center justify-center gap-2">
+                                            {isScheduling ? <Loader2 size={20} className="animate-spin" /> : <Calendar size={20} />}
+                                            {isScheduling ? 'Scheduling...' : `Confirm (${selectedClients.size})`}
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            ) : (
+                                <motion.div key="send" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => {
+                                        const futureDate = new Date(Date.now() + 30 * 60 * 1000);
+                                        const localISOString = new Date(futureDate.getTime() - (futureDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+                                        setScheduleDateTime(localISOString);
+                                    }} className="p-3 bg-white/10 rounded-lg font-semibold hover:bg-white/20 disabled:opacity-50 w-full flex items-center justify-center gap-2">
+                                        <Calendar size={20} /> Schedule
                                     </button>
-                                </div>
-                            </motion.div>
-                        ) : (
-                            <motion.div key="send" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-2 gap-3">
-                                <button onClick={() => {
-                                    const futureDate = new Date(Date.now() + 30 * 60 * 1000);
-                                    const localISOString = new Date(futureDate.getTime() - (futureDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
-                                    setScheduleDateTime(localISOString);
-                                }} className="p-3 bg-white/10 rounded-lg font-semibold hover:bg-white/20 disabled:opacity-50 w-full flex items-center justify-center gap-2">
-                                    <Calendar size={20} /> Schedule
-                                </button>
-                                <button onClick={handleSendInstantNudge} disabled={isSending || selectedClients.size === 0 || !message.trim()} className="p-3 bg-primary-action text-brand-dark rounded-lg font-semibold hover:brightness-110 disabled:opacity-50 w-full flex items-center justify-center gap-2">
-                                    {isSending ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
-                                    {isSending ? 'Sending...' : `Send Now (${selectedClients.size})`}
-                                </button>
-                            </motion.div>
-                        )}
+                                    <button onClick={handleSendInstantNudge} disabled={isSending || selectedClients.size === 0 || !message.trim()} className="p-3 bg-primary-action text-brand-dark rounded-lg font-semibold hover:brightness-110 disabled:opacity-50 w-full flex items-center justify-center gap-2">
+                                        {isSending ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+                                        {isSending ? 'Sending...' : `Send Now (${selectedClients.size})`}
+                                    </button>
+                                </motion.div>
+                            )}
                         </AnimatePresence>
                     </div>
                 </div>
             </motion.section>
+            {showSurveyModal && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="w-full max-w-md bg-gray-800 border border-white/10 rounded-lg shadow-xl p-6">
+                        <h3 className="text-lg font-bold mb-4">Attach Survey from Library</h3>
+                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                            {surveyTemplates.map(template => (
+                                <button
+                                    key={template.id}
+                                    onClick={() => {
+                                        setAttachedSurvey(template);
+                                        setShowSurveyModal(false);
+                                    }}
+                                    className="w-full text-left p-3 rounded-md bg-white/5 hover:bg-white/10"
+                                >
+                                    {template.name}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="mt-4 flex gap-2">
+                            <button onClick={() => setShowSurveyModal(false)} className="flex-1 p-2 bg-white/10 rounded-md text-sm">
+                                Cancel
+                            </button>
+                            {attachedSurvey && (
+                                <button onClick={() => setAttachedSurvey(null)} className="flex-1 p-2 bg-red-500/20 text-red-400 rounded-md text-sm">
+                                    Remove Attachment
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

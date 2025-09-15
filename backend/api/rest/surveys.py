@@ -162,22 +162,52 @@ async def delete_question(
     session.commit()
     return
 
-# --- Endpoints for Sending and Responding (Kept for Phases 2 & 3) ---
-# [Note: These will be refactored in Phase 2 to use template_id]
+# --- Endpoints for Sending and Responding 
 class SendSurveyPayload(BaseModel):
-    survey_type: Optional[str] = None # This will become template_id in Phase 2
+    template_id: UUID
 
-@router.post("/send/{client_id}")
-async def send_survey_endpoint(
+class SendBulkSurveyPayload(BaseModel):
+    template_id: UUID
+    client_ids: List[UUID]
+
+@router.post("/send-single/{client_id}")
+async def send_single_survey(
     client_id: UUID,
     payload: SendSurveyPayload,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user_from_token)
+    current_user: User = Depends(get_current_user_from_token),
 ):
-    # This endpoint will be updated in Phase 2. For now, it remains functional.
-    # ... existing logic from your file ...
-    pass 
+    """Send a single survey from a template to a specific client."""
+    success = await send_intake_survey(str(client_id), str(current_user.id), str(payload.template_id), session)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send survey.")
+    return {"status": "success", "message": "Survey sent successfully."}
 
+@router.post("/send-bulk")
+async def send_bulk_survey(
+    payload: SendBulkSurveyPayload,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user_from_token),
+):
+    """Send a single survey from a template to multiple clients."""
+    if not payload.client_ids:
+        raise HTTPException(status_code=400, detail="No client IDs provided.")
+
+    success_count = 0
+    failure_count = 0
+
+    for client_id in payload.client_ids:
+        success = await send_intake_survey(str(client_id), str(current_user.id), str(payload.template_id), session)
+        if success:
+            success_count += 1
+        else:
+            failure_count += 1
+
+    return {
+        "status": "complete",
+        "message": f"Sent survey to {success_count} clients.",
+        "failures": failure_count
+    }
 
 # --- Public Endpoints (No Authentication Required) ---
 
@@ -187,50 +217,49 @@ async def get_public_survey_info(survey_id: UUID, session: Session = Depends(get
     survey = session.get(ClientIntakeSurvey, survey_id)
     if not survey:
         raise HTTPException(status_code=404, detail="Survey not found or invalid.")
-    
+
     if survey.completed_at:
         raise HTTPException(status_code=410, detail="This survey has already been completed.")
 
     client = session.get(Client, survey.client_id)
     user = session.get(User, survey.user_id)
-    
+
     if not client or not user:
         raise HTTPException(status_code=404, detail="Survey information not found.")
+
+    # Eager load the template to get its name
+    _ = survey.template
 
     return {
         "survey_id": str(survey.id),
         "client_name": client.full_name.split()[0] if client.full_name else "there",
         "user_name": user.full_name,
-        "survey_type": survey.survey_type,
+        "survey_type": survey.template.name, # Use template name for context
+        "template_id": survey.template_id
     }
 
-@router.get("/public/config/{survey_type}")
-async def get_public_survey_config(survey_type: str, survey_id: UUID, session: Session = Depends(get_session)):
-    """Get public survey configuration. Requires a valid survey_id to fetch the correct user's config."""
+@router.get("/public/config/{template_id}")
+async def get_public_survey_config(template_id: UUID, survey_id: UUID, session: Session = Depends(get_session)):
+    """Get public survey configuration from a template. Requires a valid survey_id for authorization."""
     survey = session.get(ClientIntakeSurvey, survey_id)
-    if not survey:
+    if not survey or survey.template_id != template_id:
         raise HTTPException(status_code=404, detail="Invalid survey reference.")
-    
-    user = session.get(User, survey.user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="Survey owner not found.")
-        
-    config = get_survey_config(survey_type, user, session)
-    if not config:
-        raise HTTPException(status_code=404, detail="Survey type not found")
-        
+
+    template = session.get(SurveyTemplate, template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Survey configuration not found.")
+
     return {
-        "survey_type": config.survey_type,
-        "title": config.title,
-        "description": config.description,
-        "estimated_time": config.estimated_time,
-        "questions": [
+        "survey_type": template.name,
+        "title": template.name,
+        "description": template.description,
+        "estimated_time": "2-3 minutes", # Can be added to template model later
+        "questions": sorted([
             {
-                "id": q.id, "type": q.type.value, "question": q.question, "required": q.required,
-                "options": q.options, "placeholder": q.placeholder, "help_text": q.help_text,
-                "preference_key": q.preference_key
-            } for q in config.questions
-        ]
+                "id": str(q.id), "type": q.question_type.value, "question": q.question_text, "required": q.is_required,
+                "options": q.options, "placeholder": q.placeholder, "help_text": q.help_text
+            } for q in template.questions
+        ], key=lambda x: x.get('display_order', 0))
     }
 
 @router.post("/public/response/{survey_id}")

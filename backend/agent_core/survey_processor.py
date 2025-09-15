@@ -151,79 +151,73 @@ async def generate_tags_from_responses(responses: Dict[str, Any], survey_config:
         logger.error(f"SURVEY PROCESSOR: Error generating tags: {e}")
         return []
 
-async def send_intake_survey(client_id: str, user_id: str, survey_type: str, session: Session) -> bool:
+async def send_intake_survey(client_id: str, user_id: str, template_id: str, session: Session) -> bool:
     """
-    Send an intake survey to a client via SMS.
+    Send an intake survey to a client via SMS using a SurveyTemplate.
     """
+    from data.models.survey import SurveyTemplate
+
     try:
-        client = session.exec(select(Client).where(Client.id == client_id)).first()
-        user = session.exec(select(User).where(User.id == user_id)).first()
-        
+        client = session.get(Client, client_id)
+        user = session.get(User, user_id)
+        template = session.get(SurveyTemplate, template_id)
+
         if not client or not user:
-            logger.error(f"SURVEY PROCESSOR: Client or user not found")
+            logger.error(f"SURVEY PROCESSOR: Client {client_id} or user {user_id} not found")
             return False
-        
-        survey_config = get_survey_config(survey_type, user, session)
-        if not survey_config:
-            logger.error(f"SURVEY PROCESSOR: No config found for survey type {survey_type}")
+        if not template or template.user_id != user.id:
+            logger.error(f"SURVEY PROCESSOR: Template {template_id} not found for user {user.id}")
             return False
-        
+
         survey = ClientIntakeSurvey(
-            client_id=client_id, user_id=user_id, survey_type=survey_type
+            client_id=client_id, user_id=user_id, template_id=template_id
         )
         session.add(survey)
         session.commit()
         session.refresh(survey)
-        
-        survey_message = generate_survey_message(client, user, survey_config, survey.id)
-        
+
+        survey_message = generate_survey_message(client, user, template, survey.id)
+
         from integrations import twilio_outgoing
-        
-        # --- THIS IS THE FIX ---
-        # Removed 'await' because send_sms is a regular synchronous function.
+
         success = twilio_outgoing.send_sms(
             to_number=client.phone,
             from_number=user.twilio_phone_number,
             body=survey_message
         )
-        # --- END FIX ---
-        
+
         if success:
             client.intake_survey_sent_at = datetime.now(timezone.utc).isoformat()
             session.add(client)
             session.commit()
-            logger.info(f"SURVEY PROCESSOR: Survey sent to client {client_id}")
+            logger.info(f"SURVEY PROCESSOR: Survey from template {template_id} sent to client {client_id}")
             return True
         else:
             logger.error(f"SURVEY PROCESSOR: Failed to send survey to client {client_id}")
             return False
-            
+
     except Exception as e:
         logger.error(f"SURVEY PROCESSOR: Error sending survey: {e}", exc_info=True)
         session.rollback()
         return False
 
-def generate_survey_message(client: Client, user: User, survey_config: SurveyConfig, survey_id: str) -> str:
+def generate_survey_message(client: Client, user: User, template: "SurveyTemplate", survey_id: str) -> str:
     """
-    Generate the initial survey message to send to the client.
+    Generate the initial survey message from a template to send to the client.
     """
     client_name = client.full_name.split()[0] if client.full_name else "there"
-    
-    # Use localhost for development, production domain for production
+
     import os
     base_url = os.getenv("SURVEY_BASE_URL", "http://localhost:3000")
-    
-    message = f"""Hi {client_name}! 👋
 
-{user.full_name} would love to better understand your needs to provide the best service possible.
+    message = f"""Hi {client_name},
 
-Could you take a quick {survey_config.estimated_time} survey? It will help us personalize our recommendations for you.
+    To help personalize my service for you, please take a moment to fill out this short survey: {template.name}
 
-Click here to start: {base_url}/survey/{survey_id}
+    {base_url}/survey/{survey_id}
 
-Or reply with "survey" and we'll send you the questions via text.
-
-Thanks! 😊"""
+    Thank you,
+{user.full_name}"""
 
     return message
 

@@ -8,6 +8,7 @@ import { Info, Sparkles, Edit, Save, Loader2, Send, AlertTriangle, ChevronDown, 
 import { useAppContext, Client, User } from '@/context/AppContext';
 import { InfoCard } from '../ui/InfoCard';
 import { ClientIntakeSurvey } from '../survey/ClientIntakeSurvey';
+import { SurveyTemplate } from '@/app/(main)/surveys/page';
 
 interface QuestionAnswerPair {
     question: string;
@@ -97,8 +98,10 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
     const [showSubmissionModal, setShowSubmissionModal] = useState(false);
     const [submissionData, setSubmissionData] = useState<SurveySubmission | null>(null);
     const [isLoadingSubmission, setIsLoadingSubmission] = useState(false);
-    const [availableSurveys, setAvailableSurveys] = useState<{name: string, type: string}[]>([]);
+    const [availableSurveys, setAvailableSurveys] = useState<{ name: string, type: string }[]>([]);
     const [overrideSurveyType, setOverrideSurveyType] = useState<string>('');
+    const [surveyTemplates, setSurveyTemplates] = useState<SurveyTemplate[]>([]);
+    const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
 
     const intel = useMemo(() => {
         if (!client) return { summary: null, actions: [], canonicalPrefs: {}, rawPrefs: {} };
@@ -134,24 +137,19 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
     }, [client, intel.canonicalPrefs]);
 
     useEffect(() => {
-        const fetchAvailableSurveys = async () => {
-            if (!user) return;
+        const fetchSurveyTemplates = async () => {
             try {
-                const data = await api.get('/api/surveys/available');
-                const surveyTypes = data.survey_types.map((type: string) => ({
-                    name: type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-                    type: type
-                }));
-                setAvailableSurveys(surveyTypes);
-                if (surveyTypes.length > 0 && !overrideSurveyType) {
-                    setOverrideSurveyType(surveyTypes[0].type);
+                const templates = await api.get('/api/surveys/templates');
+                setSurveyTemplates(templates);
+                if (templates.length > 0) {
+                    setSelectedTemplateId(templates[0].id);
                 }
             } catch (error) {
-                console.error("Failed to fetch available surveys:", error);
+                console.error("Failed to fetch survey templates:", error);
             }
         };
-        fetchAvailableSurveys();
-    }, [user, api, overrideSurveyType]);
+        fetchSurveyTemplates();
+    }, [api]);
 
     if (!client) return null;
 
@@ -162,7 +160,7 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
             const updatedClient = await api.put(`/api/clients/${client.id}`, payload);
             onUpdate(updatedClient);
             setIsEditing(false);
-        } catch(err) {
+        } catch (err) {
             console.error("Failed to save client intel:", err);
             alert("Failed to save intel.");
         } finally {
@@ -181,13 +179,13 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
     };
 
     const handleSendSurvey = async () => {
-        if (!client || !client.phone) return;
+        if (!client || !client.phone || !selectedTemplateId) {
+            alert("Please select a survey to send.");
+            return;
+        };
         setSendingSurvey(true);
         try {
-            const payload = {
-                survey_type: overrideSurveyType || undefined,
-            };
-            await api.post(`/api/surveys/send/${client.id}`, payload);
+            await api.post(`/api/surveys/send-single/${client.id}`, { template_id: selectedTemplateId });
             onUpdate({ ...client, intake_survey_sent_at: new Date().toISOString() });
         } catch (error) {
             console.error('Failed to send survey:', error);
@@ -215,7 +213,7 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
             setIsLoadingSubmission(false);
         }
     };
-    
+
     const renderThematicGroups = () => {
         if (!user) return null;
         const isSeller = client.user_tags?.includes('seller') || client.ai_tags?.includes('seller');
@@ -305,7 +303,7 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
                             <p className="text-gray-300">{intel.summary}</p>
                         </div>
                     )}
-                    
+
                     {isEditing ? (
                         <div className="space-y-4 pt-4 border-t border-white/10">
                             <div className="grid grid-cols-2 gap-4">
@@ -314,7 +312,7 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
                                         key={key}
                                         label={key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                                         value={value} isEditing
-                                        onChange={(newValue) => setEditablePrefs(p => ({...p, [key]: newValue}))}
+                                        onChange={(newValue) => setEditablePrefs(p => ({ ...p, [key]: newValue }))}
                                         type={typeof value === 'number' ? 'number' : 'text'}
                                     />
                                 ))}
@@ -322,7 +320,7 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
                             <div className="flex gap-2 justify-end">
                                 <button onClick={handleCancel} className="px-3 py-1 text-xs font-semibold bg-white/10 rounded-md">Cancel</button>
                                 <button onClick={handleSave} disabled={isSaving} className="px-3 py-1 text-xs font-semibold bg-primary-action text-brand-dark rounded-md flex items-center gap-1.5">
-                                   {isSaving ? <Loader2 className="h-4 w-4 animate-spin"/> : <Save size={14}/>} Save Changes
+                                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save size={14} />} Save Changes
                                 </button>
                             </div>
                         </div>
@@ -353,7 +351,7 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
                         client.intake_survey_completed ? (
                             <div className="mt-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg space-y-3">
                                 <div>
-                                    <h4 className="text-xs font-bold text-green-400 uppercase flex items-center gap-2"><CheckCircle size={14}/>SURVEY STATUS</h4>
+                                    <h4 className="text-xs font-bold text-green-400 uppercase flex items-center gap-2"><CheckCircle size={14} />SURVEY STATUS</h4>
                                     <p className="text-xs text-gray-400 mt-1">Intel gathered from the client's last submission.</p>
                                 </div>
                                 <div className="flex gap-2">
@@ -366,16 +364,21 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
                                         View Submission
                                     </button>
                                     <div className="flex-1 flex gap-2">
-                                        <select 
-                                            value={overrideSurveyType} 
-                                            onChange={(e) => setOverrideSurveyType(e.target.value)}
-                                            className="flex-grow bg-white/5 border border-white/10 rounded-md px-2 text-xs text-white focus:border-cyan-500 focus:ring-0"
+                                        <select
+                                            value={selectedTemplateId}
+                                            onChange={(e) => setSelectedTemplateId(e.target.value)}
+                                            className="flex-grow bg-white/5 border border-white/10 rounded-md px-2 text-xs text-white focus:border-cyan-500 focus:ring-0 disabled:opacity-50"
+                                            disabled={surveyTemplates.length === 0}
                                         >
-                                            {availableSurveys.map(s => <option key={s.type} value={s.type}>{s.name}</option>)}
+                                            {surveyTemplates.length > 0 ? (
+                                                surveyTemplates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)
+                                            ) : (
+                                                <option>No surveys in library</option>
+                                            )}
                                         </select>
-                                        <button 
+                                        <button
                                             onClick={handleSendSurvey}
-                                            disabled={sendingSurvey || !client.phone}
+                                            disabled={sendingSurvey || !client.phone || surveyTemplates.length === 0}
                                             title="Resend selected survey"
                                             className="px-3 py-2 bg-cyan-500 text-white rounded-md hover:bg-cyan-600 disabled:opacity-50"
                                         >
@@ -394,15 +397,20 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
                                 </div>
                                 <div className="flex gap-2">
                                     <div className="flex-1 flex gap-2">
-                                        <button onClick={handleSendSurvey} disabled={sendingSurvey || !client.phone} title="Send selected survey" className="flex-grow flex items-center justify-center gap-1.5 px-2 py-2 bg-cyan-500 text-white text-xs font-semibold rounded-md hover:bg-cyan-600 disabled:opacity-50">
+                                        <button onClick={handleSendSurvey} disabled={sendingSurvey || !client.phone || surveyTemplates.length === 0} title="Send selected survey" className="flex-grow flex items-center justify-center gap-1.5 px-2 py-2 bg-cyan-500 text-white text-xs font-semibold rounded-md hover:bg-cyan-600 disabled:opacity-50">
                                             {sendingSurvey ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send
                                         </button>
-                                        <select 
-                                           value={overrideSurveyType} 
-                                           onChange={(e) => setOverrideSurveyType(e.target.value)}
-                                           className="bg-white/5 border border-white/10 rounded-md px-2 text-xs text-white focus:border-cyan-500 focus:ring-0"
+                                        <select
+                                            value={selectedTemplateId}
+                                            onChange={(e) => setSelectedTemplateId(e.target.value)}
+                                            className="bg-white/5 border border-white/10 rounded-md px-2 text-xs text-white focus:border-cyan-500 focus:ring-0 disabled:opacity-50"
+                                            disabled={surveyTemplates.length === 0}
                                         >
-                                           {availableSurveys.map(s => <option key={s.type} value={s.type}>{s.name}</option>)}
+                                            {surveyTemplates.length > 0 ? (
+                                                surveyTemplates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)
+                                            ) : (
+                                                <option>No surveys in library</option>
+                                            )}
                                         </select>
                                     </div>
                                     <button onClick={() => setShowSurvey(true)} className="flex-1 px-2 py-2 bg-white/10 text-white text-xs font-semibold rounded-md hover:bg-white/20">
@@ -413,7 +421,7 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
                         )
                     )}
                 </div>
-                
+
                 {showSurvey && (
                     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                         <div className="w-full max-w-2xl">
@@ -422,14 +430,14 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
                     </div>
                 )}
             </InfoCard>
-            
+
             {showSubmissionModal && (
-                <SubmissionModal 
-                    submission={submissionData} 
+                <SubmissionModal
+                    submission={submissionData}
                     onClose={() => {
                         setShowSubmissionModal(false);
                         setSubmissionData(null);
-                    }} 
+                    }}
                 />
             )}
         </>
