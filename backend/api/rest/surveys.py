@@ -109,11 +109,11 @@ async def update_survey_template(
     db_template = session.get(SurveyTemplate, template_id)
     if not db_template or db_template.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Survey template not found")
-
+    
     update_dict = template_data.model_dump(exclude_unset=True)
     for key, value in update_dict.items():
         setattr(db_template, key, value)
-
+    
     session.add(db_template)
     session.commit()
     session.refresh(db_template)
@@ -129,7 +129,7 @@ async def delete_survey_template(
     db_template = session.get(SurveyTemplate, template_id)
     if not db_template or db_template.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Survey template not found")
-
+        
     session.delete(db_template)
     session.commit()
     return
@@ -168,11 +168,11 @@ async def update_question(
     db_question = session.get(SurveyQuestion, question_id)
     if not db_question or db_question.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Question not found")
-
+    
     update_dict = question_data.model_dump(exclude_unset=True)
     for key, value in update_dict.items():
         setattr(db_question, key, value)
-
+    
     session.add(db_question)
     session.commit()
     session.refresh(db_question)
@@ -188,7 +188,7 @@ async def delete_question(
     db_question = session.get(SurveyQuestion, question_id)
     if not db_question or db_question.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Question not found")
-
+        
     session.delete(db_question)
     session.commit()
     return
@@ -204,7 +204,7 @@ async def reorder_questions(
         return
 
     question_ids = [item.id for item in payload]
-
+    
     stmt = select(SurveyQuestion).where(
         SurveyQuestion.id.in_(question_ids),
         SurveyQuestion.user_id == current_user.id
@@ -221,7 +221,7 @@ async def reorder_questions(
             question_to_update = question_map[item.id]
             question_to_update.display_order = item.display_order
             session.add(question_to_update)
-
+    
     session.commit()
     return
 
@@ -299,7 +299,7 @@ async def get_public_survey_config(template_id: UUID, survey_id: UUID, session: 
 
     stmt = select(SurveyTemplate).options(selectinload(SurveyTemplate.questions)).where(SurveyTemplate.id == template_id)
     template = session.exec(stmt).first()
-
+    
     if not template:
         raise HTTPException(status_code=404, detail="Survey configuration not found.")
 
@@ -311,7 +311,8 @@ async def get_public_survey_config(template_id: UUID, survey_id: UUID, session: 
         "questions": sorted([
             {
                 "id": str(q.id), "type": q.question_type.value, "question": q.question_text, "required": q.is_required,
-                "options": q.options, "placeholder": q.placeholder, "help_text": q.help_text
+                "options": q.options, "placeholder": q.placeholder, "help_text": q.help_text,
+                "display_order": q.display_order # ADDED THIS LINE TO FIX SORTING BUG
             } for q in template.questions
         ], key=lambda x: x.get('display_order', 0))
     }
@@ -360,12 +361,12 @@ async def get_survey_insights(
     total_completions = session.exec(completions_stmt).one()
     completion_rate = (total_completions / total_sends) * 100 if total_sends > 0 else 0
 
-    completed_surveys_stmt = select(ClientIntakeSurvey).options(selectinload(ClientIntakeSurvey.template)).where(
+    completed_surveys_stmt = select(ClientIntakeSurvey).where(
         ClientIntakeSurvey.template_id == template_id,
         ClientIntakeSurvey.completed_at != None
     )
     completed_surveys = session.exec(completed_surveys_stmt).all()
-
+    
     aggregated_answers = {str(q.id): {"text": q.question_text, "type": q.question_type, "answers": {}} for q in template.questions}
 
     for survey in completed_surveys:
