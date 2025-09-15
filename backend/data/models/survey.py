@@ -78,3 +78,25 @@ class SurveyQuestionUpdate(SQLModel):
     help_text: Optional[str] = None
     preference_key: Optional[str] = None
     display_order: Optional[int] = None
+
+# --- Response models for API 
+class SurveyQuestionPublic(SQLModel):
+    """Response model for questions - includes all question data"""
+    id: UUID
+    template_id: UUID
+    question_text: str
+    question_type: QuestionType
+    options: Optional[List[str]] = None
+    is_required: bool
+    placeholder: Optional[str] = None
+    help_text: Optional[str] = None
+    preference_key: Optional[str] = None
+    display_order: int
+
+class SurveyTemplatePublic(SQLModel):
+    """Response model for templates - includes questions"""
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    created_at: datetime
+    questions: List[SurveyQuestionPublic] = []

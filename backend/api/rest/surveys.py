@@ -14,8 +14,8 @@ from data.database import get_session
 from data.models.user import User
 from data.models.client import Client, ClientIntakeSurvey
 from data.models.survey import (
-    SurveyTemplate, SurveyTemplateCreate, SurveyTemplateUpdate,
-    SurveyQuestion, SurveyQuestionCreate, SurveyQuestionUpdate
+    SurveyTemplate, SurveyTemplateCreate, SurveyTemplateUpdate, SurveyTemplatePublic,
+    SurveyQuestion, SurveyQuestionCreate, SurveyQuestionUpdate, SurveyQuestionPublic
 )
 from api.rest.auth import get_current_user_from_token
 from agent_core.survey_processor import send_intake_survey, handle_survey_response
@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 
 # --- Survey Library (Template) Management ---
 
-@router.get("/templates", response_model=List[SurveyTemplate])
+@router.get("/templates", response_model=List[SurveyTemplatePublic])
 async def get_survey_templates(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
@@ -70,7 +70,7 @@ async def get_survey_templates(
     templates = session.exec(stmt).all()
     return templates
 
-@router.post("/templates", response_model=SurveyTemplate)
+@router.post("/templates", response_model=SurveyTemplatePublic) 
 async def create_survey_template(
     template_data: SurveyTemplateCreate,
     session: Session = Depends(get_session),
@@ -83,7 +83,7 @@ async def create_survey_template(
     session.refresh(db_template)
     return db_template
 
-@router.get("/templates/{template_id}", response_model=SurveyTemplate)
+@router.get("/templates/{template_id}", response_model=SurveyTemplatePublic)
 async def get_survey_template(
     template_id: UUID,
     session: Session = Depends(get_session),
@@ -99,7 +99,7 @@ async def get_survey_template(
         raise HTTPException(status_code=404, detail="Survey template not found")
     return template
 
-@router.put("/templates/{template_id}", response_model=SurveyTemplate)
+@router.put("/templates/{template_id}", response_model=SurveyTemplatePublic)
 async def update_survey_template(
     template_id: UUID,
     template_data: SurveyTemplateUpdate,
@@ -137,7 +137,7 @@ async def delete_survey_template(
 
 # --- Question Management (within a Template) ---
 
-@router.post("/templates/{template_id}/questions", response_model=SurveyQuestion)
+@router.post("/templates/{template_id}/questions", response_model=SurveyQuestionPublic)
 async def create_question_for_template(
     template_id: UUID,
     question_data: SurveyQuestionCreate,
@@ -158,7 +158,7 @@ async def create_question_for_template(
     session.refresh(db_question)
     return db_question
 
-@router.put("/questions/{question_id}", response_model=SurveyQuestion)
+@router.put("/questions/{question_id}", response_model=SurveyQuestionPublic)
 async def update_question(
     question_id: UUID,
     question_data: SurveyQuestionUpdate,
