@@ -1,6 +1,5 @@
 // app/(main)/surveys/[templateId]/page.tsx
-// Purpose: Survey builder page for creating and editing surveys
-
+// Purpose: Survey detail page for creating and editing surveys
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -8,8 +7,8 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, Edit, BarChart2 } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
-import { SurveyBuilder } from '@/components/survey/SurveyBuilder';
-import { SurveyInsights } from '@/components/survey/SurveyInsights'; // New Import
+import { SurveyBuilder, Question } from '@/components/survey/SurveyBuilder';
+import { SurveyInsights } from '@/components/survey/SurveyInsights';
 import { SurveyTemplate } from '../page';
 import clsx from 'clsx';
 
@@ -23,8 +22,9 @@ export default function SurveyDetailPage() {
   const [template, setTemplate] = useState<SurveyTemplate | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<SurveyView>('builder'); // New State
+  const [activeView, setActiveView] = useState<SurveyView>('builder');
 
+  // ✅ CORRECT: This function is the single source for fetching data
   const fetchTemplate = useCallback(async () => {
     if (!templateId) return;
     setLoading(true);
@@ -43,9 +43,31 @@ export default function SurveyDetailPage() {
     fetchTemplate();
   }, [fetchTemplate]);
 
-  const handleTemplateUpdate = (updatedTemplate: SurveyTemplate) => {
-    setTemplate(updatedTemplate);
-  };
+  // ✅ CORRECT: This function is now the single source of truth for all updates
+  const handleTemplateUpdate = useCallback((updatedData: Partial<SurveyTemplate>) => {
+    if (!template) return;
+
+    // 1. Optimistically update the UI for a responsive feel
+    const newTemplateState = { ...template, ...updatedData };
+    setTemplate(newTemplateState);
+
+    // 2. In the background, save metadata changes to the backend
+    // (Question changes are saved directly by their own functions in the builder)
+    if (updatedData.name !== undefined || updatedData.description !== undefined) {
+      (async () => {
+        try {
+          await api.put(`/api/surveys/templates/${template.id}`, { 
+              name: newTemplateState.name, 
+              description: newTemplateState.description 
+          });
+        } catch (error) {
+          console.error("Failed to save template metadata:", error);
+          // On error, revert to the original state from the server
+          fetchTemplate(); 
+        }
+      })();
+    }
+  }, [template, api, fetchTemplate]);
 
   if (loading) {
     return <div className="flex justify-center items-center h-64"><Loader2 className="w-8 h-8 animate-spin text-cyan-400" /></div>;
@@ -76,7 +98,6 @@ export default function SurveyDetailPage() {
                 <h1 className="text-2xl font-bold text-white">{template.name}</h1>
                 <p className="text-gray-400 text-sm mt-1">{template.description}</p>
             </div>
-            {/* --- TABS START --- */}
             <div className="flex items-center gap-2 p-1 bg-black/20 rounded-lg">
                 <button onClick={() => setActiveView('builder')} className={clsx("flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-semibold transition-colors", activeView === 'builder' ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5')}>
                     <Edit size={14} /> Builder
@@ -85,12 +106,15 @@ export default function SurveyDetailPage() {
                     <BarChart2 size={14} /> Insights
                 </button>
             </div>
-            {/* --- TABS END --- */}
         </div>
       </header>
       <div className="flex-grow p-4 sm:p-6 lg:p-8">
         {activeView === 'builder' ? (
-            <SurveyBuilder key={template.id} initialTemplate={template} onUpdate={handleTemplateUpdate} />
+            <SurveyBuilder 
+                key={template.id} 
+                template={template} 
+                onTemplateUpdate={handleTemplateUpdate} 
+            />
         ) : (
             <SurveyInsights templateId={template.id} />
         )}

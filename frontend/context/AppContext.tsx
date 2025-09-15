@@ -73,40 +73,45 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     router.replace('/auth/login');
   }, [router]);
 
-  const api = useMemo(() => {
-    // ... (This function is stable and correct, remains unchanged) ...
-    const request = async (endpoint: string, method: string, body?: any, retries = 3) => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
-      const url = `${baseUrl}${endpoint}`;
-      const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (tokenRef.current) headers['Authorization'] = `Bearer ${tokenRef.current}`;
-      for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-          const config: RequestInit = { method, headers, body: body ? JSON.stringify(body) : undefined };
-          const response = await fetch(url, config);
-          if (!response.ok) {
-            if (response.status === 401) { logout(); throw new Error('Authentication failed'); }
-            const errorData = await response.json().catch(() => ({ detail: `API Error: ${response.statusText}` }));
-            if (response.status >= 500 && attempt < retries) { console.warn(`API attempt ${attempt} failed with ${response.status}, retrying...`); await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); continue; }
-            throw new Error(errorData.detail || 'An unknown error occurred');
-          }
-          const text = await response.text();
-          return text ? JSON.parse(text) : {};
-        } catch (error) {
-          if (attempt === retries) { throw error; }
-          if (error instanceof Error && error.message.includes('4')) { throw error; }
-          console.warn(`API attempt ${attempt} failed, retrying...`, error);
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+  // Replace it with this corrected block
+const api = useMemo(() => {
+  const request = async (endpoint: string, method: string, body?: any, retries = 3) => {
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+    const url = `${baseUrl}${endpoint}`;
+    const headers: HeadersInit = { 'Content-Type': 'application/json' };
+    if (tokenRef.current) headers['Authorization'] = `Bearer ${tokenRef.current}`;
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const config: RequestInit = { 
+          method, 
+          headers, 
+          body: body ? JSON.stringify(body) : undefined,
+          cache: 'no-store' // ✅ THIS IS THE FIX
+        };
+        const response = await fetch(url, config);
+        if (!response.ok) {
+          if (response.status === 401) { logout(); throw new Error('Authentication failed'); }
+          const errorData = await response.json().catch(() => ({ detail: `API Error: ${response.statusText}` }));
+          if (response.status >= 500 && attempt < retries) { console.warn(`API attempt ${attempt} failed with ${response.status}, retrying...`); await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); continue; }
+          throw new Error(errorData.detail || 'An unknown error occurred');
         }
+        const text = await response.text();
+        return text ? JSON.parse(text) : {};
+      } catch (error) {
+        if (attempt === retries) { throw error; }
+        if (error instanceof Error && error.message.includes('4')) { throw error; }
+        console.warn(`API attempt ${attempt} failed, retrying...`, error);
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
       }
-    };
-    return {
-      get: (endpoint: string) => request(endpoint, 'GET'),
-      post: (endpoint: string, body: any) => request(endpoint, 'POST', body),
-      put: (endpoint: string, body: any) => request(endpoint, 'PUT', body),
-      del: (endpoint: string) => request(endpoint, 'DELETE'),
-    };
-  }, [logout]);
+    }
+  };
+  return {
+    get: (endpoint: string) => request(endpoint, 'GET'),
+    post: (endpoint: string, body: any) => request(endpoint, 'POST', body),
+    put: (endpoint: string, body: any) => request(endpoint, 'PUT', body),
+    del: (endpoint: string) => request(endpoint, 'DELETE'),
+  };
+}, [logout]);
 
   // --- (login, refreshUser, loginAndRedirect remain unchanged) ---
   const refreshUser = useCallback(async () => { try { const userData = await api.get('/api/users/me'); setUser(userData); } catch (error) { console.error("Failed to refresh user data:", error); logout(); } }, [api, logout]);

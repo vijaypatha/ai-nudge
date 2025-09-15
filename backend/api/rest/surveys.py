@@ -63,6 +63,7 @@ async def get_survey_templates(
     current_user: User = Depends(get_current_user_from_token)
 ):
     """Fetches all survey templates for the library, EAGERLY loading their questions."""
+    logger.critical("--- RUNNING LATEST SURVEY-LOADING CODE ---") # <-- ADD THIS LINE
     stmt = select(SurveyTemplate).options(selectinload(SurveyTemplate.questions)).where(
         SurveyTemplate.user_id == current_user.id
     ).order_by(SurveyTemplate.name)
