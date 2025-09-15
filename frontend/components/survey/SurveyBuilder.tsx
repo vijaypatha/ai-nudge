@@ -161,6 +161,7 @@ export const SurveyBuilder = ({ initialTemplate, onUpdate }: SurveyBuilderProps)
     const handler = setTimeout(async () => {
       if (name !== initialTemplate.name || description !== initialTemplate.description) {
          const updatedTemplate = await api.put(`/api/surveys/templates/${initialTemplate.id}`, { name, description });
+         setQuestions(updatedTemplate.questions || []);
          onUpdate(updatedTemplate);
       }
     }, 1000); // Save 1 second after user stops typing
