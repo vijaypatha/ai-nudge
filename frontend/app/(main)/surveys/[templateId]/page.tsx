@@ -4,22 +4,26 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Edit, BarChart2 } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 import { SurveyBuilder } from '@/components/survey/SurveyBuilder';
+import { SurveyInsights } from '@/components/survey/SurveyInsights'; // New Import
 import { SurveyTemplate } from '../page';
+import clsx from 'clsx';
 
-export default function SurveyBuilderPage() {
+type SurveyView = 'builder' | 'insights';
+
+export default function SurveyDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const { api } = useAppContext();
   const templateId = params.templateId as string;
 
   const [template, setTemplate] = useState<SurveyTemplate | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<SurveyView>('builder'); // New State
 
   const fetchTemplate = useCallback(async () => {
     if (!templateId) return;
@@ -38,7 +42,7 @@ export default function SurveyBuilderPage() {
   useEffect(() => {
     fetchTemplate();
   }, [fetchTemplate]);
-  
+
   const handleTemplateUpdate = (updatedTemplate: SurveyTemplate) => {
     setTemplate(updatedTemplate);
   };
@@ -46,32 +50,50 @@ export default function SurveyBuilderPage() {
   if (loading) {
     return <div className="flex justify-center items-center h-64"><Loader2 className="w-8 h-8 animate-spin text-cyan-400" /></div>;
   }
-  
+
   if (error) {
      return (
         <div className="p-8 text-center text-red-400">
             <p>{error}</p>
-            <Link href="/surveys" className="text-cyan-400 hover:underline mt-4 inline-block">
-                Return to Library
-            </Link>
+            <Link href="/surveys" className="text-cyan-400 hover:underline mt-4 inline-block">Return to Library</Link>
         </div>
      );
   }
 
   if (!template) {
-    return null; // Should be handled by loading/error states
+    return null;
   }
 
   return (
     <div className="h-full flex flex-col">
-       <header className="px-4 sm:px-6 lg:px-8 pt-4">
+       <header className="px-4 sm:px-6 lg:px-8 pt-4 space-y-4">
         <Link href="/surveys" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors w-fit">
           <ArrowLeft size={16} />
           Back to Survey Library
         </Link>
+        <div className="flex justify-between items-end">
+            <div>
+                <h1 className="text-2xl font-bold text-white">{template.name}</h1>
+                <p className="text-gray-400 text-sm mt-1">{template.description}</p>
+            </div>
+            {/* --- TABS START --- */}
+            <div className="flex items-center gap-2 p-1 bg-black/20 rounded-lg">
+                <button onClick={() => setActiveView('builder')} className={clsx("flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-semibold transition-colors", activeView === 'builder' ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5')}>
+                    <Edit size={14} /> Builder
+                </button>
+                <button onClick={() => setActiveView('insights')} className={clsx("flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-semibold transition-colors", activeView === 'insights' ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5')}>
+                    <BarChart2 size={14} /> Insights
+                </button>
+            </div>
+            {/* --- TABS END --- */}
+        </div>
       </header>
       <div className="flex-grow p-4 sm:p-6 lg:p-8">
-        <SurveyBuilder key={template.id} initialTemplate={template} onUpdate={handleTemplateUpdate} />
+        {activeView === 'builder' ? (
+            <SurveyBuilder key={template.id} initialTemplate={template} onUpdate={handleTemplateUpdate} />
+        ) : (
+            <SurveyInsights templateId={template.id} />
+        )}
       </div>
     </div>
   );

@@ -22,6 +22,23 @@ from api.rest.auth import get_current_user_from_token
 from agent_core.survey_config import get_survey_config, get_available_surveys, determine_survey_type
 from agent_core.survey_processor import send_intake_survey, handle_survey_response
 
+class AnswerInsight(BaseModel):
+    answer: str
+    count: int
+
+class QuestionInsights(BaseModel):
+    question_id: UUID
+    question_text: str
+    question_type: str
+    total_responses: int
+    answers: List[AnswerInsight]
+
+class SurveyInsights(BaseModel):
+    total_sends: int
+    total_completions: int
+    completion_rate: float
+    question_insights: List[QuestionInsights]
+
 router = APIRouter(prefix="/surveys", tags=["surveys"])
 logger = logging.getLogger(__name__)
 
@@ -282,6 +299,75 @@ async def submit_public_survey_response(
     else:
         raise HTTPException(status_code=500, detail="Failed to process survey responses")
     
+@router.get("/templates/{template_id}/insights", response_model=SurveyInsights)
+async def get_survey_insights(
+    template_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """Get analytics and aggregated responses for a survey template."""
+    template = session.get(SurveyTemplate, template_id)
+    if not template or template.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    # Calculate total sends and completions
+    sends_stmt = select(sa.func.count(ClientIntakeSurvey.id)).where(ClientIntakeSurvey.template_id == template_id)
+    total_sends = session.exec(sends_stmt).one()
+
+    completions_stmt = select(sa.func.count(ClientIntakeSurvey.id)).where(
+        ClientIntakeSurvey.template_id == template_id,
+        ClientIntakeSurvey.completed_at != None
+    )
+    total_completions = session.exec(completions_stmt).one()
+
+    completion_rate = (total_completions / total_sends) * 100 if total_sends > 0 else 0
+
+    # Aggregate question responses
+    completed_surveys_stmt = select(ClientIntakeSurvey).where(
+        ClientIntakeSurvey.template_id == template_id,
+        ClientIntakeSurvey.completed_at != None
+    )
+    completed_surveys = session.exec(completed_surveys_stmt).all()
+
+    # Use a dict to aggregate answers by question ID
+    aggregated_answers = {str(q.id): {"text": q.question_text, "type": q.question_type, "answers": {}} for q in template.questions}
+
+    for survey in completed_surveys:
+        for q_id_str, response in survey.responses.items():
+            if q_id_str in aggregated_answers:
+                # Handle multi-select arrays
+                if isinstance(response, list):
+                    for item in response:
+                        aggregated_answers[q_id_str]["answers"][item] = aggregated_answers[q_id_str]["answers"].get(item, 0) + 1
+                # Handle single-select strings/numbers
+                else:
+                    response_str = str(response)
+                    aggregated_answers[q_id_str]["answers"][response_str] = aggregated_answers[q_id_str]["answers"].get(response_str, 0) + 1
+
+    question_insights = []
+    for q_id_str, data in aggregated_answers.items():
+        sorted_answers = sorted(
+            [AnswerInsight(answer=ans, count=ct) for ans, ct in data["answers"].items()],
+            key=lambda x: x.count, reverse=True
+        )
+        total_responses_for_question = sum(item.count for item in sorted_answers)
+
+        question_insights.append(QuestionInsights(
+            question_id=UUID(q_id_str),
+            question_text=data["text"],
+            question_type=data["type"],
+            total_responses=total_responses_for_question,
+            answers=sorted_answers
+        ))
+
+    return SurveyInsights(
+        total_sends=total_sends,
+        total_completions=total_completions,
+        completion_rate=completion_rate,
+        question_insights=question_insights
+    )
+
+
 @router.post("/manual-submission/{client_id}")
 async def submit_manual_survey_response(
     client_id: UUID,
