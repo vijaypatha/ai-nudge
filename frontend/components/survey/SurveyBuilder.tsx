@@ -1,6 +1,4 @@
 // components/survey/SurveyBuilder.tsx
-// Purpose: Survey builder component for creating and editing surveys
-
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -99,7 +97,6 @@ const QuestionEditor = ({ question, onSave, onDelete, onCancel, isSaving, isDele
     );
 };
 
-// ✅ CORRECT: Builder is now simpler and gets its data from props
 export const SurveyBuilder = ({ template, onTemplateUpdate }: SurveyBuilderProps) => {
   const { api } = useAppContext();
   const [name, setName] = useState(template.name);
@@ -122,7 +119,7 @@ export const SurveyBuilder = ({ template, onTemplateUpdate }: SurveyBuilderProps
         const newQuestion = await api.post(`/api/surveys/templates/${template.id}/questions`, {
             question_text: 'New Question', question_type: 'text', display_order: template.questions.length,
         });
-        onTemplateUpdate({ questions: [...template.questions, newQuestion] });
+        onTemplateUpdate({ questions: [...(template.questions || []), newQuestion] });
         setSelectedQuestionId(newQuestion.id);
     } catch(e){ console.error(e)}
   };
@@ -131,7 +128,7 @@ export const SurveyBuilder = ({ template, onTemplateUpdate }: SurveyBuilderProps
       setIsSaving(true);
       try {
           const savedQuestion = await api.put(`/api/surveys/questions/${updatedQuestion.id}`, updatedQuestion);
-          const newQuestions = template.questions.map(q => q.id === savedQuestion.id ? savedQuestion : q);
+          const newQuestions = (template.questions || []).map(q => q.id === savedQuestion.id ? savedQuestion : q);
           onTemplateUpdate({ questions: newQuestions });
           setSelectedQuestionId(null);
       } catch(e) { console.error(e) }
@@ -142,7 +139,7 @@ export const SurveyBuilder = ({ template, onTemplateUpdate }: SurveyBuilderProps
       if (!window.confirm("Are you sure?")) return;
       try {
           await api.del(`/api/surveys/questions/${questionId}`);
-          const newQuestions = template.questions.filter(q => q.id !== questionId);
+          const newQuestions = (template.questions || []).filter(q => q.id !== questionId);
           onTemplateUpdate({ questions: newQuestions });
           setSelectedQuestionId(null);
       } catch(e) { console.error(e) }
@@ -153,9 +150,9 @@ export const SurveyBuilder = ({ template, onTemplateUpdate }: SurveyBuilderProps
   const handleDragEnd = async (event: any) => {
       const { active, over } = event;
       if (active.id !== over.id) {
-          const oldIndex = template.questions.findIndex(q => q.id === active.id);
-          const newIndex = template.questions.findIndex(q => q.id === over.id);
-          const reorderedQuestions = arrayMove(template.questions, oldIndex, newIndex);
+          const oldIndex = (template.questions || []).findIndex(q => q.id === active.id);
+          const newIndex = (template.questions || []).findIndex(q => q.id === over.id);
+          const reorderedQuestions = arrayMove((template.questions || []), oldIndex, newIndex);
           const updatedQuestionsForApi = reorderedQuestions.map((q, index) => ({ id: q.id, display_order: index }));
 
           onTemplateUpdate({ questions: reorderedQuestions.map((q, index) => ({...q, display_order: index})) });
@@ -178,7 +175,7 @@ export const SurveyBuilder = ({ template, onTemplateUpdate }: SurveyBuilderProps
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full">
-      <div className="lg-col-span-1 bg-brand-primary border border-white/10 rounded-xl p-5 flex flex-col">
+      <div className="lg:col-span-1 bg-brand-primary border border-white/10 rounded-xl p-5 flex flex-col">
         <div>
             <h2 className="font-bold text-xl mb-4">Survey Editor</h2>
             <div className="space-y-4">
@@ -200,8 +197,8 @@ export const SurveyBuilder = ({ template, onTemplateUpdate }: SurveyBuilderProps
         </div>
         <div className="space-y-3">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                <SortableContext items={template.questions.map(q => q.id)} strategy={verticalListSortingStrategy}>
-                    {template.questions.sort((a, b) => a.display_order - b.display_order).map((q, index) => (
+                <SortableContext items={(template.questions || []).map(q => q.id)} strategy={verticalListSortingStrategy}>
+                    {(template.questions || []).sort((a, b) => a.display_order - b.display_order).map((q, index) => (
                         selectedQuestionId === q.id ? (
                             <QuestionEditor key={q.id} question={q} onSave={handleUpdateQuestion} onDelete={() => handleDeleteQuestion(q.id)} onCancel={() => setSelectedQuestionId(null)} isSaving={isSaving}/>
                         ) : (

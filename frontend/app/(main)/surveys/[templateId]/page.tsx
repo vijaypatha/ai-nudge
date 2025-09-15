@@ -1,5 +1,4 @@
 // app/(main)/surveys/[templateId]/page.tsx
-// Purpose: Survey detail page for creating and editing surveys
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -24,7 +23,6 @@ export default function SurveyDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<SurveyView>('builder');
 
-  // ✅ CORRECT: This function is the single source for fetching data
   const fetchTemplate = useCallback(async () => {
     if (!templateId) return;
     setLoading(true);
@@ -43,7 +41,6 @@ export default function SurveyDetailPage() {
     fetchTemplate();
   }, [fetchTemplate]);
 
-  // ✅ CORRECT: This function is now the single source of truth for all updates
   const handleTemplateUpdate = useCallback((updatedData: Partial<SurveyTemplate>) => {
     if (!template) return;
 
@@ -52,7 +49,6 @@ export default function SurveyDetailPage() {
     setTemplate(newTemplateState);
 
     // 2. In the background, save metadata changes to the backend
-    // (Question changes are saved directly by their own functions in the builder)
     if (updatedData.name !== undefined || updatedData.description !== undefined) {
       (async () => {
         try {
