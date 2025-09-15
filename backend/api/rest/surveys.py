@@ -1,27 +1,26 @@
 # File Path: backend/api/rest/surveys.py
-# Purpose: API endpoints for survey management, now including custom question CRUD.
+# Purpose: API endpoints for all survey and question management.
 
 import logging
 from typing import List, Dict, Any, Optional
 from uuid import UUID
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Body
-from sqlmodel import Session, select
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlmodel import Session, select
 import sqlalchemy as sa
+from sqlalchemy.orm import selectinload
 
 from data.database import get_session
 from data.models.user import User
 from data.models.client import Client, ClientIntakeSurvey
-# MODIFIED: Import new models
 from data.models.survey import (
     SurveyTemplate, SurveyTemplateCreate, SurveyTemplateUpdate,
     SurveyQuestion, SurveyQuestionCreate, SurveyQuestionUpdate
 )
-from data import crm as crm_service
 from api.rest.auth import get_current_user_from_token
-from agent_core.survey_config import get_survey_config, get_available_surveys, determine_survey_type
 from agent_core.survey_processor import send_intake_survey, handle_survey_response
+
+# --- Pydantic Models for API Data Structures ---
 
 class AnswerInsight(BaseModel):
     answer: str
@@ -44,6 +43,15 @@ class ReorderQuestionPayload(BaseModel):
     id: UUID
     display_order: int
 
+class SendSurveyPayload(BaseModel):
+    template_id: UUID
+
+class SendBulkSurveyPayload(BaseModel):
+    template_id: UUID
+    client_ids: List[UUID]
+
+# --- API Router ---
+
 router = APIRouter(prefix="/surveys", tags=["surveys"])
 logger = logging.getLogger(__name__)
 
@@ -54,9 +62,10 @@ async def get_survey_templates(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """Get all survey templates for the current user's library."""
+    """Fetches all survey templates for the current user's library."""
     stmt = select(SurveyTemplate).where(SurveyTemplate.user_id == current_user.id).order_by(SurveyTemplate.name)
-    return session.exec(stmt).all()
+    templates = session.exec(stmt).all()
+    return templates
 
 @router.post("/templates", response_model=SurveyTemplate)
 async def create_survey_template(
@@ -64,7 +73,7 @@ async def create_survey_template(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """Create a new survey template."""
+    """Creates a new, empty survey template in the user's library."""
     db_template = SurveyTemplate.model_validate(template_data, update={"user_id": current_user.id})
     session.add(db_template)
     session.commit()
@@ -77,16 +86,14 @@ async def get_survey_template(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """Get a single survey template by ID, including its questions."""
-    stmt = select(SurveyTemplate).where(
+    """Gets a single survey template by its ID, eagerly loading its questions."""
+    stmt = select(SurveyTemplate).options(selectinload(SurveyTemplate.questions)).where(
         SurveyTemplate.id == template_id,
         SurveyTemplate.user_id == current_user.id
     )
     template = session.exec(stmt).first()
     if not template:
         raise HTTPException(status_code=404, detail="Survey template not found")
-    # Eagerly load questions if they aren't loaded by default
-    _ = template.questions
     return template
 
 @router.put("/templates/{template_id}", response_model=SurveyTemplate)
@@ -96,7 +103,7 @@ async def update_survey_template(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """Update a survey template's metadata (name, description)."""
+    """Updates a survey template's metadata, such as its name and description."""
     db_template = session.get(SurveyTemplate, template_id)
     if not db_template or db_template.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Survey template not found")
@@ -116,12 +123,12 @@ async def delete_survey_template(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """Delete a survey template and all its associated questions."""
+    """Deletes a survey template and all of its associated questions."""
     db_template = session.get(SurveyTemplate, template_id)
     if not db_template or db_template.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Survey template not found")
         
-    session.delete(db_template) # SQLAlchemy will handle cascading delete of questions
+    session.delete(db_template)
     session.commit()
     return
 
@@ -134,7 +141,7 @@ async def create_question_for_template(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """Create a new question within a specific survey template."""
+    """Creates a new question and associates it with a specific survey template."""
     db_template = session.get(SurveyTemplate, template_id)
     if not db_template or db_template.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Survey template not found")
@@ -155,7 +162,7 @@ async def update_question(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """Update an existing survey question."""
+    """Updates the properties of an existing survey question."""
     db_question = session.get(SurveyQuestion, question_id)
     if not db_question or db_question.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Question not found")
@@ -175,7 +182,7 @@ async def delete_question(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """Delete a survey question."""
+    """Deletes a single survey question."""
     db_question = session.get(SurveyQuestion, question_id)
     if not db_question or db_question.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Question not found")
@@ -190,13 +197,12 @@ async def reorder_questions(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """Update the display order for a list of questions in a batch."""
+    """Updates the display order for a list of questions in a single batch operation."""
     if not payload:
         return
 
     question_ids = [item.id for item in payload]
-
-    # Verify all questions belong to the current user in a single query
+    
     stmt = select(SurveyQuestion).where(
         SurveyQuestion.id.in_(question_ids),
         SurveyQuestion.user_id == current_user.id
@@ -213,17 +219,11 @@ async def reorder_questions(
             question_to_update = question_map[item.id]
             question_to_update.display_order = item.display_order
             session.add(question_to_update)
-
+    
     session.commit()
     return
 
-# --- Endpoints for Sending and Responding 
-class SendSurveyPayload(BaseModel):
-    template_id: UUID
-
-class SendBulkSurveyPayload(BaseModel):
-    template_id: UUID
-    client_ids: List[UUID]
+# --- Endpoints for Sending Surveys ---
 
 @router.post("/send-single/{client_id}")
 async def send_single_survey(
@@ -232,7 +232,7 @@ async def send_single_survey(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token),
 ):
-    """Send a single survey from a template to a specific client."""
+    """Sends a survey from a template to a single, specific client."""
     success = await send_intake_survey(str(client_id), str(current_user.id), str(payload.template_id), session)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to send survey.")
@@ -244,7 +244,7 @@ async def send_bulk_survey(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token),
 ):
-    """Send a single survey from a template to multiple clients."""
+    """Sends a survey from a template to a list of clients."""
     if not payload.client_ids:
         raise HTTPException(status_code=400, detail="No client IDs provided.")
 
@@ -268,34 +268,29 @@ async def send_bulk_survey(
 
 @router.get("/public/info/{survey_id}")
 async def get_public_survey_info(survey_id: UUID, session: Session = Depends(get_session)):
-    """Get public survey information for a specific survey ID."""
+    """Gets public information for a client to view before starting a survey."""
     survey = session.get(ClientIntakeSurvey, survey_id)
-    if not survey:
-        raise HTTPException(status_code=404, detail="Survey not found or invalid.")
-
-    if survey.completed_at:
-        raise HTTPException(status_code=410, detail="This survey has already been completed.")
+    if not survey or survey.completed_at:
+        raise HTTPException(status_code=404, detail="Survey not found, invalid, or already completed.")
 
     client = session.get(Client, survey.client_id)
     user = session.get(User, survey.user_id)
-
     if not client or not user:
         raise HTTPException(status_code=404, detail="Survey information not found.")
-
-    # Eager load the template to get its name
-    _ = survey.template
+    
+    _ = survey.template # Eagerly load the template to get its name
 
     return {
         "survey_id": str(survey.id),
         "client_name": client.full_name.split()[0] if client.full_name else "there",
         "user_name": user.full_name,
-        "survey_type": survey.template.name, # Use template name for context
+        "survey_type": survey.template.name,
         "template_id": survey.template_id
     }
 
 @router.get("/public/config/{template_id}")
 async def get_public_survey_config(template_id: UUID, survey_id: UUID, session: Session = Depends(get_session)):
-    """Get public survey configuration from a template. Requires a valid survey_id for authorization."""
+    """Gets the public configuration (questions, etc.) for a specific survey."""
     survey = session.get(ClientIntakeSurvey, survey_id)
     if not survey or survey.template_id != template_id:
         raise HTTPException(status_code=404, detail="Invalid survey reference.")
@@ -308,7 +303,7 @@ async def get_public_survey_config(template_id: UUID, survey_id: UUID, session: 
         "survey_type": template.name,
         "title": template.name,
         "description": template.description,
-        "estimated_time": "2-3 minutes", # Can be added to template model later
+        "estimated_time": "2-3 minutes",
         "questions": sorted([
             {
                 "id": str(q.id), "type": q.question_type.value, "question": q.question_text, "required": q.is_required,
@@ -323,32 +318,30 @@ async def submit_public_survey_response(
     responses: Dict[str, Any],
     session: Session = Depends(get_session)
 ):
-    """Submit survey responses from a client (public endpoint)."""
+    """Accepts and processes a client's submitted survey responses."""
     survey = session.get(ClientIntakeSurvey, survey_id)
-    if not survey:
-        raise HTTPException(status_code=404, detail="Survey not found")
-    
-    if survey.completed_at:
-        raise HTTPException(status_code=410, detail="Survey has already been completed.")
+    if not survey or survey.completed_at:
+        raise HTTPException(status_code=404, detail="Survey not found or has already been completed.")
 
     success = await handle_survey_response(str(survey.client_id), str(survey.id), responses, session)
     if success:
         return {"message": "Survey responses submitted successfully"}
     else:
         raise HTTPException(status_code=500, detail="Failed to process survey responses")
-    
+
+# --- Analytics Endpoint ---
+
 @router.get("/templates/{template_id}/insights", response_model=SurveyInsights)
 async def get_survey_insights(
     template_id: UUID,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """Get analytics and aggregated responses for a survey template."""
+    """Calculates and returns analytics and aggregated responses for a survey template."""
     template = session.get(SurveyTemplate, template_id)
     if not template or template.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    # Calculate total sends and completions
     sends_stmt = select(sa.func.count(ClientIntakeSurvey.id)).where(ClientIntakeSurvey.template_id == template_id)
     total_sends = session.exec(sends_stmt).one()
 
@@ -357,27 +350,22 @@ async def get_survey_insights(
         ClientIntakeSurvey.completed_at != None
     )
     total_completions = session.exec(completions_stmt).one()
-
     completion_rate = (total_completions / total_sends) * 100 if total_sends > 0 else 0
 
-    # Aggregate question responses
     completed_surveys_stmt = select(ClientIntakeSurvey).where(
         ClientIntakeSurvey.template_id == template_id,
         ClientIntakeSurvey.completed_at != None
     )
     completed_surveys = session.exec(completed_surveys_stmt).all()
-
-    # Use a dict to aggregate answers by question ID
+    
     aggregated_answers = {str(q.id): {"text": q.question_text, "type": q.question_type, "answers": {}} for q in template.questions}
 
     for survey in completed_surveys:
         for q_id_str, response in survey.responses.items():
             if q_id_str in aggregated_answers:
-                # Handle multi-select arrays
                 if isinstance(response, list):
                     for item in response:
                         aggregated_answers[q_id_str]["answers"][item] = aggregated_answers[q_id_str]["answers"].get(item, 0) + 1
-                # Handle single-select strings/numbers
                 else:
                     response_str = str(response)
                     aggregated_answers[q_id_str]["answers"][response_str] = aggregated_answers[q_id_str]["answers"].get(response_str, 0) + 1
@@ -389,7 +377,6 @@ async def get_survey_insights(
             key=lambda x: x.count, reverse=True
         )
         total_responses_for_question = sum(item.count for item in sorted_answers)
-
         question_insights.append(QuestionInsights(
             question_id=UUID(q_id_str),
             question_text=data["text"],
@@ -404,44 +391,3 @@ async def get_survey_insights(
         completion_rate=completion_rate,
         question_insights=question_insights
     )
-
-
-@router.post("/manual-submission/{client_id}")
-async def submit_manual_survey_response(
-    client_id: UUID,
-    responses: Dict[str, Any],
-    session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user_from_token)
-):
-    """
-    Handles a survey submitted manually by an agent on behalf of a client.
-    This creates the survey record and then triggers the main AI synthesis.
-    """
-    client = crm_service.get_client_by_id(client_id, current_user.id, session)
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-
-    survey_type = determine_survey_type(current_user.vertical, client.user_tags)
-    if not survey_type:
-        raise HTTPException(status_code=400, detail="Could not determine survey type for client.")
-
-    # 1. Create the ClientIntakeSurvey record, just like the client-led flow.
-    survey = ClientIntakeSurvey(
-        client_id=client_id,
-        user_id=current_user.id,
-        survey_type=survey_type,
-        responses=responses,
-        processed=True,
-        completed_at=datetime.now(timezone.utc).isoformat()
-    )
-    session.add(survey)
-    client.intake_survey_completed = True
-    session.add(client)
-    session.commit()
-    session.refresh(client) # Refresh to load the new survey relationship
-
-    # 2. Trigger the main AI synthesis engine.
-    logger.info(f"SURVEYS API: Triggering AI synthesis for manual submission for client {client.id}")
-    await crm_service._run_synthesis_and_update_client(client, current_user, session)
-    
-    return {"status": "success", "message": "Manual survey submitted and processed."}
