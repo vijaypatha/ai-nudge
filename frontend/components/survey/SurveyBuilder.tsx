@@ -1,4 +1,5 @@
 // components/survey/SurveyBuilder.tsx
+// Purpose: Survey builder component for creating and editing surveys
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -116,10 +117,12 @@ export const SurveyBuilder = ({ template, onTemplateUpdate }: SurveyBuilderProps
 
   const handleAddQuestion = async () => {
     try {
+        // ✅ FIX: Use `(template.questions || [])` to prevent crash on new surveys
+        const currentQuestions = template.questions || [];
         const newQuestion = await api.post(`/api/surveys/templates/${template.id}/questions`, {
-            question_text: 'New Question', question_type: 'text', display_order: template.questions.length,
+            question_text: 'New Question', question_type: 'text', display_order: currentQuestions.length,
         });
-        onTemplateUpdate({ questions: [...(template.questions || []), newQuestion] });
+        onTemplateUpdate({ questions: [...currentQuestions, newQuestion] });
         setSelectedQuestionId(newQuestion.id);
     } catch(e){ console.error(e)}
   };
@@ -150,9 +153,10 @@ export const SurveyBuilder = ({ template, onTemplateUpdate }: SurveyBuilderProps
   const handleDragEnd = async (event: any) => {
       const { active, over } = event;
       if (active.id !== over.id) {
-          const oldIndex = (template.questions || []).findIndex(q => q.id === active.id);
-          const newIndex = (template.questions || []).findIndex(q => q.id === over.id);
-          const reorderedQuestions = arrayMove((template.questions || []), oldIndex, newIndex);
+          const currentQuestions = template.questions || [];
+          const oldIndex = currentQuestions.findIndex(q => q.id === active.id);
+          const newIndex = currentQuestions.findIndex(q => q.id === over.id);
+          const reorderedQuestions = arrayMove(currentQuestions, oldIndex, newIndex);
           const updatedQuestionsForApi = reorderedQuestions.map((q, index) => ({ id: q.id, display_order: index }));
 
           onTemplateUpdate({ questions: reorderedQuestions.map((q, index) => ({...q, display_order: index})) });
@@ -197,6 +201,7 @@ export const SurveyBuilder = ({ template, onTemplateUpdate }: SurveyBuilderProps
         </div>
         <div className="space-y-3">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                {/* ✅ FIX: Safeguard all uses of template.questions */}
                 <SortableContext items={(template.questions || []).map(q => q.id)} strategy={verticalListSortingStrategy}>
                     {(template.questions || []).sort((a, b) => a.display_order - b.display_order).map((q, index) => (
                         selectedQuestionId === q.id ? (

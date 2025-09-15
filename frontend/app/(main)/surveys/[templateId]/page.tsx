@@ -1,4 +1,5 @@
 // app/(main)/surveys/[templateId]/page.tsx
+
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -17,7 +18,7 @@ export default function SurveyDetailPage() {
   const params = useParams();
   const { api } = useAppContext();
   const templateId = params.templateId as string;
-
+  
   const [template, setTemplate] = useState<SurveyTemplate | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,38 +45,50 @@ export default function SurveyDetailPage() {
   const handleTemplateUpdate = useCallback((updatedData: Partial<SurveyTemplate>) => {
     if (!template) return;
 
-    // 1. Optimistically update the UI for a responsive feel
+    // 1. Always update the UI optimistically for a responsive feel
     const newTemplateState = { ...template, ...updatedData };
     setTemplate(newTemplateState);
 
-    // 2. In the background, save metadata changes to the backend
+    // 2. Only save template metadata (name/description) to backend
+    // Questions are handled by their individual API endpoints
     if (updatedData.name !== undefined || updatedData.description !== undefined) {
       (async () => {
         try {
-          await api.put(`/api/surveys/templates/${template.id}`, { 
-              name: newTemplateState.name, 
-              description: newTemplateState.description 
+          await api.put(`/api/surveys/templates/${template.id}`, {
+            name: newTemplateState.name,
+            description: newTemplateState.description
           });
         } catch (error) {
           console.error("Failed to save template metadata:", error);
           // On error, revert to the original state from the server
-          fetchTemplate(); 
+          fetchTemplate();
         }
       })();
     }
+    // Note: We don't need to save questions here because:
+    // - handleAddQuestion already persists new questions via POST
+    // - handleUpdateQuestion already persists edits via PUT  
+    // - handleDeleteQuestion already removes questions via DELETE
+    // - We just need to keep the local state in sync
   }, [template, api, fetchTemplate]);
 
   if (loading) {
-    return <div className="flex justify-center items-center h-64"><Loader2 className="w-8 h-8 animate-spin text-cyan-400" /></div>;
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
+      </div>
+    );
   }
 
   if (error) {
-     return (
-        <div className="p-8 text-center text-red-400">
-            <p>{error}</p>
-            <Link href="/surveys" className="text-cyan-400 hover:underline mt-4 inline-block">Return to Library</Link>
-        </div>
-     );
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen text-center">
+        <div className="text-red-400 mb-4">{error}</div>
+        <Link href="/surveys" className="text-cyan-400 hover:text-cyan-300">
+          Return to Library
+        </Link>
+      </div>
+    );
   }
 
   if (!template) {
@@ -83,38 +96,54 @@ export default function SurveyDetailPage() {
   }
 
   return (
-    <div className="h-full flex flex-col">
-       <header className="px-4 sm:px-6 lg:px-8 pt-4 space-y-4">
-        <Link href="/surveys" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors w-fit">
-          <ArrowLeft size={16} />
-          Back to Survey Library
-        </Link>
-        <div className="flex justify-between items-end">
-            <div>
-                <h1 className="text-2xl font-bold text-white">{template.name}</h1>
-                <p className="text-gray-400 text-sm mt-1">{template.description}</p>
-            </div>
-            <div className="flex items-center gap-2 p-1 bg-black/20 rounded-lg">
-                <button onClick={() => setActiveView('builder')} className={clsx("flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-semibold transition-colors", activeView === 'builder' ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5')}>
-                    <Edit size={14} /> Builder
-                </button>
-                <button onClick={() => setActiveView('insights')} className={clsx("flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-semibold transition-colors", activeView === 'insights' ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5')}>
-                    <BarChart2 size={14} /> Insights
-                </button>
-            </div>
+    <div className="p-6 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-4">
+          <Link href="/surveys" className="text-gray-400 hover:text-white">
+            <ArrowLeft className="w-5 h-5" />
+          </Link>
+          <h1 className="text-2xl font-bold text-white">{template.name}</h1>
         </div>
-      </header>
-      <div className="flex-grow p-4 sm:p-6 lg:p-8">
-        {activeView === 'builder' ? (
-            <SurveyBuilder 
-                key={template.id} 
-                template={template} 
-                onTemplateUpdate={handleTemplateUpdate} 
-            />
-        ) : (
-            <SurveyInsights templateId={template.id} />
-        )}
+        
+        {/* View Toggle */}
+        <div className="flex bg-gray-800 rounded-lg p-1">
+          <button
+            onClick={() => setActiveView('builder')}
+            className={clsx(
+              'px-4 py-2 rounded-md flex items-center gap-2 transition-colors',
+              activeView === 'builder' 
+                ? 'bg-cyan-500 text-white' 
+                : 'text-gray-400 hover:text-white'
+            )}
+          >
+            <Edit className="w-4 h-4" />
+            Builder
+          </button>
+          <button
+            onClick={() => setActiveView('insights')}
+            className={clsx(
+              'px-4 py-2 rounded-md flex items-center gap-2 transition-colors',
+              activeView === 'insights' 
+                ? 'bg-cyan-500 text-white' 
+                : 'text-gray-400 hover:text-white'
+            )}
+          >
+            <BarChart2 className="w-4 h-4" />
+            Insights
+          </button>
+        </div>
       </div>
+
+      {/* Content */}
+      {activeView === 'builder' ? (
+        <SurveyBuilder 
+          template={template} 
+          onTemplateUpdate={handleTemplateUpdate}
+        />
+      ) : (
+        <SurveyInsights templateId={templateId} />
+      )}
     </div>
   );
 }
