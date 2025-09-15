@@ -100,8 +100,7 @@ export const SurveyBuilder = ({ initialTemplate }: SurveyBuilderProps) => {
   const handleUpdateQuestion = async (updatedQuestion: Question) => {
       setIsSaving(true);
       try {
-          const savedQuestion = await api.put(`/api/questions/${updatedQuestion.id}`, updatedQuestion);
-          setQuestions(questions.map(q => q.id === savedQuestion.id ? savedQuestion : q));
+          const savedQuestion = await api.put(`/api/surveys/questions/${updatedQuestion.id}`, updatedQuestion);          setQuestions(questions.map(q => q.id === savedQuestion.id ? savedQuestion : q));
           setSelectedQuestionId(null);
       } catch(e) { console.error(e) }
       finally { setIsSaving(false) }
@@ -110,7 +109,7 @@ export const SurveyBuilder = ({ initialTemplate }: SurveyBuilderProps) => {
   const handleDeleteQuestion = async (questionId: string) => {
       if (!window.confirm("Are you sure you want to delete this question?")) return;
       try {
-          await api.del(`/api/questions/${questionId}`);
+          await api.del(`/api/surveys/questions/${questionId}`);
           setQuestions(questions.filter(q => q.id !== questionId));
           setSelectedQuestionId(null);
       } catch(e) { console.error(e) }
