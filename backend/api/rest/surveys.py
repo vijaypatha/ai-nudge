@@ -40,6 +40,10 @@ class SurveyInsights(BaseModel):
     completion_rate: float
     question_insights: List[QuestionInsights]
 
+class ReorderQuestionPayload(BaseModel):
+    id: UUID
+    display_order: int
+
 router = APIRouter(prefix="/surveys", tags=["surveys"])
 logger = logging.getLogger(__name__)
 
@@ -177,6 +181,39 @@ async def delete_question(
         raise HTTPException(status_code=404, detail="Question not found")
         
     session.delete(db_question)
+    session.commit()
+    return
+
+@router.post("/questions/reorder", status_code=204)
+async def reorder_questions(
+    payload: List[ReorderQuestionPayload],
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """Update the display order for a list of questions in a batch."""
+    if not payload:
+        return
+
+    question_ids = [item.id for item in payload]
+
+    # Verify all questions belong to the current user in a single query
+    stmt = select(SurveyQuestion).where(
+        SurveyQuestion.id.in_(question_ids),
+        SurveyQuestion.user_id == current_user.id
+    )
+    questions_from_db = session.exec(stmt).all()
+
+    if len(questions_from_db) != len(question_ids):
+        raise HTTPException(status_code=403, detail="One or more questions not found or you don't have permission to edit them.")
+
+    question_map = {q.id: q for q in questions_from_db}
+
+    for item in payload:
+        if item.id in question_map:
+            question_to_update = question_map[item.id]
+            question_to_update.display_order = item.display_order
+            session.add(question_to_update)
+
     session.commit()
     return
 
