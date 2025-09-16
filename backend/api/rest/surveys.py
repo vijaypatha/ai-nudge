@@ -34,10 +34,13 @@ class QuestionInsights(BaseModel):
     answers: List[AnswerInsight]
 
 class SurveyInsights(BaseModel):
+    summary: str | None
+    trends: List[str] = []
     total_sends: int
     total_completions: int
     completion_rate: float
     question_insights: List[QuestionInsights]
+
 
 class ReorderQuestionPayload(BaseModel):
     id: UUID
@@ -358,18 +361,16 @@ async def get_survey_insights(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token)
 ):
-    """Calculates and returns analytics and aggregated responses for a survey template."""
-    stmt = select(SurveyTemplate).options(selectinload(SurveyTemplate.questions)).where(
-        SurveyTemplate.id == template_id,
-        SurveyTemplate.user_id == current_user.id
-    )
-    template = session.exec(stmt).first()
-    if not template:
+    """Calculates and returns analytics and AI-generated insights for a survey template."""
+    from agent_core import llm_client
+
+    template = session.get(SurveyTemplate, template_id)
+    if not template or template.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Template not found")
 
+    # --- Part 1: Quantitative Analysis (Existing Logic) ---
     sends_stmt = select(sa.func.count(ClientIntakeSurvey.id)).where(ClientIntakeSurvey.template_id == template_id)
     total_sends = session.exec(sends_stmt).one()
-
     completions_stmt = select(sa.func.count(ClientIntakeSurvey.id)).where(
         ClientIntakeSurvey.template_id == template_id,
         ClientIntakeSurvey.completed_at != None
@@ -377,30 +378,72 @@ async def get_survey_insights(
     total_completions = session.exec(completions_stmt).one()
     completion_rate = (total_completions / total_sends) * 100 if total_sends > 0 else 0
 
-    completed_surveys_stmt = select(ClientIntakeSurvey).where(
+    completed_surveys = session.exec(select(ClientIntakeSurvey).where(
         ClientIntakeSurvey.template_id == template_id,
         ClientIntakeSurvey.completed_at != None
-    )
-    completed_surveys = session.exec(completed_surveys_stmt).all()
-    
-    aggregated_answers = {str(q.id): {"text": q.question_text, "type": q.question_type, "answers": {}} for q in template.questions}
+    )).all()
 
+    if not completed_surveys:
+        return SurveyInsights(
+            summary="No responses yet. Send this survey to clients to start gathering insights.",
+            trends=[],
+            total_sends=total_sends,
+            total_completions=0,
+            completion_rate=0,
+            question_insights=[]
+        )
+
+    # --- Part 2: AI-Powered Qualitative Analysis (New Logic) ---
+    all_responses_text = ""
+    for i, survey in enumerate(completed_surveys):
+        all_responses_text += f"Client #{i+1} Responses:\n"
+        for q in template.questions:
+            answer = survey.responses.get(str(q.id))
+            if answer:
+                all_responses_text += f"- {q.question_text}: {json.dumps(answer)}\n"
+        all_responses_text += "\n"
+
+    prompt = f"""
+    You are a business intelligence analyst for a {current_user.vertical or 'professional'}.
+    Analyze the following survey responses from multiple clients for the '{template.name}' survey.
+    Your goal is to provide a high-level summary and identify key trends.
+
+    RAW DATA:
+    {all_responses_text}
+
+    TASKS:
+    1.  **Summary:** Write a 2-3 sentence executive summary of the overall client profile and their primary needs based on this data.
+    2.  **Trends:** Identify the top 3-4 most significant, actionable trends. A trend is a highly common answer or a recurring theme.
+
+    Return your analysis as a single JSON object with two keys: "summary" and "trends".
+    Example: {{"summary": "...", "trends": ["...", "..."]}}
+    """
+
+    ai_summary = None
+    ai_trends = []
+    try:
+        ai_response_str = await llm_client.get_chat_completion(prompt, temperature=0.5, json_response=True)
+        if ai_response_str:
+            ai_data = json.loads(ai_response_str)
+            ai_summary = ai_data.get("summary")
+            ai_trends = ai_data.get("trends", [])
+    except Exception as e:
+        logger.error(f"Failed to generate AI insights for template {template_id}: {e}")
+        ai_summary = "Could not generate an AI summary for this survey."
+
+    # --- Part 3: Combine and Return ---
+    aggregated_answers = {str(q.id): {"text": q.question_text, "type": q.question_type, "answers": {}} for q in template.questions}
     for survey in completed_surveys:
         for q_id_str, response in survey.responses.items():
             if q_id_str in aggregated_answers:
-                if isinstance(response, list):
-                    for item in response:
-                        aggregated_answers[q_id_str]["answers"][item] = aggregated_answers[q_id_str]["answers"].get(item, 0) + 1
-                else:
-                    response_str = str(response)
-                    aggregated_answers[q_id_str]["answers"][response_str] = aggregated_answers[q_id_str]["answers"].get(response_str, 0) + 1
+                responses_list = response if isinstance(response, list) else [response]
+                for item in responses_list:
+                    item_str = str(item)
+                    aggregated_answers[q_id_str]["answers"][item_str] = aggregated_answers[q_id_str]["answers"].get(item_str, 0) + 1
 
     question_insights = []
     for q_id_str, data in aggregated_answers.items():
-        sorted_answers = sorted(
-            [AnswerInsight(answer=ans, count=ct) for ans, ct in data["answers"].items()],
-            key=lambda x: x.count, reverse=True
-        )
+        sorted_answers = sorted([AnswerInsight(answer=ans, count=ct) for ans, ct in data["answers"].items()], key=lambda x: x.count, reverse=True)
         total_responses_for_question = sum(item.count for item in sorted_answers)
         question_insights.append(QuestionInsights(
             question_id=UUID(q_id_str),
@@ -411,6 +454,8 @@ async def get_survey_insights(
         ))
 
     return SurveyInsights(
+        summary=ai_summary,
+        trends=ai_trends,
         total_sends=total_sends,
         total_completions=total_completions,
         completion_rate=completion_rate,

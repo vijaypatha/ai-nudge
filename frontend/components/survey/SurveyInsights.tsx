@@ -5,7 +5,7 @@
 
 import { useState, useEffect, FC } from 'react';
 import { useAppContext } from '@/context/AppContext';
-import { Loader2, TrendingUp, CheckCircle, Percent, MessageSquare } from 'lucide-react';
+import { Loader2, TrendingUp, CheckCircle, Percent, MessageSquare, Bot, ListChecks } from 'lucide-react';
 
 interface SurveyInsightsProps {
     templateId: string;
@@ -24,7 +24,10 @@ interface QuestionInsights {
     answers: AnswerInsight[];
 }
 
+// ✅ UPDATED: Added AI insight fields
 interface SurveyInsightsData {
+    summary: string | null;
+    trends: string[];
     total_sends: number;
     total_completions: number;
     completion_rate: number;
@@ -100,31 +103,57 @@ export const SurveyInsights: FC<SurveyInsightsProps> = ({ templateId }) => {
 
     return (
         <div className="space-y-8">
+            {/* --- TOP-LEVEL STATS --- */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <StatCard icon={<TrendingUp size={20} />} label="Total Sends" value={insights.total_sends} color="bg-blue-500/20 text-blue-400" />
                 <StatCard icon={<CheckCircle size={20} />} label="Total Completions" value={insights.total_completions} color="bg-green-500/20 text-green-400" />
                 <StatCard icon={<Percent size={20} />} label="Completion Rate" value={`${insights.completion_rate.toFixed(1)}%`} color="bg-cyan-500/20 text-cyan-400" />
             </div>
 
-            <div className="space-y-6">
-                {insights.question_insights.map((q, index) => (
-                    <div key={q.question_id} className="bg-brand-primary border border-white/10 rounded-xl p-5">
-                        <p className="font-semibold text-white mb-1">{index + 1}. {q.question_text}</p>
-                        <p className="text-xs text-gray-500 mb-4 uppercase flex items-center gap-2">
-                            <MessageSquare size={12} /> {q.total_responses} Responses
-                        </p>
-                        <div className="space-y-3">
-                            {q.answers.length > 0 ? (
-                                q.answers.slice(0, 5).map(ans => (
-                                    <AnswerBar key={ans.answer} answer={ans.answer} count={ans.count} total={q.total_responses} />
-                                ))
-                            ) : (
-                                <p className="text-sm text-gray-500 italic">No responses recorded for this question yet.</p>
-                            )}
-                            {q.answers.length > 5 && <p className="text-xs text-gray-500 text-center pt-2">+ {q.answers.length - 5} more answers</p>}
-                        </div>
+            {/* --- NEW: AI-GENERATED INSIGHTS --- */}
+            {insights.summary && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="bg-brand-primary border border-white/10 rounded-xl p-5">
+                        <h3 className="font-bold text-white mb-3 flex items-center gap-2"><Bot size={18} /> AI-Generated Summary</h3>
+                        <p className="text-sm text-gray-300 leading-relaxed">{insights.summary}</p>
                     </div>
-                ))}
+                    <div className="bg-brand-primary border border-white/10 rounded-xl p-5">
+                        <h3 className="font-bold text-white mb-3 flex items-center gap-2"><ListChecks size={18} /> Key Trends</h3>
+                        <ul className="space-y-2">
+                            {insights.trends.map((trend, index) => (
+                                <li key={index} className="flex items-start gap-3 text-sm">
+                                    <span className="text-cyan-400 mt-1">✓</span>
+                                    <span className="text-gray-300">{trend}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                </div>
+            )}
+
+            {/* --- DETAILED ANSWER BREAKDOWNS --- */}
+            <div>
+                <h2 className="text-xl font-bold text-white mb-4">Answer Breakdowns</h2>
+                <div className="space-y-6">
+                    {insights.question_insights.map((q, index) => (
+                        <div key={q.question_id} className="bg-brand-primary border border-white/10 rounded-xl p-5">
+                            <p className="font-semibold text-white mb-1">{index + 1}. {q.question_text}</p>
+                            <p className="text-xs text-gray-500 mb-4 uppercase flex items-center gap-2">
+                                <MessageSquare size={12} /> {q.total_responses} Responses
+                            </p>
+                            <div className="space-y-3">
+                                {q.answers.length > 0 ? (
+                                    q.answers.slice(0, 5).map(ans => (
+                                        <AnswerBar key={ans.answer} answer={ans.answer} count={ans.count} total={q.total_responses} />
+                                    ))
+                                ) : (
+                                    <p className="text-sm text-gray-500 italic">No responses recorded for this question yet.</p>
+                                )}
+                                {q.answers.length > 5 && <p className="text-xs text-gray-500 text-center pt-2">+ {q.answers.length - 5} more answers</p>}
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </div>
         </div>
     );
