@@ -151,9 +151,10 @@ async def generate_tags_from_responses(responses: Dict[str, Any], survey_config:
         logger.error(f"SURVEY PROCESSOR: Error generating tags: {e}")
         return []
 
-async def send_intake_survey(client_id: str, user_id: str, template_id: str, session: Session) -> bool:
+async def send_intake_survey(client_id: str, user_id: str, template_id: str, session: Session, custom_message: Optional[str] = None) -> bool:
     """
     Send an intake survey to a client via SMS using a SurveyTemplate.
+    Can now accept an optional custom message to override the default.
     """
     from data.models.survey import SurveyTemplate
 
@@ -162,11 +163,8 @@ async def send_intake_survey(client_id: str, user_id: str, template_id: str, ses
         user = session.get(User, user_id)
         template = session.get(SurveyTemplate, template_id)
 
-        if not client or not user:
-            logger.error(f"SURVEY PROCESSOR: Client {client_id} or user {user_id} not found")
-            return False
-        if not template or template.user_id != user.id:
-            logger.error(f"SURVEY PROCESSOR: Template {template_id} not found for user {user.id}")
+        if not client or not user or not template:
+            logger.error(f"Survey Processor: Client, user, or template not found.")
             return False
 
         survey = ClientIntakeSurvey(
@@ -176,7 +174,8 @@ async def send_intake_survey(client_id: str, user_id: str, template_id: str, ses
         session.commit()
         session.refresh(survey)
 
-        survey_message = generate_survey_message(client, user, template, survey.id)
+        # The custom message is passed to the message generator
+        survey_message = generate_survey_message(client, user, template, survey.id, custom_message)
 
         from integrations import twilio_outgoing
 
@@ -190,36 +189,32 @@ async def send_intake_survey(client_id: str, user_id: str, template_id: str, ses
             client.intake_survey_sent_at = datetime.now(timezone.utc).isoformat()
             session.add(client)
             session.commit()
-            logger.info(f"SURVEY PROCESSOR: Survey from template {template_id} sent to client {client_id}")
+            logger.info(f"Survey from template {template_id} sent to client {client_id}")
             return True
         else:
-            logger.error(f"SURVEY PROCESSOR: Failed to send survey to client {client_id}")
+            logger.error(f"Failed to send survey to client {client_id}")
             return False
 
     except Exception as e:
-        logger.error(f"SURVEY PROCESSOR: Error sending survey: {e}", exc_info=True)
+        logger.error(f"Error sending survey: {e}", exc_info=True)
         session.rollback()
         return False
 
-def generate_survey_message(client: Client, user: User, template: "SurveyTemplate", survey_id: str) -> str:
+def generate_survey_message(client: Client, user: User, template: "SurveyTemplate", survey_id: str, custom_message: Optional[str] = None) -> str:
     """
-    Generate the initial survey message from a template to send to the client.
+    Generate the survey message. Uses the custom message if provided, otherwise falls back to a default.
     """
-    client_name = client.full_name.split()[0] if client.full_name else "there"
-
     import os
     base_url = os.getenv("SURVEY_BASE_URL", "http://localhost:3000")
+    survey_link = f"{base_url}/survey/{survey_id}"
 
-    message = f"""Hi {client_name},
+    if custom_message and custom_message.strip():
+        # If a custom message exists, simply append the link
+        return f"{custom_message.strip()}\n{survey_link}"
 
-    To help personalize my service for you, please take a moment to fill out this short survey: {template.name}
-
-    {base_url}/survey/{survey_id}
-
-    Thank you,
-{user.full_name}"""
-
-    return message
+    # Otherwise, use the default template
+    client_name = client.full_name.split()[0] if client.full_name else "there"
+    return f"""Hi {client_name},
 
 import os
 

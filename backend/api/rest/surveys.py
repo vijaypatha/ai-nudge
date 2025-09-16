@@ -49,6 +49,8 @@ class SendSurveyPayload(BaseModel):
 class SendBulkSurveyPayload(BaseModel):
     template_id: UUID
     client_ids: List[UUID]
+    message: Optional[str] = None
+
 
 # --- API Router ---
 
@@ -247,7 +249,7 @@ async def send_bulk_survey(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user_from_token),
 ):
-    """Sends a survey from a template to a list of clients."""
+    """Sends a survey from a template to multiple clients, with an optional custom message."""
     if not payload.client_ids:
         raise HTTPException(status_code=400, detail="No client IDs provided.")
 
@@ -255,7 +257,10 @@ async def send_bulk_survey(
     failure_count = 0
 
     for client_id in payload.client_ids:
-        success = await send_intake_survey(str(client_id), str(current_user.id), str(payload.template_id), session)
+        # Pass the custom message from the payload into the send function
+        success = await send_intake_survey(
+            str(client_id), str(current_user.id), str(payload.template_id), session, custom_message=payload.message
+        )
         if success:
             success_count += 1
         else:
