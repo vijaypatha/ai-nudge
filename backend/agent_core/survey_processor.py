@@ -3,7 +3,7 @@
 
 import logging
 import json
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 from sqlmodel import Session, select
 
@@ -15,6 +15,12 @@ from data import crm as crm_service
 from agent_core.semantic_service import update_client_embedding
 
 logger = logging.getLogger(__name__)
+
+def _safe_get_first_name(full_name: str | None) -> str:
+    """Safely extracts the first name from a full name string."""
+    if not full_name or not full_name.strip():
+        return "The team"
+    return full_name.strip().split()[0]
 
 async def process_survey_responses(survey_id: str, session: Session) -> bool:
     """
@@ -43,11 +49,9 @@ async def process_survey_responses(survey_id: str, session: Session) -> bool:
         session.add(client)
         session.commit()
         
-        # --- THIS IS THE FIX ---
         # Refresh the client object to load the newly saved survey relationship
         # before passing it to the synthesis engine.
         session.refresh(client)
-        # --- END FIX ---
         
         # 2. Call the main, centralized AI synthesis engine from crm.py.
         logger.info(f"SURVEY PROCESSOR: Triggering main AI synthesis for client {client.id} after survey completion.")
@@ -71,20 +75,17 @@ def extract_preferences_from_responses(responses: Dict[str, Any], survey_config:
         if question.preference_key and question.id in responses:
             response_value = responses[question.id]
             
-            # Handle different question types
             if question.type.value == "number":
                 try:
                     preferences[question.preference_key] = int(response_value)
                 except (ValueError, TypeError):
                     preferences[question.preference_key] = response_value
             elif question.type.value == "multi_select":
-                # For multi-select, store as list
                 if isinstance(response_value, list):
                     preferences[question.preference_key] = response_value
                 else:
                     preferences[question.preference_key] = [response_value] if response_value else []
             else:
-                # For text, select, boolean, etc.
                 preferences[question.preference_key] = response_value
     
     return preferences
@@ -94,7 +95,6 @@ async def generate_tags_from_responses(responses: Dict[str, Any], survey_config:
     Generate relevant tags from survey responses using AI.
     """
     try:
-        # Create a summary of responses for AI analysis
         response_summary = []
         for question in survey_config.questions:
             if question.id in responses:
@@ -110,7 +110,6 @@ async def generate_tags_from_responses(responses: Dict[str, Any], survey_config:
         
         summary_text = "\n".join(response_summary)
         
-        # Generate tags using AI
         prompt = f"""
         You are analyzing survey responses for a {user_vertical} professional.
         
@@ -136,12 +135,11 @@ async def generate_tags_from_responses(responses: Dict[str, Any], survey_config:
             try:
                 tags = json.loads(response)
                 if isinstance(tags, list):
-                    # Clean and validate tags
                     cleaned_tags = []
                     for tag in tags:
                         if isinstance(tag, str) and tag.strip():
                             cleaned_tags.append(tag.strip().lower())
-                    return cleaned_tags[:5]  # Limit to 5 tags
+                    return cleaned_tags[:5]
             except json.JSONDecodeError:
                 logger.warning(f"SURVEY PROCESSOR: Failed to parse AI-generated tags: {response}")
         
@@ -174,7 +172,6 @@ async def send_intake_survey(client_id: str, user_id: str, template_id: str, ses
         session.commit()
         session.refresh(survey)
 
-        # The custom message is passed to the message generator
         survey_message = generate_survey_message(client, user, template, survey.id, custom_message)
 
         from integrations import twilio_outgoing
@@ -209,26 +206,29 @@ def generate_survey_message(client: Client, user: User, template: "SurveyTemplat
     survey_link = f"{base_url}/survey/{survey_id}"
 
     if custom_message and custom_message.strip():
-        # If a custom message exists, simply append the link
         return f"{custom_message.strip()}\n{survey_link}"
 
-    # Otherwise, use the default template
-    client_name = client.full_name.split()[0] if client.full_name else "there"
-    return f"""Hi {client_name},
+    client_first_name = _safe_get_first_name(client.full_name)
+    return f"""Hi {client_first_name},
 
-import os
+To help personalize my service for you, please take a moment to fill out this short survey: {template.name}
+
+{survey_link}
+
+Thank you,
+{_safe_get_first_name(user.full_name)}"""
 
 async def _send_agent_notification_email(user: User, client: Client, survey: ClientIntakeSurvey):
     """
     (Placeholder) Sends an email notification to the agent.
-    NOTE: This requires a real email sending service (e.g., SendGrid, SES) to be implemented.
     """
-    # Use environment variables for frontend URL
+    import os
     frontend_base_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
     client_url = f"{frontend_base_url}/clients/{client.id}"
     
-    subject = f"🚀 New Survey Completed: {client.full_name}"
-    body = f"""Hi {user.full_name.split()[0]},
+    agent_first_name = _safe_get_first_name(user.full_name)
+    subject = f"New Survey Completed: {client.full_name}"
+    body = f"""Hi {agent_first_name},
 
 Great news! Your client, {client.full_name}, just completed their intake survey.
 
@@ -240,14 +240,11 @@ View their updated profile here:
 This is a great time to review their new preferences and prepare for your next conversation.
 """
     
-    # --- TODO: Replace this with your actual email sending logic ---
     logger.info("--- AGENT NOTIFICATION (SIMULATED) ---")
     logger.info(f"To: {user.email}")
     logger.info(f"Subject: {subject}")
     logger.info(f"Body:\n{body}")
     logger.info("------------------------------------")
-    # Example: await email_service.send(to=user.email, subject=subject, body=body)
-
 
 async def handle_survey_response(client_id: str, survey_id: str, responses: Dict[str, Any], session: Session) -> bool:
     """
@@ -276,26 +273,20 @@ async def handle_survey_response(client_id: str, survey_id: str, responses: Dict
             if client and user:
                 from integrations import twilio_outgoing
                 
-                # 1. Send "Thank You" SMS to the client
+                agent_first_name = _safe_get_first_name(user.full_name)
+
                 if client.phone and user.twilio_phone_number:
-                    client_message = f"""Thank you for completing the survey! 🎉
-
-We're already analyzing your preferences to find the perfect opportunities for you.
-
-{user.full_name.split()[0]} will be in touch soon with your first set of personalized matches!"""
+                    client_message = f"""Thank you for completing the survey. Your responses have been received. {agent_first_name} will review your information and be in touch with you shortly."""
                     
-                    # --- THIS IS THE FIX ---
                     twilio_outgoing.send_sms(
                         to_number=client.phone,
                         from_number=user.twilio_phone_number,
                         body=client_message
                     )
                 
-                # 2. Send notification SMS to the agent
                 if user.phone_number and user.twilio_phone_number:
-                    agent_message = f"🚀 New Survey: {client.full_name} just completed their intake survey. Their profile is updated and ready for review in your app."
+                    agent_message = f"New Survey: {client.full_name} just completed their intake survey. Their profile is updated and ready for review in your app."
                     
-                    # --- THIS IS THE FIX ---
                     twilio_outgoing.send_sms(
                         to_number=user.phone_number,
                         from_number=user.twilio_phone_number,
