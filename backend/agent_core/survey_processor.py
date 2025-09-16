@@ -6,6 +6,8 @@ import json
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 from sqlmodel import Session, select
+from common.redis_client import get_redis_client
+
 
 from data.models.client import Client, ClientIntakeSurvey
 from data.models.user import User
@@ -249,34 +251,56 @@ This is a great time to review their new preferences and prepare for your next c
 
 async def handle_survey_response(client_id: str, survey_id: str, responses: Dict[str, Any], session: Session) -> bool:
     """
-    Handle survey responses submitted by the client.
+    Handle survey responses submitted by the client. This function orchestrates
+    saving responses, triggering AI processing, invalidating caches, and sending notifications.
     """
+    from common.redis_client import get_redis_client # Import for caching
+
     try:
+        # Fetch the specific survey instance that was submitted
         survey = session.exec(select(ClientIntakeSurvey).where(ClientIntakeSurvey.id == survey_id)).first()
         if not survey:
             logger.error(f"SURVEY PROCESSOR: Survey {survey_id} not found")
             return False
         
+        # Prevent processing a survey that has already been completed
         if survey.completed_at:
             logger.warning(f"SURVEY PROCESSOR: Attempted to process already completed survey {survey_id}")
             return True
 
+        # Save the raw responses to the database record
         survey.responses = responses
         session.add(survey)
         session.commit()
         
+        # Trigger the main AI processing engine
         success = await process_survey_responses(str(survey.id), session)
         
         if success:
+            # If AI processing was successful, invalidate the cache and send notifications
+            
+            # 1. Invalidate the Redis cache for this survey's template
+            try:
+                redis_client = get_redis_client()
+                cache_key = f"survey_insights:{survey.template_id}"
+                redis_client.delete(cache_key)
+                logger.info(f"SURVEY PROCESSOR: Cleared insights cache for template {survey.template_id}")
+            except Exception as e:
+                logger.error(f"SURVEY PROCESSOR: Failed to clear Redis cache - {e}")
+
+            # 2. Fetch the client and user to send notifications
             client = session.exec(select(Client).where(Client.id == survey.client_id)).first()
             user = session.exec(select(User).where(User.id == survey.user_id)).first()
             
             if client and user:
                 from integrations import twilio_outgoing
                 
+                # Use the safe helper function to prevent errors with malformed names
                 agent_first_name = _safe_get_first_name(user.full_name)
-
+                
+                # 3. Send "Thank You" SMS to the client
                 if client.phone and user.twilio_phone_number:
+                    # Use the generic, professional message
                     client_message = f"""Thank you for completing the survey. Your responses have been received. {agent_first_name} will review your information and be in touch with you shortly."""
                     
                     twilio_outgoing.send_sms(
@@ -285,6 +309,7 @@ async def handle_survey_response(client_id: str, survey_id: str, responses: Dict
                         body=client_message
                     )
                 
+                # 4. Send notification SMS to the agent (business owner)
                 if user.phone_number and user.twilio_phone_number:
                     agent_message = f"New Survey: {client.full_name} just completed their intake survey. Their profile is updated and ready for review in your app."
                     

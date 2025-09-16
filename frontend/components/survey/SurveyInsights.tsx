@@ -5,7 +5,7 @@
 
 import { useState, useEffect, FC } from 'react';
 import { useAppContext } from '@/context/AppContext';
-import { Loader2, TrendingUp, CheckCircle, Percent, MessageSquare, Bot, ListChecks } from 'lucide-react';
+import { Loader2, TrendingUp, CheckCircle, Percent, MessageSquare, Bot, ListChecks, Info } from 'lucide-react';
 
 interface SurveyInsightsProps {
     templateId: string;
@@ -24,7 +24,6 @@ interface QuestionInsights {
     answers: AnswerInsight[];
 }
 
-// ✅ UPDATED: Added AI insight fields
 interface SurveyInsightsData {
     summary: string | null;
     trends: string[];
@@ -93,25 +92,21 @@ export const SurveyInsights: FC<SurveyInsightsProps> = ({ templateId }) => {
         return <div className="flex justify-center items-center h-64"><Loader2 className="w-8 h-8 animate-spin text-cyan-400" /></div>;
     }
 
-    if (error) {
-        return <div className="p-8 text-center text-red-400">{error}</div>;
+    if (error || !insights) {
+        return <div className="p-8 text-center text-red-400">{error || "No data available for this survey yet."}</div>;
     }
 
-    if (!insights) {
-        return <div className="p-8 text-center text-gray-400">No data available for this survey yet.</div>;
-    }
+    const hasEnoughDataForAI = insights.total_completions >= 5;
 
     return (
         <div className="space-y-8">
-            {/* --- TOP-LEVEL STATS --- */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <StatCard icon={<TrendingUp size={20} />} label="Total Sends" value={insights.total_sends} color="bg-blue-500/20 text-blue-400" />
                 <StatCard icon={<CheckCircle size={20} />} label="Total Completions" value={insights.total_completions} color="bg-green-500/20 text-green-400" />
                 <StatCard icon={<Percent size={20} />} label="Completion Rate" value={`${insights.completion_rate.toFixed(1)}%`} color="bg-cyan-500/20 text-cyan-400" />
             </div>
 
-            {/* --- NEW: AI-GENERATED INSIGHTS --- */}
-            {insights.summary && (
+            {hasEnoughDataForAI ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div className="bg-brand-primary border border-white/10 rounded-xl p-5">
                         <h3 className="font-bold text-white mb-3 flex items-center gap-2"><Bot size={18} /> AI-Generated Summary</h3>
@@ -129,13 +124,18 @@ export const SurveyInsights: FC<SurveyInsightsProps> = ({ templateId }) => {
                         </ul>
                     </div>
                 </div>
+            ) : (
+                <div className="bg-brand-primary border-2 border-dashed border-white/10 rounded-xl p-8 text-center">
+                    <Info size={24} className="mx-auto text-cyan-400 mb-4" />
+                    <h3 className="font-bold text-white">AI Insights are being generated</h3>
+                    <p className="text-sm text-gray-400 mt-2">{insights.summary}</p>
+                </div>
             )}
 
-            {/* --- DETAILED ANSWER BREAKDOWNS --- */}
             <div>
                 <h2 className="text-xl font-bold text-white mb-4">Answer Breakdowns</h2>
                 <div className="space-y-6">
-                    {insights.question_insights.map((q, index) => (
+                    {insights.question_insights.length > 0 ? insights.question_insights.map((q, index) => (
                         <div key={q.question_id} className="bg-brand-primary border border-white/10 rounded-xl p-5">
                             <p className="font-semibold text-white mb-1">{index + 1}. {q.question_text}</p>
                             <p className="text-xs text-gray-500 mb-4 uppercase flex items-center gap-2">
@@ -152,7 +152,9 @@ export const SurveyInsights: FC<SurveyInsightsProps> = ({ templateId }) => {
                                 {q.answers.length > 5 && <p className="text-xs text-gray-500 text-center pt-2">+ {q.answers.length - 5} more answers</p>}
                             </div>
                         </div>
-                    ))}
+                    )) : (
+                        <p className="text-sm text-center text-gray-500 py-8">No responses have been submitted yet.</p>
+                    )}
                 </div>
             </div>
         </div>
