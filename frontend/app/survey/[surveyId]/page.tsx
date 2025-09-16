@@ -59,10 +59,8 @@ export default function PublicSurveyPage() {
                 const info = await infoResponse.json();
                 setSurveyInfo(info);
 
-                // --- THIS IS THE FIX ---
-                // We must pass the survey_id as a query parameter so the backend can
-                // fetch the correct user's custom survey configuration.
-                const configResponse = await fetch(`http://localhost:8001/api/surveys/public/config/${info.survey_type}?survey_id=${surveyId}`);
+                const configResponse = await fetch(`http://localhost:8001/api/surveys/public/config/${info.template_id}?survey_id=${surveyId}`);
+
                 if (!configResponse.ok) {
                     const errorData = await configResponse.json();
                     throw new Error(errorData.detail || 'Survey configuration not found');
