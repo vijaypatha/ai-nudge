@@ -51,6 +51,16 @@ class SendBulkSurveyPayload(BaseModel):
     client_ids: List[UUID]
     message: Optional[str] = None
 
+class QuestionAnswerPair(BaseModel):
+    question: str
+    answer: Any
+
+class SurveySubmission(BaseModel):
+    id: UUID
+    completed_at: str
+    survey_title: str
+    questions_and_answers: List[QuestionAnswerPair]
+
 
 # --- API Router ---
 
@@ -406,3 +416,47 @@ async def get_survey_insights(
         completion_rate=completion_rate,
         question_insights=question_insights
     )
+
+# --- NEW: Added endpoint to get all survey submissions for a client ---
+@router.get("/client/{client_id}", response_model=List[SurveySubmission])
+async def get_client_survey_submissions(
+    client_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """Gets all completed survey submissions for a given client."""
+
+    # Ensure the client belongs to the current user
+    client = session.get(Client, client_id)
+    if not client or client.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    # Fetch all completed surveys for this client, eagerly loading templates and questions
+    stmt = select(ClientIntakeSurvey).options(
+        selectinload(ClientIntakeSurvey.template).selectinload(SurveyTemplate.questions)
+    ).where(
+        ClientIntakeSurvey.client_id == client_id,
+        ClientIntakeSurvey.completed_at != None
+    ).order_by(ClientIntakeSurvey.completed_at.desc())
+
+    submissions = session.exec(stmt).all()
+
+    results = []
+    for survey in submissions:
+        if not survey.template: continue # Skip if template has been deleted
+
+        question_map = {str(q.id): q.question_text for q in survey.template.questions}
+        q_and_a_list = []
+
+        for q_id, answer in survey.responses.items():
+            question_text = question_map.get(q_id, f"Question ID: {q_id} (Deleted)")
+            q_and_a_list.append(QuestionAnswerPair(question=question_text, answer=answer))
+
+        results.append(SurveySubmission(
+            id=survey.id,
+            completed_at=survey.completed_at,
+            survey_title=survey.template.name,
+            questions_and_answers=q_and_a_list
+        ))
+
+    return results

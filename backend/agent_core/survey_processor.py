@@ -216,7 +216,8 @@ To help personalize my service for you, please take a moment to fill out this sh
 {survey_link}
 
 Thank you,
-{_safe_get_first_name(user.full_name)}"""
+{user.full_name}
+"""
 
 async def _send_agent_notification_email(user: User, client: Client, survey: ClientIntakeSurvey):
     """

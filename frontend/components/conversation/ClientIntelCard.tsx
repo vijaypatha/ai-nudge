@@ -1,6 +1,6 @@
 // frontend/components/conversation/ClientIntelCard.tsx
-// --- FINAL VERSION: Includes Manual Survey Override Dropdown ---
-
+// --- FINAL VERSION ---
+// This version correctly fetches and displays survey submissions.
 'use client';
 
 import { useState, useEffect, useMemo, FC } from 'react';
@@ -10,6 +10,7 @@ import { InfoCard } from '../ui/InfoCard';
 import { ClientIntakeSurvey } from '../survey/ClientIntakeSurvey';
 import { SurveyTemplate } from '@/app/(main)/surveys/page';
 
+// ✅ ADDED: Interfaces for the submission data
 interface QuestionAnswerPair {
     question: string;
     answer: any;
@@ -20,6 +21,40 @@ interface SurveySubmission {
     survey_title: string;
     questions_and_answers: QuestionAnswerPair[];
 }
+
+// ✅ ADDED: The self-contained Submission Modal component
+const SubmissionModal: FC<{ submission: SurveySubmission | null; onClose: () => void; }> = ({ submission, onClose }) => {
+    if (!submission) return null;
+
+    const formatAnswer = (answer: any) => {
+        if (answer === null || answer === undefined || answer === '') return <span className="italic text-gray-500">No answer provided</span>;
+        if (Array.isArray(answer)) return answer.join(', ');
+        if (typeof answer === 'boolean') return answer ? 'Yes' : 'No';
+        return String(answer);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+            <div className="w-full max-w-2xl bg-gray-800 border border-white/10 rounded-lg shadow-xl p-6" onClick={(e) => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-4">
+                    <div>
+                        <h3 className="text-lg font-bold text-white">{submission.survey_title}</h3>
+                        <p className="text-xs text-gray-400">Submitted on {new Date(submission.completed_at).toLocaleString()}</p>
+                    </div>
+                    <button onClick={onClose} className="p-1 rounded-full hover:bg-white/10 text-gray-400"><X size={20} /></button>
+                </div>
+                <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                    {submission.questions_and_answers.map((qa, index) => (
+                        <div key={index} className="text-sm">
+                            <p className="font-semibold text-gray-300 mb-1">{qa.question}</p>
+                            <p className="text-white pl-4 border-l-2 border-cyan-500/30">{formatAnswer(qa.answer)}</p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const PreferenceField: FC<{ label: string; value: any; isEditing?: boolean; onChange?: (value: any) => void; type?: 'text' | 'number' | 'textarea' }> = ({ label, value, isEditing, onChange, type = 'text' }) => {
     const formatValue = (val: any): string => {
@@ -53,39 +88,6 @@ const PreferenceField: FC<{ label: string; value: any; isEditing?: boolean; onCh
     );
 };
 
-const SubmissionModal: FC<{ submission: SurveySubmission | null; onClose: () => void; }> = ({ submission, onClose }) => {
-    if (!submission) return null;
-
-    const formatAnswer = (answer: any) => {
-        if (answer === null || answer === undefined || answer === '') return <span className="italic text-gray-500">No answer</span>;
-        if (Array.isArray(answer)) return answer.join(', ');
-        if (typeof answer === 'boolean') return answer ? 'Yes' : 'No';
-        return String(answer);
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
-            <div className="w-full max-w-2xl bg-gray-800 border border-white/10 rounded-lg shadow-xl p-6" onClick={(e) => e.stopPropagation()}>
-                <div className="flex justify-between items-center mb-4">
-                    <div>
-                        <h3 className="text-lg font-bold text-white">{submission.survey_title}</h3>
-                        <p className="text-xs text-gray-400">Submitted on {new Date(submission.completed_at).toLocaleString()}</p>
-                    </div>
-                    <button onClick={onClose} className="p-1 rounded-full hover:bg-white/10 text-gray-400"><X size={20} /></button>
-                </div>
-                <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
-                    {submission.questions_and_answers.map((qa, index) => (
-                        <div key={index} className="text-sm">
-                            <p className="font-semibold text-gray-300 mb-1">{qa.question}</p>
-                            <p className="text-white pl-4 border-l-2 border-cyan-500/30">{formatAnswer(qa.answer)}</p>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-};
-
 
 export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefined; onUpdate: (updatedClient: Client) => void; }) => {
     const { api, user } = useAppContext();
@@ -95,13 +97,13 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
     const [showSurvey, setShowSurvey] = useState(false);
     const [sendingSurvey, setSendingSurvey] = useState(false);
     const [showRawData, setShowRawData] = useState(false);
+    const [surveyTemplates, setSurveyTemplates] = useState<SurveyTemplate[]>([]);
+    const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+    
+    // ✅ ADDED: State for the modal
     const [showSubmissionModal, setShowSubmissionModal] = useState(false);
     const [submissionData, setSubmissionData] = useState<SurveySubmission | null>(null);
     const [isLoadingSubmission, setIsLoadingSubmission] = useState(false);
-    const [availableSurveys, setAvailableSurveys] = useState<{ name: string, type: string }[]>([]);
-    const [overrideSurveyType, setOverrideSurveyType] = useState<string>('');
-    const [surveyTemplates, setSurveyTemplates] = useState<SurveyTemplate[]>([]);
-    const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
 
     const intel = useMemo(() => {
         if (!client) return { summary: null, actions: [], canonicalPrefs: {}, rawPrefs: {} };
@@ -195,13 +197,14 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
         }
     };
 
+    // ✅ ADDED: Function to fetch submission data and show the modal
     const handleViewSubmission = async () => {
         if (!client) return;
         setIsLoadingSubmission(true);
         try {
             const submissions: SurveySubmission[] = await api.get(`/api/surveys/client/${client.id}`);
             if (submissions && submissions.length > 0) {
-                setSubmissionData(submissions[0]);
+                setSubmissionData(submissions[0]); // Show the most recent submission
                 setShowSubmissionModal(true);
             } else {
                 alert("No completed survey submissions found for this client.");
@@ -401,12 +404,12 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
                                             {sendingSurvey ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send
                                         </button>
                                         <select
-                                            value={selectedTemplateId}
-                                            onChange={(e) => setSelectedTemplateId(e.target.value)}
-                                            className="bg-white/5 border border-white/10 rounded-md px-2 text-xs text-white focus:border-cyan-500 focus:ring-0 disabled:opacity-50"
-                                            disabled={surveyTemplates.length === 0}
+                                           value={selectedTemplateId} 
+                                           onChange={(e) => setSelectedTemplateId(e.target.value)}
+                                           className="bg-white/5 border border-white/10 rounded-md px-2 text-xs text-white focus:border-cyan-500 focus:ring-0 disabled:opacity-50"
+                                           disabled={surveyTemplates.length === 0}
                                         >
-                                            {surveyTemplates.length > 0 ? (
+                                           {surveyTemplates.length > 0 ? (
                                                 surveyTemplates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)
                                             ) : (
                                                 <option>No surveys in library</option>
@@ -431,6 +434,7 @@ export const ClientIntelCard = ({ client, onUpdate }: { client: Client | undefin
                 )}
             </InfoCard>
 
+            {/* ✅ ADDED: Render the modal when state is true */}
             {showSubmissionModal && (
                 <SubmissionModal
                     submission={submissionData}
