@@ -2,6 +2,7 @@
 # FINAL CORRECTED VERSION
 
 import logging
+import json
 from typing import List, Dict, Any, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
