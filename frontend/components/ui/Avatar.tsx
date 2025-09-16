@@ -1,33 +1,51 @@
 // frontend/components/ui/Avatar.tsx
-// Purpose: A reusable component to display a user's initials as a styled avatar.
-// Consistent styling for avatars across the application.
+// --- FINAL VERSION ---
+// This version correctly generates colors based on the name and renders the avatar.
 
-import clsx from 'clsx';
+import React from 'react';
 
-/**
- * Props for the Avatar component.
- * @param name - The full name of the user to generate initials from.
- * @param className - Optional additional classes for styling.
- */
 interface AvatarProps {
   name: string;
+  imageUrl?: string | null;
   className?: string;
 }
 
-/**
- * Renders a circular avatar with the user's initials.
- * Handles name splitting and capitalization.
- */
-export const Avatar = ({ name, className }: AvatarProps) => {
-  // Generates initials from the user's name.
-  // Example: "John Doe" -> "JD"
-  const initials = name?.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() || '';
+// A simple function to generate a color based on the name's characters
+// This ensures the same user always gets the same color.
+const generateColor = (name: string) => {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    hash = hash & hash;
+  }
+  const color = `hsl(${hash % 360}, 50%, 70%)`;
+  const textColor = `hsl(${hash % 360}, 100%, 20%)`;
+  return { backgroundColor: color, color: textColor };
+};
+
+export const Avatar: React.FC<AvatarProps> = ({ name, imageUrl, className = '' }) => {
+  const getInitials = (name: string) => {
+    if (!name) return '?';
+    const names = name.trim().split(' ');
+    if (names.length > 1) {
+      return `${names[0][0]}${names[names.length - 1][0]}`.toUpperCase();
+    }
+    return names[0].substring(0, 2).toUpperCase();
+  };
+
+  if (imageUrl) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={imageUrl} alt={name} className={`rounded-full object-cover ${className}`} />;
+  }
+
+  const { backgroundColor, color } = generateColor(name);
+  const initials = getInitials(name);
 
   return (
-    <div className={clsx(
-      "flex items-center justify-center rounded-full bg-white/10 text-brand-text-muted font-bold select-none",
-      className
-    )}>
+    <div
+      className={`rounded-full flex items-center justify-center font-bold ${className}`}
+      style={{ backgroundColor, color }}
+    >
       {initials}
     </div>
   );
