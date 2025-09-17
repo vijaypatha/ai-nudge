@@ -203,7 +203,8 @@ export const SurveyBuilder = ({ template, onTemplateUpdate }: SurveyBuilderProps
                 </div>
 
                 {/* ✅ FIX: This div is now the scrollable container */}
-                <div className="flex-grow space-y-3 overflow-y-auto min-h-0 pr-2">
+                {/* ✅ FIXED: Scrollable container with visible scrollbar */}
+                <div className="flex-grow space-y-3 overflow-y-auto min-h-0 pr-2 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800 hover:scrollbar-thumb-gray-500">
                     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                         <SortableContext items={(template.questions || []).map(q => q.id)} strategy={verticalListSortingStrategy}>
                             {(template.questions || []).sort((a, b) => a.display_order - b.display_order).map((q, index) => (
@@ -216,6 +217,7 @@ export const SurveyBuilder = ({ template, onTemplateUpdate }: SurveyBuilderProps
                         </SortableContext>
                     </DndContext>
                 </div>
+
 
                 {/* Footer Button (remains fixed at the bottom) */}
                 <button onClick={handleAddQuestion} className="w-full mt-6 py-3 border-2 border-dashed border-white/20 rounded-lg text-sm font-semibold text-gray-400 hover:bg-white/5 hover:text-white transition-colors flex-shrink-0">
