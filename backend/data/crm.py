@@ -14,7 +14,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from agent_core import semantic_service
 from .models.feedback import NegativePreference
-from .models.portal import PortalComment, CommenterType
+from .models.portal import PortalComment, CommenterType, PortalLink
 
 from agent_core.deduplication.deduplication_engine import find_strong_duplicate
 
@@ -1512,3 +1512,12 @@ async def update_user_onboarding_status(user: User, session: Session) -> bool:
         return True
 
     return False
+
+# --- NEW: Function to get the permanent portal link for a client ---
+def get_portal_link_for_client(client_id: UUID, session: Session) -> Optional[PortalLink]:
+    """
+    Retrieves the single, permanent PortalLink for a given client.
+    """
+    statement = select(PortalLink).where(PortalLink.client_id == client_id)
+    link = session.exec(statement).first()
+    return link

@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
 
 // --- (Interfaces are unchanged) ---
-export interface User { id: string; full_name: string; email?: string; phone_number: string; twilio_phone_number?: string; user_type: 'realtor' | 'therapist' | 'loan_officer' | null; onboarding_complete: boolean; onboarding_state: { phone_verified: boolean; work_style_set: boolean; contacts_imported: boolean; first_nudges_seen: boolean;[key: string]: any; }; timezone?: string; mls_username?: string; mls_password?: string; license_number?: string; specialties?: string[]; faq_auto_responder_enabled: boolean; vertical?: string; tool_provider?: string; super_user?: boolean; }
+export interface User { id: string; full_name: string; email?: string; phone_number: string; twilio_phone_number?: string; user_type: 'realtor' | 'therapist' | 'loan_officer' | null; onboarding_complete: boolean; onboarding_state: { phone_verified: boolean; work_style_set: boolean; contacts_imported: boolean; first_nudges_seen: boolean;[key: string]: any; }; timezone?: string; mls_username?: string; mls_password?: string; license_number?: string; specialties?: string[]; faq_auto_responder_enabled: boolean; vertical?: string; tool_provider?: string; super_user?: boolean; client_roles?: string[]; }
 export interface Client { id: string; user_id: string; full_name: string; email: string | null; phone: string | null; ai_tags: string[]; user_tags: string[]; preferences: { notes?: string[];[key: string]: any; }; last_interaction: string | null; notes?: string; timezone?: string; intake_survey_completed?: boolean; intake_survey_sent_at?: string; }
 export interface Property { id: string; address: string; price: number; status: string; image_urls: string[]; }
 export interface MatchedClient { client_id: string; client_name: string; match_score: number; match_reasons: string[]; }
@@ -28,6 +28,7 @@ interface AppContextType {
   conversations: Conversation[];
   nudges: CampaignBriefing[];
   socket: WebSocket | null;
+  clientRoles: string[];
   logout: () => void;
   api: { get: (endpoint: string) => Promise<any>; post: (endpoint: string, body: any) => Promise<any>; put: (endpoint: string, body: any) => Promise<any>; del: (endpoint: string) => Promise<any>; };
   login: (token: string) => Promise<User | null>;
@@ -39,6 +40,7 @@ interface AppContextType {
   refreshUser: () => Promise<void>;
   forceRefreshAllData: () => Promise<void>;
   refreshNudges: () => Promise<void>;
+  refreshClientRoles: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -52,6 +54,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [nudges, setNudges] = useState<CampaignBriefing[]>([]);
   const [socket, setSocket] = useState<WebSocket | null>(null);
+  const [clientRoles, setClientRoles] = useState<string[]>([]);
   const tokenRef = useRef<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const router = useRouter();
@@ -65,6 +68,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setProperties([]);
     setConversations([]);
     setNudges([]);
+    setClientRoles([]);
     if (socketRef.current) {
       socketRef.current.close();
       socketRef.current = null;
@@ -120,8 +124,9 @@ const api = useMemo(() => {
 
   // --- (Data fetching functions remain unchanged) ---
   const refreshNudges = useCallback(async () => { if (!tokenRef.current) return; try { console.log("Refreshing AI Nudges..."); const nudgesData = await api.get('/api/campaigns'); setNudges(nudgesData); } catch (error) { console.error("Failed to refresh nudges:", error); } }, [api]);
+  const refreshClientRoles = useCallback(async () => { if (!tokenRef.current) return; try { const rolesData = await api.get('/api/settings/roles'); setClientRoles(rolesData); } catch (error) { console.error("Failed to refresh client roles:", error); } }, [api]);
   const refreshConversations = useCallback(async () => { if (!tokenRef.current) return; try { const conversationsData = await api.get('/api/conversations/'); const sortedConversations = conversationsData.sort((a: any, b: any) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()); setConversations(prevConversations => JSON.stringify(prevConversations) === JSON.stringify(sortedConversations) ? prevConversations : sortedConversations); } catch (error) { console.error("Failed to refresh conversations:", error); } }, [api]);
-  const fetchDashboardData = useCallback(async () => { if (!tokenRef.current) return; try { const results = await Promise.allSettled([api.get('/api/clients'), api.get('/api/properties'), api.get('/api/conversations/'), api.get('/api/campaigns')]); if (results[0].status === 'fulfilled') setClients(results[0].value); if (results[1].status === 'fulfilled') setProperties(results[1].value); if (results[2].status === 'fulfilled') { const sortedConversations = results[2].value.sort((a: any, b: any) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()); setConversations(sortedConversations); } if (results[3].status === 'fulfilled') setNudges(results[3].value); results.forEach((result, index) => { if (result.status === 'rejected') console.error(`Failed to fetch endpoint ${index}:`, result.reason); }); } catch (error) { console.error("A critical error occurred while fetching dashboard data:", error); } }, [api]);
+  const fetchDashboardData = useCallback(async () => { if (!tokenRef.current) return; try { const results = await Promise.allSettled([api.get('/api/clients'), api.get('/api/properties'), api.get('/api/conversations/'), api.get('/api/campaigns'), api.get('/api/settings/roles')]); if (results[0].status === 'fulfilled') setClients(results[0].value); if (results[1].status === 'fulfilled') setProperties(results[1].value); if (results[2].status === 'fulfilled') { const sortedConversations = results[2].value.sort((a: any, b: any) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()); setConversations(sortedConversations); } if (results[3].status === 'fulfilled') setNudges(results[3].value); if (results[4].status === 'fulfilled') setClientRoles(results[4].value); results.forEach((result, index) => { if (result.status === 'rejected') console.error(`Failed to fetch endpoint ${index}:`, result.reason); }); } catch (error) { console.error("A critical error occurred while fetching dashboard data:", error); } }, [api]);
   const forceRefreshAllData = useCallback(async () => { if (!tokenRef.current) return; console.log("Force refreshing all data..."); await fetchDashboardData(); }, [fetchDashboardData]);
 
   // --- FIX #1: Create refs to hold the latest versions of the refresh functions ---
@@ -226,7 +231,7 @@ const api = useMemo(() => {
   useEffect(() => { if (isAuthenticated && user) { fetchDashboardData(); } }, [isAuthenticated, user, fetchDashboardData]);
   const updateClientInList = (updatedClient: Client) => { setClients(prevClients => prevClients.map(c => c.id === updatedClient.id ? updatedClient : c)); };
   const refetchScheduledMessagesForClient = useCallback(async (clientId: string): Promise<ScheduledMessage[]> => { try { return await api.get(`/api/scheduled-messages/?client_id=${clientId}`); } catch (error) { console.error(`Failed to fetch scheduled messages for ${clientId}:`, error); return []; } }, [api]);
-  const value = useMemo(() => ({ loading, isAuthenticated, user, token: tokenRef.current, clients, properties, conversations, nudges, socket, logout, api, login, loginAndRedirect, fetchDashboardData, refreshConversations, updateClientInList, refetchScheduledMessagesForClient, refreshUser, forceRefreshAllData, refreshNudges }), [loading, isAuthenticated, user, clients, properties, conversations, nudges, socket, logout, api, login, loginAndRedirect, fetchDashboardData, refreshConversations, updateClientInList, refetchScheduledMessagesForClient, refreshUser, forceRefreshAllData, refreshNudges]);
+  const value = useMemo(() => ({ loading, isAuthenticated, user, token: tokenRef.current, clients, properties, conversations, nudges, socket, clientRoles, logout, api, login, loginAndRedirect, fetchDashboardData, refreshConversations, updateClientInList, refetchScheduledMessagesForClient, refreshUser, forceRefreshAllData, refreshNudges, refreshClientRoles }), [loading, isAuthenticated, user, clients, properties, conversations, nudges, socket, clientRoles, logout, api, login, loginAndRedirect, fetchDashboardData, refreshConversations, updateClientInList, refetchScheduledMessagesForClient, refreshUser, forceRefreshAllData, refreshNudges, refreshClientRoles]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };

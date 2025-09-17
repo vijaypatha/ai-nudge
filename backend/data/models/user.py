@@ -62,6 +62,8 @@ class User(SQLModel, table=True):
     intake_survey_delay_hours: int = Field(default=24)
     twilio_phone_number: Optional[str] = Field(default=None, index=True)
     timezone: Optional[str] = Field(default=None, index=True)
+    # --- NEW: Field to store custom client roles ---
+    client_roles: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
 
     # --- Relationships ---
     campaigns: List["CampaignBriefing"] = Relationship(back_populates="user")
@@ -98,3 +100,4 @@ class UserUpdate(SQLModel):
     faq_auto_responder_enabled: Optional[bool] = None
     twilio_phone_number: Optional[str] = None
     timezone: Optional[str] = None
+    client_roles: Optional[List[str]] = None

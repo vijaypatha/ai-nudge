@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from .user import User
     from .client import Client
     from .resource import Resource
+    from .campaign import CampaignBriefing
 
 class CommenterType(str, Enum):
     AGENT = "agent"
@@ -42,7 +43,7 @@ class PortalLink(SQLModel, table=True):
     id: str = Field(primary_key=True)  # A short, random, URL-safe ID
     token: str = Field(sa_column=Column(Text))  # The full, long JWT
     
-    # Foreign keys for tracking and potential future features
+    # --- MODIFICATION: The campaign_id now links to the main "hub" campaign ---
     campaign_id: UUID = Field(foreign_key="campaignbriefing.id", index=True)
     client_id: UUID = Field(foreign_key="client.id", index=True)
     user_id: UUID = Field(foreign_key="user.id", index=True)
@@ -52,3 +53,8 @@ class PortalLink(SQLModel, table=True):
     expires_at: datetime
     
     is_active: bool = Field(default=True, index=True)
+
+    # Relationships
+    campaign: "CampaignBriefing" = Relationship()
+    client: "Client" = Relationship()
+    user: "User" = Relationship()

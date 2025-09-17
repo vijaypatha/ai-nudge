@@ -21,6 +21,8 @@ from data.models.client import Client, ClientCreate, ClientUpdate, ClientTagUpda
 from data.models.message import ScheduledMessage
 from data import crm as crm_service
 from data.database import engine, get_session
+# --- MODIFIED: Import nudge_engine for hub creation ---
+from agent_core.brain import nudge_engine
 from agent_core import audience_builder
 from api.websocket_manager import manager as websocket_manager
 from celery_tasks import initial_data_fetch_for_user_task, backfill_nudges_for_client_task
@@ -32,6 +34,16 @@ router = APIRouter(prefix="/clients", tags=["Clients"])
 settings = get_settings()
 redis_client = redis.from_url(settings.REDIS_URL)
 USER_NOTIFICATION_CHANNEL = "user-notifications" # Must match the channel in main.py
+
+# --- NEW: Payload for adding a client and creating a hub ---
+class AddClientPayload(ClientCreate):
+    client_role: Optional[str] = "buyer"
+    create_hub: bool = True
+
+# --- NEW: Response for adding a client, includes the hub URL ---
+class AddClientResponse(BaseModel):
+    client: Client
+    hub_url: Optional[str] = None
 
 class ClientSearchQuery(BaseModel):
     natural_language_query: Optional[str] = None
@@ -70,30 +82,37 @@ class ClientNudgeResponse(BaseModel):
     matched_audience: List[MatchedClient]
 
 
-@router.post("/manual", response_model=Client)
+@router.post("/manual", response_model=AddClientResponse)
 async def add_manual_client(
-    client_data: ClientCreate,
+    payload: AddClientPayload,
     current_user: User = Depends(get_current_user_from_token),
-    session: Session = Depends(get_session) 
+    session: Session = Depends(get_session)
 ):
     """
-    Creates a single new client, triggers a backfill, and checks for onboarding completion.
+    Creates a new client, optionally creates their permanent "Living Hub",
+    triggers a backfill, and checks for onboarding completion.
     """
-    from data.crm import update_user_onboarding_status # Import the new function
+    from data.crm import update_user_onboarding_status
 
+    client_data = ClientCreate.model_validate(payload)
     client, is_new = await crm_service.create_or_update_client(
-        user_id=current_user.id, 
+        user_id=current_user.id,
         client_data=client_data
     )
 
+    hub_url = None
     if is_new:
+        if payload.create_hub:
+            # Orchestrate the creation of the permanent client hub
+            hub_url = await nudge_engine.setup_client_portal(client, current_user, session)
+
         logging.info(f"API: New client {client.id} created, dispatching backfill task.")
         backfill_nudges_for_client_task.delay(client_id=str(client.id))
 
     # After adding the contact, check if this completes the user's onboarding
     await update_user_onboarding_status(user=current_user, session=session)
 
-    return client
+    return AddClientResponse(client=client, hub_url=hub_url)
 
 @router.post("/search", response_model=List[Client])
 async def search_clients(query: ClientSearchQuery, current_user: User = Depends(get_current_user_from_token)):

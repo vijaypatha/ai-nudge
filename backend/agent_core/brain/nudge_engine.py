@@ -20,10 +20,60 @@ from .verticals import VERTICAL_CONFIGS
 from .nudge_engine_utils import calculate_cosine_similarity
 from common.config import get_settings
 from data.models.portal import PortalLink
+# --- NEW: Imports for Hub creation ---
+from backend.common.jwt_utils import create_portal_token
+from nanoid import generate as generate_nanoid
 
 MATCH_THRESHOLD = 1  # Lowered for better matching with sample data
 FEEDBACK_PENALTY_THRESHOLD = 0.85
 FEEDBACK_PENALTY_FACTOR = 0.1
+
+async def setup_client_portal(client: Client, user: User, session: Session) -> str:
+    """
+    Orchestrates the creation of a new client's permanent "Living Hub".
+    This creates the anchor CampaignBriefing and the single, permanent PortalLink.
+    Returns the permanent hub URL.
+    """
+    settings = get_settings()
+    # 1. Check if a hub already exists to prevent duplicates
+    existing_link = crm_service.get_portal_link_for_client(client.id, session)
+    if existing_link:
+        logging.warning(f"NUDGE_ENGINE: Client {client.id} already has a portal link. Skipping creation.")
+        return f"{settings.FRONTEND_BASE_URL}/portal/{existing_link.id}"
+
+    # 2. Create the main "Hub" CampaignBriefing to act as an anchor
+    hub_campaign = CampaignBriefing(
+        user_id=user.id,
+        client_id=client.id,
+        campaign_type="client_hub",
+        headline=f"Client Hub for {client.full_name}",
+        status=CampaignStatus.ACTIVE.value,
+        source="hub_orchestrator"
+    )
+    session.add(hub_campaign)
+    session.flush()  # Assigns an ID to hub_campaign
+
+    # 3. Generate the permanent, secure PortalLink
+    long_token = create_portal_token(client.id, user.id)
+    short_id = generate_nanoid(size=12)
+
+    portal_link = PortalLink(
+        id=short_id,
+        token=long_token,
+        campaign_id=hub_campaign.id, # Link to the anchor campaign
+        client_id=client.id,
+        user_id=user.id,
+        created_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=730), # Long-lived link
+        is_active=True
+    )
+    session.add(portal_link)
+    session.commit()
+
+    portal_url = f"{settings.FRONTEND_BASE_URL}/portal/{short_id}"
+    logging.info(f"NUDGE_ENGINE: Successfully created permanent Client Hub for client {client.id} at {portal_url}")
+
+    return portal_url
 
 async def score_event_against_client(client: Client, event: MarketEvent, resource: Resource, vertical_config: dict, session: Session, resource_embedding: Optional[List[float]] = None) -> Tuple[int, List[str]]:
     """
@@ -92,14 +142,10 @@ async def _create_campaign_from_event(event: MarketEvent, user: User, resource: 
 async def find_and_update_matches_for_all_clients(user: User, new_resources: List[Resource], session: Session):
     """
     MODIFIED: Finds matches and creates a NEW, versioned campaign briefing (curation)
-    for each client with new matches. It no longer overwrites old ones.
+    for each client. It NO LONGER creates a new portal link, instead referencing the
+    permanent one in the notification draft.
     """
     from agent_core.agents import conversation as conversation_agent
-    from backend.common.jwt_utils import create_portal_token
-    from common.config import get_settings
-    from nanoid import generate as generate_nanoid
-    from data.models.campaign import CampaignBriefing, CampaignStatus
-    from data.models.portal import PortalLink
 
     vertical_config = VERTICAL_CONFIGS.get(user.vertical, {})
     if not vertical_config: return
@@ -111,17 +157,12 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
 
     # --- BATCH EMBEDDING GENERATION ---
     # 1. Collect all resource texts that need an embedding.
-    resources_to_embed = [
-        res for res in new_resources 
-        if res.resource_type == "property" and res.attributes.get('PublicRemarks')
-    ]
+    resources_to_embed = [res for res in new_resources if res.resource_type == "property" and res.attributes.get('PublicRemarks')]
     texts_to_embed = [res.attributes['PublicRemarks'] for res in resources_to_embed]
 
     # 2. Generate embeddings in a single batch call.
-    embeddings = []
-    if texts_to_embed:
-        embeddings = await llm_client.generate_embeddings_batched(texts_to_embed)
-    
+    embeddings = await llm_client.generate_embeddings_batched(texts_to_embed) if texts_to_embed else []
+
     # 3. Create a map of resource ID -> embedding for easy lookup.
     resource_embedding_map = {res.id: emb for res, emb in zip(resources_to_embed, embeddings)}
 
@@ -136,6 +177,13 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
         
         if not potential_new_matches:
             continue
+
+        # --- MODIFICATION: Fetch the permanent hub URL for this client ---
+        portal_link = crm_service.get_portal_link_for_client(client.id, session)
+        if not portal_link:
+            logging.warning(f"NUDGE_ENGINE (PROACTIVE): Client {client.id} has no portal link. Cannot create curation nudge.")
+            continue
+        portal_url = f"{get_settings().FRONTEND_BASE_URL}/portal/{portal_link.id}"
 
         potential_new_matches.sort(key=lambda x: x['score'], reverse=True)
         curated_matches_to_process = [m['resource'] for m in potential_new_matches[:10]]
@@ -161,74 +209,58 @@ async def find_and_update_matches_for_all_clients(user: User, new_resources: Lis
                     "reasons": match_info['reasons'] if match_info else [],
                     "agent_commentary": commentary
                 })
-            nudge_key_intel = {
-                "summary_draft": batch_results["summary_draft"],
-                "curation_rationale": batch_results.get("curation_rationale"),
-                "matched_resource_ids": final_curated_matches
-            }
             summary_draft = batch_results.get(
-                "summary_draft", 
+                "summary_draft",
                 f"Hi {client.full_name.split()[0]}, I found some new properties for you to review."
             )
-            portal_url = f"{get_settings().FRONTEND_BASE_URL}/portal/{generate_nanoid(size=12)}"  # Temp for now
-            original_draft = f"{summary_draft}\n\nView Your Private Portal:\n{portal_url}"
-            
-            # --- MODIFICATION: Create the CampaignBriefing object with all required fields ---
+
+            # --- MODIFICATION: Use the permanent URL in the draft ---
+            original_draft = f"{summary_draft}\n\nYou can see them in your private hub:\n{portal_url}"
+
             nudge = CampaignBriefing(
                 user_id=user.id,
                 client_id=client.id,
                 campaign_type="consolidated_initial_matches",
                 headline=f"Found {total_matches_found} new matches for {client.full_name}",
                 original_draft=original_draft,
-                key_intel=nudge_key_intel,
+                key_intel={
+                    "summary_draft": summary_draft,
+                    "curation_rationale": batch_results.get("curation_rationale"),
+                    "matched_resource_ids": final_curated_matches
+                },
                 status=CampaignStatus.DRAFT.value,
                 source="consolidated_engine_v3"
             )
 
-            # 3. Create the PortalLink, linking it to the new nudge's ID.
             session.add(nudge)
-            session.flush() # Flush to assign an ID to the new nudge
-            long_token = create_portal_token(client.id, user.id)
-            short_id = generate_nanoid(size=12)
-            portal_link = PortalLink(
-                id=short_id,
-                token=long_token,
-                campaign_id=nudge.id,
-                client_id=client.id,
-                user_id=user.id,
-                created_at=datetime.now(timezone.utc),
-                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
-                is_active=True
-            )
-            session.add(portal_link)
-            # 4. Update the remaining nudge fields with the new draft and info.
-            # The URL now has the real short_id, so we update the draft.
-            nudge.original_draft = (
-                f"{summary_draft}\n\nView Your Private Portal:\n{get_settings().FRONTEND_BASE_URL}/portal/{short_id}"
-            )
-
             session.commit()
-            logging.info(f"NUDGE_ENGINE (PROACTIVE): Successfully CREATED versioned nudge {nudge.id} and created short link {short_id}.")
+            logging.info(f"NUDGE_ENGINE (PROACTIVE): Successfully CREATED versioned curation {nudge.id} for client {client.id}.")
 
         except Exception as e:
             logging.error(f"NUDGE_ENGINE: Main processing loop failed for client {client.id}. Error: {e}", exc_info=True)
+            session.rollback()
 
 
 async def _create_or_update_consolidated_nudge(client: Client, user: User, session: Session, source: str):
     """
     The core logic for the "Living" Consolidated Nudge, used by the REACTIVE pipeline.
     MODIFIED: Re-scores all active resources and creates a NEW versioned nudge
-    with any new top matches found based on the client's updated profile.
+    Does NOT create a new portal link.
     """
     logging.info(f"NUDGE_ENGINE (REACTIVE): Updating consolidated nudge for client {client.id} from source '{source}'.")
     
     try:
         # This is now a self-contained, version-creating function.
         # It no longer finds-and-updates an existing record.
-        from nanoid import generate as generate_nanoid
-        from backend.common.jwt_utils import create_portal_token
         vertical_config = VERTICAL_CONFIGS.get(user.vertical, {})
         if not vertical_config: return
+
+        portal_link = crm_service.get_portal_link_for_client(client.id, session)
+        if not portal_link:
+            logging.error(f"NUDGE_ENGINE (REACTIVE): Cannot run reactive update for client {client.id}, no portal link found.")
+            return
+
+        portal_url = f"{get_settings().FRONTEND_BASE_URL}/portal/{portal_link.id}"
 
         active_resources = session.exec(
             select(Resource).where(Resource.user_id == user.id, Resource.status == ResourceStatus.ACTIVE)
@@ -241,57 +273,48 @@ async def _create_or_update_consolidated_nudge(client: Client, user: User, sessi
         logging.info(f"NUDGE_ENGINE (REACTIVE): Scoring {len(active_resources)} active resources for client {client.id}.")
         
         # --- BATCH EMBEDDING GENERATION ---
-        resources_to_embed = [
-            res for res in active_resources 
-            if res.resource_type == "property" and res.attributes.get('PublicRemarks')
-        ]
+        resources_to_embed = [res for res in active_resources if res.resource_type == "property" and res.attributes.get('PublicRemarks')]
         texts_to_embed = [res.attributes['PublicRemarks'] for res in resources_to_embed]
         
-        embeddings = []
-        if texts_to_embed:
-            embeddings = await llm_client.generate_embeddings_batched(texts_to_embed)
-
+        embeddings = await llm_client.generate_embeddings_batched(texts_to_embed) if texts_to_embed else []
         resource_embedding_map = {res.id: emb for res, emb in zip(resources_to_embed, embeddings)}
 
         matches = []
         for resource in active_resources:
-            # --- THIS IS THE FIX ---
-            # Create a synthetic MarketEvent for the scorer, which expects it.
             event = MarketEvent(event_type="new_listing", payload=resource.attributes, entity_id=resource.entity_id)
             embedding = resource_embedding_map.get(resource.id)
             score, reasons = await score_event_against_client(client, event, resource, vertical_config, session, resource_embedding=embedding)
             
             if score >= MATCH_THRESHOLD:
-                matches.append({"resource_id": str(resource.id), "score": score, "reasons": reasons})
+                matches.append({"resource_id": str(resource.id), "score": score, "reasons": reasons, "resource_obj": resource})
         
         if not matches:
             logging.warning(f"NUDGE_ENGINE (REACTIVE): No matches found for client {client.id} after scoring.")
             return
 
-        top_matches = sorted(matches, key=lambda x: x['score'], reverse=True)[:10]
-        top_match_resources = crm_service.get_clients_by_ids(
-            [UUID(m['resource_id']) for m in top_matches], user.id
-        )
+        top_matches_data = sorted(matches, key=lambda x: x['score'], reverse=True)[:10]
+        top_match_resources = [m['resource_obj'] for m in top_matches_data]
         
         # Generate AI commentary for the new reactive matches
         batch_results = await conversation_agent.draft_consolidated_nudge_with_commentary(
             realtor=user, client=client, matches_to_process=top_match_resources,
-            total_matches_found=len(top_matches), session=session
+            total_matches_found=len(top_matches_data), session=session
         )
 
-        for i, match in enumerate(top_matches):
-            match['agent_commentary'] = (
-                batch_results['commentaries'][i] 
-                if batch_results and batch_results.get('commentaries') 
-                else "A new match based on your recent feedback."
-            )
+        final_curated_matches = []
+        for i, match in enumerate(top_matches_data):
+            commentary = (batch_results['commentaries'][i] if batch_results and batch_results.get('commentaries') else "A new match based on your recent feedback.")
+            final_curated_matches.append({
+                "resource_id": match["resource_id"],
+                "score": match["score"],
+                "reasons": match["reasons"],
+                "agent_commentary": commentary
+            })
 
         summary_draft = batch_results.get(
-            "summary_draft", 
+            "summary_draft",
             f"Based on your feedback, here are some new properties I found."
         )
-        short_id = generate_nanoid(size=12)
-        portal_url = f"{get_settings().FRONTEND_BASE_URL}/portal/{short_id}"
         original_draft = f"{summary_draft}\n\nView Your Updated Portal:\n{portal_url}"
         
         nudge = CampaignBriefing(
@@ -301,28 +324,15 @@ async def _create_or_update_consolidated_nudge(client: Client, user: User, sessi
             headline=f"New Matches Found for {client.full_name}",
             original_draft=original_draft,
             key_intel={
-                "matched_resource_ids": top_matches, 
+                "matched_resource_ids": final_curated_matches,
                 "curation_rationale": "These new matches were selected based on your recent feedback."
             },
             status=CampaignStatus.DRAFT.value,
             source=source
         )
         session.add(nudge)
-        session.flush()
-
-        portal_link = PortalLink(
-            id=short_id,
-            token=create_portal_token(client.id, user.id),
-            campaign_id=nudge.id,
-            client_id=client.id,
-            user_id=user.id,
-            created_at=datetime.now(timezone.utc),
-            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
-            is_active=True
-        )
-        session.add(portal_link)
         session.commit()
-        logging.info(f"NUDGE_ENGINE (REACTIVE): Successfully CREATED new versioned nudge {nudge.id} for client {client.id} with {len(top_matches)} matches.")
+        logging.info(f"NUDGE_ENGINE (REACTIVE): Successfully CREATED new versioned nudge {nudge.id} for client {client.id} with {len(top_matches_data)} matches.")
 
     except Exception as e:
         logging.error(f"NUDGE_ENGINE (REACTIVE): Failed to create or update consolidated nudge for client {client.id}. Error: {e}", exc_info=True)
