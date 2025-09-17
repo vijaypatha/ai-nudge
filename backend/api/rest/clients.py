@@ -20,7 +20,7 @@ from api.security import get_current_user_from_token
 from data.models.client import Client, ClientCreate, ClientUpdate, ClientTagUpdate
 from data.models.message import ScheduledMessage
 from data import crm as crm_service
-from data.database import engine
+from data.database import engine, get_session
 from agent_core import audience_builder
 from api.websocket_manager import manager as websocket_manager
 from celery_tasks import initial_data_fetch_for_user_task, backfill_nudges_for_client_task
@@ -73,37 +73,26 @@ class ClientNudgeResponse(BaseModel):
 @router.post("/manual", response_model=Client)
 async def add_manual_client(
     client_data: ClientCreate,
-    current_user: User = Depends(get_current_user_from_token)
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session) 
 ):
     """
-    Creates a single new client, triggers the backfill pipeline, and updates onboarding state.
+    Creates a single new client, triggers a backfill, and checks for onboarding completion.
     """
+    from data.crm import update_user_onboarding_status # Import the new function
+
     client, is_new = await crm_service.create_or_update_client(
         user_id=current_user.id, 
         client_data=client_data
     )
-    
-    # --- ADDED: Dispatch backfill task for new clients ---
+
     if is_new:
         logging.info(f"API: New client {client.id} created, dispatching backfill task.")
         backfill_nudges_for_client_task.delay(client_id=str(client.id))
-    
-    # This logic appears to be for the *user's* first contact, not a new client in general.
-    # It correctly triggers the *user's* initial data fetch.
-    try:
-        if not current_user.onboarding_state.get('contacts_imported'):
-            logging.info(f"Updating onboarding state for user {current_user.id} after manual contact add.")
-            updated_state = current_user.onboarding_state.copy()
-            updated_state['contacts_imported'] = True
-            
-            update_data = UserUpdate(onboarding_state=updated_state)
-            crm_service.update_user(user_id=current_user.id, update_data=update_data)
-            logging.info(f"Successfully updated onboarding state for user {current_user.id}.")
-            logging.info(f"Triggering initial data fetch for user {current_user.id}.")
-            initial_data_fetch_for_user_task.delay(user_id=str(current_user.id))
-    except Exception as e:
-        logging.error(f"Could not update onboarding_state for user {current_user.id} after manual add: {e}")
-    
+
+    # After adding the contact, check if this completes the user's onboarding
+    await update_user_onboarding_status(user=current_user, session=session)
+
     return client
 
 @router.post("/search", response_model=List[Client])

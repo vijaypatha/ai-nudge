@@ -1,4 +1,6 @@
 # AI Nudge - Project Specification
+**Last Updated**: 09/16/2025
+
 
 ## **Product Vision & Architecture**
 
@@ -66,7 +68,7 @@ This is the fundamental engine of the application:
 - **Message Queue:** Redis + Celery for async task processing
 - **AI/ML:** OpenAI API + Google Generative AI
 - **Communication:** Twilio for SMS/voice
-- **Authentication:** JWT with OAuth2 (Google, Microsoft)
+- **Authentication:** JWT with OAuth2 (Google)
 - **Real-time:** WebSocket connections for live updates
 
 ### **Frontend Stack**
@@ -110,10 +112,11 @@ This is the fundamental engine of the application:
 - **`models/resource.py`:** Content resource management and storage
 
 #### **Integrations (`/integrations/`)**
-- **`mls/`:** Multiple Listing Service integrations
+- **`mls/`:** Multiple Listing Service integrations (FlexMLS Spark API, RESO API)
 - **`twilio_*.py`:** SMS/voice communication
-- **`oauth/`:** Google and Microsoft OAuth
+- **`oauth/google.py`:** Google OAuth for contact import
 - **`openai.py`:** AI model integration
+- **`tool_factory.py`:** Generic factory for vertical-specific tools
 
 #### **Workflow (`/workflow/`)**
 - **`actions.py`:** Reusable workflow actions
@@ -150,7 +153,7 @@ This is the fundamental engine of the application:
 ## **Key Features & Capabilities**
 
 ### **1. Intelligent Client Management**
-- **Contact Import:** Google/Microsoft OAuth integration for contact import
+- **Contact Import:** Google OAuth integration for contact import
 - **Client Profiling:** AI-powered client intelligence and segmentation
 - **Relationship Tracking:** Automated relationship strength assessment
 - **Deduplication:** Smart contact deduplication and merging
@@ -180,7 +183,7 @@ This is the fundamental engine of the application:
 - **Perceive Layer Integration:** Content resources are part of the Perceive layer that feeds into the AI reasoning engine
 - **Personalized Messaging:** AI generates personalized messages for sharing content with matched clients
 - **Multi-Vertical Support:** Content resources work across all business verticals (real estate, therapy, consulting, etc.)
-- **Usage Tracking:** System tracks content usage and engagement metrics
+- **Usage Tracking:** System tracks which content resources are shared and their engagement rates
 - **Content Categories:** Flexible categorization system for organizing content by topic and relevance
 - **Client Matching Logic:** 
   - Matches clients based on user tags and AI tags
@@ -188,12 +191,34 @@ This is the fundamental engine of the application:
   - Supports multiple content types (documents, videos, articles)
 - **Unified Experience:** Content recommendations appear in the same interface as other AI suggestions, providing a cohesive user experience
 
-### **6. Personalization & Learning**
+### **6. Client Intake Surveys**
+- **Automated Survey Delivery:** System automatically sends intake surveys to new clients via SMS
+- **Survey Templates:** Configurable survey templates for different verticals (real estate, therapy)
+- **Multi-Step Surveys:** Support for complex, multi-step survey flows with various question types
+- **AI Processing:** Survey responses are automatically processed by AI to extract client preferences and generate tags
+- **Client Profiling:** Survey data feeds into the client intelligence engine for better matching
+- **Manual Survey Management:** Agents can manually trigger surveys and customize survey messages
+- **Survey Completion Tracking:** System tracks survey completion status and timing
+- **Vertical-Specific Questions:** Different survey types for different business verticals (buyer vs seller surveys for real estate)
+
+### **7. Interactive Client Portals**
+- **Secure Portal Generation:** Real estate agents can generate secure, shareable portal links for clients
+- **Property Curation:** AI-curated property matches are displayed in an interactive portal interface
+- **Client Feedback Collection:** Clients can provide feedback on properties (like/dislike, comments)
+- **Real-time Updates:** Portal content updates automatically as new matches are found
+- **Multi-Media Support:** Property portals display photos, details, and agent commentary
+- **Comment System:** Two-way commenting system between agents and clients on specific properties
+- **Portal Analytics:** Track client engagement and feedback on portal content
+- **Secure Access:** JWT-based secure access with expiration dates for portal links
+- **Mobile-Responsive:** Portal interface works seamlessly on mobile devices
+- **Agent Commentary:** AI-generated commentary explains why each property was selected for the client
+
+### **8. Personalization & Learning**
 - **Style Adaptation:** AI learns from user message edits
 - **Behavior Profiling:** User interaction pattern analysis
 - **Performance Optimization:** Continuous improvement based on outcomes
 
-### **6. Seamless Timezone Scheduling**
+### **9. Seamless Timezone Scheduling**
 - **Zero Timezone Complexity:** Users schedule messages in their local time without any timezone selection
 - **Automatic Detection:** System automatically detects user's timezone from browser
 - **Backend Handles Everything:** 
@@ -249,9 +274,8 @@ This is the fundamental engine of the application:
    ```
 
 ### **Testing Strategy**
-- **Unit Tests:** Pytest for backend, Jest for frontend
+- **Unit Tests:** Pytest for backend
 - **Integration Tests:** API endpoint testing with FastAPI TestClient
-- **E2E Tests:** Playwright for critical user flows
 - **Manual Testing:** Comprehensive test scenarios for each feature
 - **Content Recommendation Testing:**
   - Test content resource creation and management
@@ -302,13 +326,29 @@ This is the fundamental engine of the application:
 - **Usage Analytics:** System tracks which content resources are shared and their engagement rates
 - **Multi-Vertical Adaptability:** Content recommendation logic works across all business verticals
 
+### **Survey Processing Pipeline**
+1. **Survey Trigger:** System automatically sends intake surveys to new clients or agents manually trigger surveys
+2. **Response Collection:** Clients complete multi-step surveys via SMS or web interface
+3. **AI Processing:** Survey responses are processed by AI to extract preferences and generate client tags
+4. **Client Profiling Update:** Extracted data updates the client's profile and preferences
+5. **Matching Enhancement:** Updated client profile improves property/content matching accuracy
+6. **Portal Generation:** Enhanced client profiles enable better curated portal content
+
+### **Portal Generation Pipeline**
+1. **Match Curation:** AI finds and scores property matches for each client
+2. **Portal Creation:** System generates secure portal links with curated property matches
+3. **Client Access:** Clients access portals via secure, shareable links
+4. **Feedback Collection:** Clients provide feedback on properties through the portal interface
+5. **Agent Notification:** Agents receive real-time updates on client feedback and engagement
+6. **Continuous Improvement:** Client feedback improves future matching and portal curation
+
 ---
 
 ## **Security & Compliance**
 
 ### **Authentication & Authorization**
 - **JWT Tokens:** Secure token-based authentication
-- **OAuth Integration:** Google and Microsoft OAuth for contact import
+- **OAuth Integration:** Google OAuth for contact import
 - **Role-based Access:** User type-specific permissions
 - **Session Management:** Secure session handling
 

@@ -1,6 +1,6 @@
 # AI Nudge Database Documentation
 
-**Last Updated**: 08/15/2025
+**Last Updated**: 01/15/2025
 
 ## Database Overview
 
@@ -24,7 +24,7 @@ postgresql://postgres:password123@db:5432/realestate_db
 
 ## Database Tables
 
-The application contains **15 main tables**:
+The application contains **18 main tables**:
 
 ### 1. `user` Table
 **Purpose**: Stores user account information and preferences
@@ -233,7 +233,46 @@ The application contains **15 main tables**:
 - `preference_key` (String) - Key for extracting preferences
 - `display_order` (Integer, default=0) - Order of question display
 
-### 15. `portalcomment` Table - **NEW**
+### 15. `surveytemplate` Table - **NEW**
+**Purpose**: Stores survey templates that contain multiple questions
+**Key Fields**:
+- `id` (UUID, Primary Key)
+- `user_id` (UUID, Foreign Key to user.id, indexed)
+- `name` (String, indexed) - Template name
+- `description` (String) - Template description
+- `created_at` (DateTime) - When template was created
+
+### 16. `surveyquestion` Table - **UPDATED**
+**Purpose**: Stores survey questions linked to templates
+**Key Fields**:
+- `id` (UUID, Primary Key)
+- `user_id` (UUID, Foreign Key to user.id, indexed)
+- `template_id` (UUID, Foreign Key to surveytemplate.id, indexed) - **UPDATED**: Now linked to template
+- `question_text` (String) - The actual question
+- `question_type` (Enum: TEXT, NUMBER, SELECT, MULTI_SELECT, RANGE, BOOLEAN, indexed) - **UPDATED**: New enum values
+- `options` (JSON) - Available options for select/multi-select questions
+- `is_required` (Boolean, default=False) - Whether question is required
+- `placeholder` (String) - Placeholder text for input fields
+- `help_text` (String) - Additional help text
+- `preference_key` (String) - Key for extracting preferences
+- `display_order` (Integer, default=0) - Order of question display
+
+### 17. `clientintakesurvey` Table - **UPDATED**
+**Purpose**: Stores client intake survey responses and processing
+**Key Fields**:
+- `id` (UUID, Primary Key)
+- `client_id` (UUID, Foreign Key to client.id, indexed)
+- `user_id` (UUID, Foreign Key to user.id, indexed)
+- `template_id` (UUID, Foreign Key to surveytemplate.id, indexed) - **NEW**: Links to survey template
+- `survey_type` (String, indexed) - Type of survey (e.g., "real_estate_buyer")
+- `survey_version` (String, default="1.0") - Survey version
+- `completed_at` (String) - When survey was completed
+- `responses` (JSON) - Raw survey responses
+- `processed` (Boolean, default=False, indexed) - Whether responses have been processed
+- `preferences_extracted` (JSON) - Extracted preferences from responses
+- `tags_generated` (JSON) - AI-generated tags from responses
+
+### 18. `portalcomment` Table - **NEW**
 **Purpose**: Stores comments made within the client portal on resources
 **Key Fields**:
 - `id` (UUID, Primary Key)
@@ -243,6 +282,18 @@ The application contains **15 main tables**:
 - `commenter_type` (Enum: AGENT, CLIENT) - Who made the comment
 - `comment_text` (String) - The comment content
 - `created_at` (DateTime) - When comment was created
+
+### 19. `portallink` Table - **NEW**
+**Purpose**: Stores secure portal links for client access
+**Key Fields**:
+- `id` (String, Primary Key) - Short, URL-safe ID
+- `token` (Text) - Full JWT token
+- `campaign_id` (UUID, Foreign Key to campaignbriefing.id, indexed)
+- `client_id` (UUID, Foreign Key to client.id, indexed)
+- `user_id` (UUID, Foreign Key to user.id, indexed)
+- `created_at` (DateTime) - When link was created
+- `expires_at` (DateTime) - When link expires
+- `is_active` (Boolean, indexed) - Whether link is active
 
 ## Database Relationships
 
@@ -255,20 +306,28 @@ The application contains **15 main tables**:
 - **User** → **ContentResource** (One-to-Many)
 - **User** → **MarketEvent** (One-to-Many)
 - **User** → **Faq** (One-to-Many)
-- **User** → **SurveyQuestion** (One-to-Many) - **NEW**
+- **User** → **SurveyTemplate** (One-to-Many) - **NEW**
+- **User** → **SurveyQuestion** (One-to-Many) - **UPDATED**
 - **User** → **PortalComment** (One-to-Many) - **NEW**
+- **User** → **PortalLink** (One-to-Many) - **NEW**
 
 - **Client** → **Message** (One-to-Many)
 - **Client** → **ScheduledMessage** (One-to-Many)
 - **Client** → **CampaignBriefing** (One-to-Many)
 - **Client** → **NegativePreference** (One-to-Many)
-- **Client** → **ClientIntakeSurvey** (One-to-Many) - **NEW**
+- **Client** → **ClientIntakeSurvey** (One-to-Many) - **UPDATED**
 - **Client** → **PortalComment** (One-to-Many) - **NEW**
+- **Client** → **PortalLink** (One-to-Many) - **NEW**
 
 - **Message** → **CampaignBriefing** (One-to-Many) - AI drafts
 - **CampaignBriefing** → **ScheduledMessage** (One-to-Many)
 - **Resource** → **CampaignBriefing** (One-to-Many) - Triggering resources
 - **Resource** → **PortalComment** (One-to-Many) - **NEW**
+- **Resource** → **PortalLink** (One-to-Many) - **NEW**
+
+- **SurveyTemplate** → **SurveyQuestion** (One-to-Many) - **NEW**
+- **SurveyTemplate** → **ClientIntakeSurvey** (One-to-Many) - **NEW**
+- **CampaignBriefing** → **PortalLink** (One-to-Many) - **NEW**
 
 ## Database Features
 
@@ -293,16 +352,20 @@ The application contains **15 main tables**:
 - DateTime fields are indexed for time-based queries
 - Composite indexes on frequently queried combinations
 
-### 5. Survey System - **NEW**
+### 5. Survey System - **UPDATED**
+- **Survey Templates**: Users can create reusable survey templates with multiple questions
 - **Client Intake Surveys**: Automated survey system for gathering client preferences
-- **Custom Survey Questions**: Users can define their own survey questions
+- **Custom Survey Questions**: Users can define their own survey questions linked to templates
 - **Survey Processing**: AI-powered extraction of preferences and tags from responses
 - **Survey Configuration**: Per-user settings for survey behavior
+- **Question Types**: Support for TEXT, NUMBER, SELECT, MULTI_SELECT, RANGE, and BOOLEAN question types
 
-### 6. Client Portal System - **NEW**
+### 6. Client Portal System - **UPDATED**
 - **Interactive Comments**: Clients and agents can comment on shared resources
 - **Resource Sharing**: Secure portal for sharing resources with clients
 - **Feedback Collection**: Structured feedback collection from clients
+- **Secure Portal Links**: JWT-based secure links for client portal access
+- **Portal Link Management**: Track and manage portal link expiration and status
 
 ### 7. Migration History
 The database uses Alembic for migrations with the following key migrations:
@@ -320,15 +383,19 @@ The database uses Alembic for migrations with the following key migrations:
 - `add_client_intake_survey_table.py` - **NEW**: Client intake survey system
 - `8d8a21dcd8ba_add_survey_and_portal_models.py` - **NEW**: Portal and survey models
 - `447f04b9000c_create_surveyquestion_table.py` - **NEW**: Survey question system
+- `8027110b2edf_add_portal_link_table.py` - **NEW**: Portal link system for secure client access
+- `57cf42b7f456_add_surveytemplate_model_and_link_.py` - **NEW**: Survey template system
+- `35ea1f544186_add_missing_enum_values_to_questiontype.py` - **NEW**: Updated question types
+- `71598edfe977_set_native_enum_false_for_questiontype.py` - **NEW**: Question type enum fixes
 
 ## Database Statistics
 
-- **Total Tables**: 15 (increased from 12)
-- **Primary Tables**: 15 (all main tables)
+- **Total Tables**: 18 (increased from 15)
+- **Primary Tables**: 18 (all main tables)
 - **Total Indexes**: 60+ (including composite indexes)
 - **JSON Fields**: 20+ across all tables
 - **UUID Primary Keys**: All tables
-- **Foreign Key Relationships**: 25+ relationships
+- **Foreign Key Relationships**: 30+ relationships
 
 ## Database Architecture Patterns
 
@@ -354,11 +421,14 @@ The database uses Alembic for migrations with the following key migrations:
 - `campaignbriefing` for AI-generated content
 - Celery integration for async processing
 
-### 5. Survey & Portal System - **NEW**
+### 5. Survey & Portal System - **UPDATED**
+- **Survey Templates**: Reusable survey templates with multiple question types
 - **Survey Pipeline**: Automated survey sending, response collection, and processing
 - **Portal Interaction**: Client-agent communication through shared resources
 - **Preference Extraction**: AI-powered analysis of survey responses
 - **Custom Question Support**: User-defined survey questions with various types
+- **Secure Portal Access**: JWT-based portal links with expiration management
+- **Question Type Support**: TEXT, NUMBER, SELECT, MULTI_SELECT, RANGE, BOOLEAN
 
 ## Database Security
 
@@ -377,4 +447,4 @@ The database uses Alembic for migrations with the following key migrations:
 
 ---
 
-*This documentation covers the complete database structure of the AI Nudge application as of 08/15/2025.* 
+*This documentation covers the complete database structure of the AI Nudge application as of 01/15/2025.* 

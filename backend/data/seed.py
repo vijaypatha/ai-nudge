@@ -1,13 +1,14 @@
 # FILE: backend/data/seed.py
 import logging
 from sqlalchemy import text
-from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 import asyncio
 from datetime import datetime, timezone
 
 from .database import engine
 from common.config import get_settings
+# ✅ Import the function to create default surveys
+from agent_core.survey_processor import create_default_surveys_for_user
 
 settings = get_settings()
 
@@ -32,54 +33,40 @@ async def seed_database():
         from .models.campaign import CampaignBriefing
         from .models.faq import Faq
         from .models.event import MarketEvent, PipelineRun
-        
-        # --- THIS IS THE FIX ---
-        # The deletion order is now corrected to respect all database foreign key constraints.
-        # Dependent records are deleted before their parent records.
-        
-        # 1. Delete records that depend on CampaignBriefing, Client, User, or Resource
+        from .models.survey import SurveyQuestion, SurveyTemplate
+
+        # The deletion order is corrected to respect all database foreign key constraints.
         session.query(ScheduledMessage).delete()
         session.query(Message).delete()
-
-        # 2. Now it's safe to delete CampaignBriefing
         session.query(CampaignBriefing).delete()
-
-        # 3. Delete other records that depend on Client and User
         session.query(ClientIntakeSurvey).delete()
         session.query(Faq).delete()
         
-        # 4. Safely attempt to delete survey questions
+        # Safely attempt to delete survey questions and templates
         try:
-            # Use TRUNCATE for PostgreSQL to reset identity columns, or DELETE for others.
-            # This is a general approach; for production, you might use dialect-specific code.
             if session.bind.dialect.name == 'postgresql':
+                # Use TRUNCATE CASCADE to handle foreign keys and reset sequences
                 session.execute(text("TRUNCATE TABLE surveyquestion RESTART IDENTITY CASCADE"))
+                session.execute(text("TRUNCATE TABLE surveytemplate RESTART IDENTITY CASCADE"))
             else:
-                # This will fail if the table doesn't exist, hence the try/except
-                session.query_class.delete() # A placeholder for a potential SurveyQuestion model
-            logger.info("Cleared surveyquestion table.")
+                session.query(SurveyQuestion).delete()
+                session.query(SurveyTemplate).delete()
+            logger.info("Cleared surveyquestion and surveytemplate tables.")
         except Exception:
-            logger.warning("Could not clear surveyquestion table (it may not exist yet). Continuing...")
+            logger.warning("Could not clear survey tables (they may not exist yet). Continuing...")
             session.rollback()
             
-        # 5. Now it's safe to delete Clients
         session.query(Client).delete()
-
-        # 6. Delete records that depend on User
         session.query(MarketEvent).delete()
         session.query(PipelineRun).delete()
         session.query(Resource).delete()
         session.query(ContentResource).delete()
-
-        # 7. Finally, it's safe to delete the Users
         session.query(User).delete()
         
         session.commit()
-        # --- END FIX ---
         
         logger.info("Previous data cleared. Seeding new data...")
 
-        # --- Seeding logic remains the same ---
         realtor_user = User(
             id="75411688-5705-4dd8-9b47-5355a34d15ec", user_type=UserType.REALTOR, full_name="Jane Doe",
             email="jane.doe@realty.com", phone_number="+15558675309", twilio_phone_number="+143527219870",
@@ -95,6 +82,12 @@ async def seed_database():
         session.commit()
         session.refresh(realtor_user)
         session.refresh(therapist_user)
+
+        # ✅ NEW: Explicitly create default surveys for the seed users
+        logger.info("Creating default surveys for seed users...")
+        create_default_surveys_for_user(user=realtor_user, session=session)
+        create_default_surveys_for_user(user=therapist_user, session=session)
+        logger.info("Default surveys for seed users created.")
 
         investor_client = Client(id="9afb4bd1-9f26-4ae8-8a63-af71537dd932", user_id=realtor_user.id, full_name="Carlos Rodriguez (Investor)", user_tags=["investor"], preferences={"keywords": ["duplex", "investment"]})
         therapy_client = Client(id="54d5b199-0cf2-43e1-bd52-c6d7ba90699b", user_id=therapist_user.id, full_name="Jennifer Martinez", user_tags=["anxiety"], notes="Experiencing generalized anxiety.")

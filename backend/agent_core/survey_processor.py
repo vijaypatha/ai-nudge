@@ -11,6 +11,7 @@ from common.redis_client import get_redis_client
 
 from data.models.client import Client, ClientIntakeSurvey
 from data.models.user import User
+from data.models.survey import SurveyTemplate
 from agent_core.survey_config import get_survey_config, SurveyConfig
 from agent_core import llm_client
 from data import crm as crm_service
@@ -218,8 +219,7 @@ To help personalize my service for you, please take a moment to fill out this sh
 {survey_link}
 
 Thank you,
-{user.full_name}
-"""
+{user.full_name}"""
 
 async def _send_agent_notification_email(user: User, client: Client, survey: ClientIntakeSurvey):
     """
@@ -327,3 +327,50 @@ async def handle_survey_response(client_id: str, survey_id: str, responses: Dict
         logger.error(f"SURVEY PROCESSOR: Error handling survey response for survey_id {survey_id}: {e}", exc_info=True)
         session.rollback()
         return False
+    
+def create_default_surveys_for_user(user: User, session: Session):
+    """
+    Creates a set of default, editable survey templates for a new user
+    based on their professional vertical.
+    """
+    from data.models.survey import SurveyTemplate, SurveyQuestion
+    from agent_core.survey_config import REAL_ESTATE_BUYER_SURVEY, REAL_ESTATE_SELLER_SURVEY, THERAPY_SURVEY
+
+    logger.info(f"Creating default survey templates for user {user.id} in vertical '{user.vertical}'")
+    
+    default_configs = []
+    if user.vertical == "real_estate":
+        default_configs = [REAL_ESTATE_BUYER_SURVEY, REAL_ESTATE_SELLER_SURVEY]
+    elif user.vertical == "therapy":
+        default_configs = [THERAPY_SURVEY]
+
+    if not default_configs:
+        logger.warning(f"No default surveys defined for vertical: {user.vertical}")
+        return
+
+    for config in default_configs:
+        new_template = SurveyTemplate(
+            user_id=user.id,
+            name=config.title,
+            description=config.description
+        )
+        session.add(new_template)
+        session.flush()
+
+        for i, question_config in enumerate(config.questions):
+            new_question = SurveyQuestion(
+                user_id=user.id,
+                template_id=new_template.id,
+                question_text=question_config.question,
+                question_type=question_config.type,
+                options=question_config.options,
+                is_required=question_config.required,
+                placeholder=question_config.placeholder,
+                help_text=question_config.help_text,
+                preference_key=question_config.preference_key,
+                display_order=i
+            )
+            session.add(new_question)
+    
+    session.commit()
+    logger.info(f"Successfully created {len(default_configs)} default templates for user {user.id}")

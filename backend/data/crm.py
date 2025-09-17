@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 from uuid import UUID
 import json 
-from sqlmodel import Session, select, delete
+from sqlmodel import Session, select, delete, func
 from sqlalchemy.orm import selectinload
 from .database import engine
 import logging
@@ -1475,3 +1475,40 @@ def get_relationship_timeline_for_client(client_id: UUID, user_id: UUID, limit: 
         timeline.sort(key=lambda x: x["date"], reverse=True)
         
         return timeline[:limit]
+
+async def update_user_onboarding_status(user: User, session: Session) -> bool:
+    """
+    Checks if a user has met all onboarding criteria and updates their status.
+    If the status is changed to complete, it triggers the creation of default surveys.
+    Returns True if the status was changed, False otherwise.
+    """
+    from agent_core.survey_processor import create_default_surveys_for_user
+
+    # If onboarding is already complete, do nothing.
+    if user.onboarding_complete:
+        return False
+
+    # Condition 1 & 2: Check flags in the user's profile.
+    phone_verified = user.onboarding_state.get('phone_verified', False)
+    work_style_set = user.onboarding_state.get('work_style_set', False)
+
+    # Condition 3: Check if the user has at least one client.
+    client_count = session.exec(
+        select(func.count(Client.id)).where(Client.user_id == user.id)
+    ).one()
+    has_clients = client_count > 0
+
+    # If all conditions are met, update the user.
+    if phone_verified and work_style_set and has_clients:
+        user.onboarding_complete = True
+        session.add(user)
+
+        # This is the trigger that creates the surveys.
+        create_default_surveys_for_user(user=user, session=session)
+
+        session.commit()
+        session.refresh(user)
+        logging.info(f"CRM: User {user.id} has completed onboarding. Default surveys created.")
+        return True
+
+    return False
