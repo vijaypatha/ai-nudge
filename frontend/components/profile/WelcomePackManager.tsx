@@ -147,14 +147,10 @@ export const WelcomePackManager: FC<WelcomePackManagerProps> = ({ api, allResour
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveId(null);
-    
     if (!over) return;
 
     const sourceContainer = findContainer(active.id as string);
-    // Check if over.id is a container first, then check if it's an item
-    const destContainer = packConfig[over.id as string] ? 
-      over.id as string : 
-      findContainer(over.id as string);
+    const destContainer = findContainer(over.id as string) || (packConfig[over.id as string] ? over.id as string : null);
 
     if (!sourceContainer || !destContainer) return;
 
@@ -162,40 +158,63 @@ export const WelcomePackManager: FC<WelcomePackManagerProps> = ({ api, allResour
       const newConfig = { ...prev };
       const sourceItems = [...newConfig[sourceContainer]];
       const activeIndex = sourceItems.findIndex(item => item.id === active.id);
-      
-      if (activeIndex === -1) return prev;
-      
       const [movedItem] = sourceItems.splice(activeIndex, 1);
 
       if (sourceContainer === destContainer) {
-        // Reordering within same container
         const overIndex = sourceItems.findIndex(item => item.id === over.id);
-        sourceItems.splice(overIndex >= 0 ? overIndex : sourceItems.length, 0, movedItem);
+        sourceItems.splice(overIndex, 0, movedItem);
         newConfig[sourceContainer] = sourceItems;
       } else {
-        // Moving between containers
         const destItems = [...newConfig[destContainer]];
-        
+        const overIndex = destItems.findIndex(item => item.id === over.id);
+
         if (sourceContainer === 'library') {
-          // COPY logic - don't remove from library
+          // COPY logic: don't remove from library
           if (!destItems.some(item => item.id === movedItem.id)) {
-            const overIndex = destItems.findIndex(item => item.id === over.id);
-            destItems.splice(overIndex >= 0 ? overIndex : destItems.length, 0, movedItem);
-            newConfig[destContainer] = destItems;
+            destItems.splice(overIndex !== -1 ? overIndex : destItems.length, 0, movedItem);
           }
-          // Don't update library (keep original)
+          newConfig[destContainer] = destItems;
         } else {
-          // MOVE logic - remove from source
-          const overIndex = destItems.findIndex(item => item.id === over.id);
-          destItems.splice(overIndex >= 0 ? overIndex : destItems.length, 0, movedItem);
+          // MOVE logic: remove from source
+          destItems.splice(overIndex !== -1 ? overIndex : destItems.length, 0, movedItem);
           newConfig[sourceContainer] = sourceItems;
           newConfig[destContainer] = destItems;
         }
       }
-      
       return newConfig;
     });
   };
+
+    const handleDragOver = (event: DragEndEvent) => {
+        // This function can be used for visual feedback during drag, but the state mutation is handled in onDragEnd.
+        // For now, we leave it empty to prevent the previous bug.
+    };
+
+    const handleDragEnd_OLD = (event: DragEndEvent) => {
+      const { active, over } = event;
+      setActiveId(null);
+      if (!over) return;
+
+      const activeContainer = findContainer(active.id as string);
+      const overContainerId = packConfig[over.id as string] ? (over.id as string) : findContainer(over.id as string);
+
+      if (!activeContainer || !overContainerId || !packConfig[activeContainer]) return;
+
+      if (activeContainer === overContainerId) {
+        setPackConfig(prev => {
+          const newConfig = { ...prev };
+          const items = [...newConfig[activeContainer]];
+          const activeIndex = items.findIndex(item => item.id === active.id);
+          const overIndex = items.findIndex(item => item.id === over.id);
+
+          if (activeIndex !== -1 && overIndex !== -1 && activeIndex !== overIndex) {
+            newConfig[activeContainer] = arrayMove(items, activeIndex, overIndex);
+          }
+
+          return newConfig;
+        });
+      }
+    };
 
   const handleSave = async () => {
     setIsSaving(true);

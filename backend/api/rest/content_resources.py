@@ -538,19 +538,4 @@ async def update_welcome_packs_config(
         logging.error(f"API: Error updating welcome packs config: {str(e)}")
         import traceback
         logging.error(f"API: Full traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail="Failed to update welcome pack config")
-
-# Add middleware for request body logging
-@router.middleware("http")
-async def log_requests(request, call_next):
-    if request.method == "PUT" and "welcome-packs-config" in str(request.url):
-        body = await request.body()
-        logging.info(f"API: Raw request body: {body.decode()}")
-        # Re-create request with body for processing
-        from fastapi import Request
-        async def receive():
-            return {"type": "http.request", "body": body}
-        request._receive = receive
-    
-    response = await call_next(request)
-    return response 
+        raise HTTPException(status_code=500, detail="Failed to update welcome pack config") 

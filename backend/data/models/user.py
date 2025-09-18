@@ -103,3 +103,5 @@ class UserUpdate(SQLModel):
     twilio_phone_number: Optional[str] = None
     timezone: Optional[str] = None
     client_roles: Optional[List[str]] = None
+    welcome_pack_message: Optional[str] = None
+    welcome_packs_config: Optional[Dict[str, List[str]]] = None
