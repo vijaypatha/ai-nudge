@@ -312,7 +312,7 @@ const FaqCard: FC<{
 
 // Main Profile Page with CONSISTENT COLOR SCHEME
 export default function ProfilePage() {
-    const { api, user, loading: isContextLoading, logout, refreshUser } = useAppContext();
+    const { api, user, clientRoles, loading: isContextLoading, logout, refreshUser } = useAppContext();
     const [profile, setProfile] = useState<UserType | null>(null);
     const [faqs, setFaqs] = useState<FaqItem[]>([]);
     const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -715,7 +715,7 @@ export default function ProfilePage() {
                             title="Content & Resources"
                             description="Manage documents, links, and other resources that your AI assistant can share with clients when relevant to their needs."
                         >
-                            <ContentResourceManager api={api} userRoles={profile.client_roles || []} />
+                            <ContentResourceManager api={api} userRoles={clientRoles} />
                         </MajorSection>
 
                         {/* Customization & Preferences */}

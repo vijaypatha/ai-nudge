@@ -6,6 +6,7 @@ import logging
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import ValidationError
 from sqlmodel import Session, select
 from pydantic import BaseModel
 
@@ -475,23 +476,37 @@ async def update_welcome_packs_config(
     current_user: User = Depends(get_current_user_from_token),
     session: Session = Depends(get_session)
 ):
-    """
-    Updates the user's Welcome Pack configuration and message.
-    """
-    user_to_update = session.get(User, current_user.id)
-    if not user_to_update:
-        raise HTTPException(status_code=404, detail="User not found.")
+    """Updates the user's Welcome Pack configuration and message."""
+    try:
+        logging.info(f"API: Updating welcome packs config for user {current_user.id}")
+        logging.info(f"API: Received payload: {payload.dict()}")
+        
+        user_to_update = session.get(User, current_user.id)
+        if not user_to_update:
+            raise HTTPException(status_code=404, detail="User not found.")
 
-    # Sanitize data before saving
-    sanitized_config = {
-        role: [str(uuid) for uuid in id_list]
-        for role, id_list in payload.config.items()
-    }
-
-    user_to_update.welcome_packs_config = sanitized_config
-    user_to_update.welcome_pack_message = payload.message
-    session.add(user_to_update)
-    session.commit()
-    session.refresh(user_to_update)
-
-    return {"status": "success", "config": user_to_update.welcome_packs_config, "message": user_to_update.welcome_pack_message} 
+        # Sanitize data before saving - ensure all IDs are strings
+        sanitized_config = {
+            role: [str(uuid_val) for uuid_val in id_list] 
+            for role, id_list in payload.config.items()
+        }
+        
+        user_to_update.welcome_packs_config = sanitized_config
+        user_to_update.welcome_pack_message = payload.message
+        
+        session.add(user_to_update)
+        session.commit()
+        session.refresh(user_to_update)
+        
+        return {
+            "status": "success",
+            "config": user_to_update.welcome_packs_config,
+            "message": user_to_update.welcome_pack_message
+        }
+        
+    except ValidationError as e:
+        logging.error(f"API: Validation error in welcome packs config: {e.json()}")
+        raise HTTPException(status_code=422, detail=e.errors())
+    except Exception as e:
+        logging.error(f"API: Error updating welcome packs config: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update welcome pack config") 
