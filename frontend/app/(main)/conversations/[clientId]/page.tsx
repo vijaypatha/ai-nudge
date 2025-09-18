@@ -19,7 +19,7 @@ import { ContentSuggestionsCard } from '@/components/conversation/ContentSuggest
 import { ScheduleMessageModal } from '@/components/modals/ScheduleMessageModal';
 import { Avatar } from '@/components/ui/Avatar';
 import { InfoCard } from '@/components/ui/InfoCard';
-import { Users, Phone, Video, Loader2 } from 'lucide-react';
+import { Users, Phone, Video, Loader2, Link as LinkIcon, Sparkles } from 'lucide-react';
 
 // --- [NEW] Import the new search card component ---
 import { InteractiveSearchCard } from '@/components/conversation/InteractiveSearchCard';
@@ -71,6 +71,11 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     const [isPlanSuccess, setIsPlanSuccess] = useState(false);
     const [isPlanUpdating, setIsPlanUpdating] = useState(false);
     
+    // --- NEW: State for Hub management ---
+    const [hubUrl, setHubUrl] = useState<string | null>(null);
+    const [isHubLoading, setIsHubLoading] = useState(true);
+
+
     // --- [NEW] State management for the Interactive Search feature ---
     const [isSearching, setIsSearching] = useState(false);
     const [searchResults, setSearchResults] = useState<InteractiveSearchResult[]>([]);
@@ -102,6 +107,35 @@ export default function ConversationPage({ params }: ConversationPageProps) {
         }
     }, [api, refetchScheduledMessagesForClient]);
 
+    // --- NEW: Function to fetch or create the client's Hub link ---
+    const fetchHubLink = useCallback(async (currentClientId: string) => {
+        if (!api) return;
+        setIsHubLoading(true);
+        try {
+            const response = await api.get(`/api/clients/${currentClientId}/hub-link`);
+            setHubUrl(response.hub_url);
+        } catch (error) {
+            console.error("Failed to fetch Hub link:", error);
+            setHubUrl(null); // Ensure it's null on error
+        } finally {
+            setIsHubLoading(false);
+        }
+    }, [api]);
+
+    const handleCreateHub = useCallback(async () => {
+        if (!api || !clientId) return;
+        setIsHubLoading(true);
+        try {
+            const response = await api.post(`/api/clients/${clientId}/create-hub`, {});
+            setHubUrl(response.hub_url);
+        } catch (error) {
+            console.error("Failed to create Hub:", error);
+            alert("Could not create a Client Hub at this time.");
+        } finally {
+            setIsHubLoading(false);
+        }
+    }, [api, clientId]);
+
     // --- [NEW] Function to trigger and handle the interactive search API call ---
     const handleInteractiveSearch = useCallback(async () => {
         if (!api || !clientId) return;
@@ -126,6 +160,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
                 const clientData = await api.get(`/api/clients/${clientId}`);
                 setSelectedClient(clientData);
                 await fetchConversationData(clientId);
+                await fetchHubLink(clientId); // Fetch hub link after client is loaded
                 setPageState('loaded');
             } catch (error) {
                 console.error("Failed to fetch client:", error);
@@ -133,7 +168,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
             }
         };
         fetchClientAndConversation();
-    }, [clientId, api, fetchConversationData]);
+    }, [clientId, api, fetchConversationData, fetchHubLink]);
 
     useEffect(() => {
         if (!socket) return;
@@ -207,7 +242,29 @@ export default function ConversationPage({ params }: ConversationPageProps) {
             <ScheduleMessageModal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} onScheduleSuccess={handleScheduleSuccess} clientId={clientId} initialContent={composerContent} />
             <main className="flex-1 flex flex-col min-w-0 lg:border-l lg:border-r border-white/10">
                 <header className="flex items-center justify-between p-4 border-b border-white/10 bg-brand-dark/50 backdrop-blur-sm md:sticky md:top-0 z-30">
-                    <div className="flex items-center gap-4"><Avatar name={selectedClient.full_name} className="w-11 h-11 hidden sm:flex" /><div><h2 className="text-xl font-bold text-brand-text-main">{selectedClient.full_name}</h2><p className="text-sm text-brand-accent">Online</p></div></div>
+                    <div className="flex items-center gap-4">
+                        <Avatar name={selectedClient.full_name} className="w-11 h-11 hidden sm:flex" />
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h2 className="text-xl font-bold text-brand-text-main">{selectedClient.full_name}</h2>
+                                {/* --- NEW: Hub Management Buttons --- */}
+                                {isHubLoading ? (
+                                    <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+                                ) : hubUrl ? (
+                                    <button onClick={() => window.open(hubUrl, '_blank')} className="px-2 py-1 text-xs font-semibold text-cyan-300 bg-cyan-500/10 rounded-full hover:bg-cyan-500/20 flex items-center gap-1">
+                                        <LinkIcon className="w-3 h-3" />
+                                        View Hub
+                                    </button>
+                                ) : (
+                                    <button onClick={handleCreateHub} className="px-2 py-1 text-xs font-semibold text-purple-300 bg-purple-500/10 rounded-full hover:bg-purple-500/20 flex items-center gap-1">
+                                        <Sparkles className="w-3 h-3" />
+                                        Create Hub
+                                    </button>
+                                )}
+                            </div>
+                            <p className="text-sm text-brand-accent">Online</p>
+                        </div>
+                    </div>
                     <div className="flex items-center gap-2"><button className="p-2 rounded-full text-brand-text-muted hover:bg-white/10"><Phone className="w-5 h-5" /></button><button className="p-2 rounded-full text-brand-text-muted hover:bg-white/10"><Video className="w-5 h-5" /></button></div>
                 </header>
                 <div className="flex-shrink-0 p-2 border-b border-white/10 lg:hidden"><Tabs options={tabOptions} activeTab={activeTab} setActiveTab={(id) => setActiveTab(id as 'messages' | 'intel')} /></div>

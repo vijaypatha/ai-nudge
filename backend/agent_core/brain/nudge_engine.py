@@ -47,6 +47,7 @@ async def setup_client_portal(client: Client, user: User, session: Session) -> s
         client_id=client.id,
         campaign_type="client_hub",
         headline=f"Client Hub for {client.full_name}",
+        original_draft=f"Welcome to the Client Hub for {client.full_name}.",
         status=CampaignStatus.ACTIVE.value,
         source="hub_orchestrator"
     )

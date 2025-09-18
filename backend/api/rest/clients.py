@@ -45,6 +45,9 @@ class AddClientResponse(BaseModel):
     client: Client
     hub_url: Optional[str] = None
 
+class HubLinkResponse(BaseModel):
+    hub_url: Optional[str] = None
+
 class ClientSearchQuery(BaseModel):
     natural_language_query: Optional[str] = None
     tags: Optional[List[str]] = None
@@ -546,3 +549,43 @@ async def interactive_search_for_client(
                     )
                 )
         return matches
+
+@router.get("/{client_id}/hub-link", response_model=HubLinkResponse)
+async def get_client_hub_link(
+    client_id: UUID,
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
+):
+    """
+    Retrieves the permanent Living Hub URL for a specific client, if it exists.
+    """
+    link = crm_service.get_portal_link_for_client(client_id, session)
+    if not link:
+        return HubLinkResponse(hub_url=None)
+
+    hub_url = f"{get_settings().FRONTEND_BASE_URL}/portal/{link.id}"
+    return HubLinkResponse(hub_url=hub_url)
+
+
+@router.post("/{client_id}/create-hub", response_model=HubLinkResponse)
+async def create_hub_for_existing_client(
+    client_id: UUID,
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
+):
+    """
+    Creates a Living Hub for an existing client who doesn't already have one.
+    """
+    client = crm_service.get_client_by_id(client_id, current_user.id, session)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    # Check if a hub already exists to prevent duplicates
+    existing_link = crm_service.get_portal_link_for_client(client_id, session)
+    if existing_link:
+        hub_url = f"{get_settings().FRONTEND_BASE_URL}/portal/{existing_link.id}"
+        return HubLinkResponse(hub_url=hub_url)
+
+    # Create the hub using the existing engine function
+    hub_url = await nudge_engine.setup_client_portal(client, current_user, session)
+    return HubLinkResponse(hub_url=hub_url)
