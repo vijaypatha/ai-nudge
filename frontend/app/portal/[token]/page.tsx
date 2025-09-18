@@ -6,9 +6,16 @@
 import { useState, useEffect, FC } from 'react';
 import { format } from 'date-fns';
 import Image from 'next/image';
-import { Heart, ThumbsUp, ThumbsDown, Send, Loader2, AlertTriangle, X, CheckSquare, Edit } from 'lucide-react';
+import { Heart, ThumbsUp, ThumbsDown, Send, Loader2, AlertTriangle, X, CheckSquare, Edit, Video, BookOpen, FileText } from 'lucide-react';
 
 // --- Types (mirroring backend structures) ---
+interface ContentResource {
+    id: string;
+    title: string;
+    url: string;
+    description?: string;
+    content_type: 'article' | 'video' | 'document';
+}
 interface PortalPreferences {
     [key: string]: any;
 }
@@ -46,6 +53,8 @@ interface PortalData {
     curation_rationale?: string;
     survey_completed: boolean;
     survey_template: any | null; // Placeholder for survey structure
+    welcome_message?: string;
+    welcome_pack: ContentResource[];
 }
 
 
@@ -229,28 +238,58 @@ const PropertyCard: FC<{ resource: PortalMatch; token: string; onImageClick: (im
     );
 };
 
-// --- NEW: Kickoff view for clients who haven't completed their survey ---
-const SurveyKickoffView: FC<{ portalData: PortalData }> = ({ portalData }) => (
-    <div className="max-w-3xl mx-auto p-4 sm:p-6 lg:p-8 text-center">
-        <header className="mb-12">
-            <h1 className="text-4xl font-bold text-white">Welcome, {portalData.client_name}!</h1>
-            <p className="mt-2 text-lg text-gray-400">Let's get started by confirming a few details.</p>
-        </header>
-        <div className="bg-gray-800/50 border border-dashed border-white/10 rounded-2xl p-8">
-            <Edit className="w-12 h-12 text-cyan-400 mx-auto mb-4" />
-            <h2 className="text-2xl font-semibold text-white mb-2">Help Us Find Your Perfect Match</h2>
-            <p className="text-gray-400 mb-6">
-                Your feedback helps us tailor your experience. Please take a moment to complete your intake survey.
-            </p>
-            <button className="bg-cyan-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-cyan-600 transition-colors">
-                Start Survey
-            </button>
+const getContentTypeIcon = (type: string) => {
+    switch (type) {
+        case 'video': return <Video className="w-5 h-5 text-purple-400" />;
+        case 'document': return <FileText className="w-5 h-5 text-orange-400" />;
+        default: return <BookOpen className="w-5 h-5 text-blue-400" />;
+    }
+};
+
+// --- MODIFIED: Kickoff view now includes the Welcome Pack ---
+const SurveyKickoffView: FC<{ portalData: PortalData }> = ({ portalData }) => {
+    const hasWelcomePack = portalData.welcome_pack && portalData.welcome_pack.length > 0;
+
+    return (
+        <div className="max-w-3xl mx-auto p-4 sm:p-6 lg:p-8">
+            <header className="text-center mb-12">
+                <h1 className="text-4xl font-bold text-white">Welcome, {portalData.client_name}!</h1>
+                {portalData.welcome_message ? (
+                     <p className="mt-4 text-lg text-gray-300 whitespace-pre-wrap">{portalData.welcome_message}</p>
+                ) : (
+                    <p className="mt-2 text-lg text-gray-400">Let's get started by confirming a few details.</p>
+                )}
+            </header>
+
+            {hasWelcomePack && (
+                <section className="mb-12">
+                    <h2 className="text-xl font-semibold text-center text-gray-300 mb-6">A Few Resources to Get You Started</h2>
+                    <div className="space-y-4">
+                        {portalData.welcome_pack.map(item => (
+                            <a key={item.id} href={item.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-4 bg-gray-800/50 border border-white/10 rounded-lg p-4 hover:bg-gray-800/80 transition-colors">
+                                <div className="flex-shrink-0">{getContentTypeIcon(item.content_type)}</div>
+                                <div>
+                                    <h3 className="font-semibold text-white">{item.title}</h3>
+                                    {item.description && <p className="text-sm text-gray-400">{item.description}</p>}
+                                </div>
+                            </a>
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            <div className="bg-gray-800/50 border border-dashed border-white/10 rounded-2xl p-8 text-center">
+                <Edit className="w-12 h-12 text-cyan-400 mx-auto mb-4" />
+                <h2 className="text-2xl font-semibold text-white mb-2">Help Us Find Your Perfect Match</h2>
+                <p className="text-gray-400 mb-6">Your feedback helps us tailor your experience. Please take a moment to complete your intake survey.</p>
+                <button className="bg-cyan-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-cyan-600 transition-colors">Start Survey</button>
+            </div>
+            <footer className="text-center mt-16 text-gray-500 text-xs">
+                {portalData.agent_name && <p>This portal was personally prepared for you by {portalData.agent_name}.</p>}
+            </footer>
         </div>
-        <footer className="text-center mt-16 text-gray-500 text-xs">
-            {portalData.agent_name && <p>This portal was personally prepared for you by {portalData.agent_name}.</p>}
-        </footer>
-    </div>
-);
+    );
+};
 
 // --- NEW: The main Hub view for ongoing interaction ---
 const HubView: FC<{ portalData: PortalData; token: string; onOpenLightbox: (images: string[], index: number) => void }> = ({ portalData, token, onOpenLightbox }) => (
@@ -272,7 +311,7 @@ const HubView: FC<{ portalData: PortalData; token: string; onOpenLightbox: (imag
         <section className="mb-16">
             <h2 className="text-2xl font-semibold text-center mb-6">Confirming Your Vision</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-3xl mx-auto">
-                <PreferenceChip label="Max Budget" value={portalData.preferences.budget_max?.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 })} />
+                <PreferenceChip label="Max Budget" value={portalData.preferences.budget_max?.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }) || 'Not set'} />
                 <PreferenceChip label="Min Bedrooms" value={portalData.preferences.min_bedrooms} />
                 <PreferenceChip label="Min Bathrooms" value={portalData.preferences.min_bathrooms} />
                 <PreferenceChip label="Location(s)" value={portalData.preferences.locations} />

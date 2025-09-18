@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from .user import User
     from .campaign import CampaignBriefing
     from .feedback import NegativePreference
+    from .survey import SurveyTemplate
 
 class Client(SQLModel, table=True):
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
@@ -38,6 +39,8 @@ class Client(SQLModel, table=True):
     # --- NEW: Survey completion tracking ---
     intake_survey_completed: bool = Field(default=False, index=True)
     intake_survey_sent_at: Optional[str] = Field(default=None)
+    client_role: Optional[str] = Field(default="client") # Role for Welcome Pack matching
+    welcome_pack_override: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
     
     user: "User" = Relationship(back_populates="clients")
     
@@ -76,6 +79,7 @@ class ClientCreate(SQLModel):
     ai_tags: List[str] = []
     user_tags: List[str] = []
     preferences: Dict[str, Any] = {}
+    client_role: str = "client"
     intake_survey_completed: bool = False
 
 class ClientUpdate(SQLModel):
@@ -88,6 +92,7 @@ class ClientUpdate(SQLModel):
     timezone: Optional[str] = None
     intake_survey_completed: Optional[bool] = None
     intake_survey_sent_at: Optional[str] = None
+    client_role: Optional[str] = None
 
 class ClientTagUpdate(SQLModel):
     user_tags: List[str]

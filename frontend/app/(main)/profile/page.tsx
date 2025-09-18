@@ -715,7 +715,7 @@ export default function ProfilePage() {
                             title="Content & Resources"
                             description="Manage documents, links, and other resources that your AI assistant can share with clients when relevant to their needs."
                         >
-                            <ContentResourceManager api={api} />
+                            <ContentResourceManager api={api} userRoles={profile.client_roles || []} />
                         </MajorSection>
 
                         {/* Customization & Preferences */}

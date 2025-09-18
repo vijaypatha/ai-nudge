@@ -8,6 +8,8 @@ import { useState, useEffect, FC } from 'react';
 import { Plus, Trash2, Edit3, Save, XCircle, ExternalLink, BookOpen, Video, FileText, Sparkles } from 'lucide-react';
 import { ACTIVE_THEME } from '@/utils/theme';
 import Confetti from 'react-confetti';
+import { Tabs, TabOption } from '@/components/ui/Tabs';
+import { WelcomePackManager } from './WelcomePackManager';
 
 export interface ContentResource {
   id: string;
@@ -32,9 +34,10 @@ export interface ContentResourceCreate {
 
 interface ContentResourceManagerProps {
   api: any; // API client from context
+  userRoles: string[];
 }
 
-export const ContentResourceManager: FC<ContentResourceManagerProps> = ({ api }) => {
+export const ContentResourceManager: FC<ContentResourceManagerProps> = ({ api, userRoles }) => {
   const [resources, setResources] = useState<ContentResource[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +45,7 @@ export const ContentResourceManager: FC<ContentResourceManagerProps> = ({ api })
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+  const [activeTab, setActiveTab] = useState('content');
   
   // Form state for adding/editing
   const [formData, setFormData] = useState<ContentResourceCreate>({
@@ -53,6 +57,11 @@ export const ContentResourceManager: FC<ContentResourceManagerProps> = ({ api })
   });
   
   const [newCategory, setNewCategory] = useState('');
+
+  const tabOptions: TabOption[] = [
+    { id: 'content', label: 'Content Library' },
+    { id: 'welcomePacks', label: 'Welcome Packs' },
+  ];
 
   // Add window size tracking for confetti
   useEffect(() => {
@@ -226,24 +235,32 @@ export const ContentResourceManager: FC<ContentResourceManagerProps> = ({ api })
         />
       )}
 
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-cyan-400" />
-            Content Resources
-          </h3>
-          <button
-            onClick={() => setIsAdding(true)}
-            className="px-3 py-1.5 text-sm font-semibold bg-white/10 rounded-lg hover:bg-white/20 flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            Add Resource
-          </button>
+      <div className="bg-brand-primary border border-white/10 rounded-lg shadow-md w-full">
+        <div className="p-6">
+            <h2 className="text-xl font-bold text-white">Content & Resources</h2>
+            <p className="text-sm text-gray-400 mt-1">Manage documents, links, and Welcome Packs for new clients.</p>
+            <div className="mt-4">
+              <Tabs options={tabOptions} activeTab={activeTab} setActiveTab={setActiveTab} />
+            </div>
         </div>
-        
-        <p className="text-sm text-gray-400">
-          Add helpful content that your AI can share with clients based on their interests and needs.
-        </p>
+
+        {activeTab === 'content' && (
+          <div className="p-6 space-y-4">
+            <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  Content Library
+                </h3>
+                <button
+                  onClick={() => setIsAdding(true)}
+                  className="px-3 py-1.5 text-sm font-semibold bg-white/10 rounded-lg hover:bg-white/20 flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Resource
+                </button>
+              </div>
+              <p className="text-sm text-gray-400 -mt-2">
+                Add helpful content that your AI can share with clients based on their interests and needs.
+              </p>
 
         {error && (
           <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-red-400 text-sm">
@@ -376,85 +393,85 @@ export const ContentResourceManager: FC<ContentResourceManagerProps> = ({ api })
           </div>
         )}
 
-        {/* Resources List */}
-        <div className="space-y-3">
-          {resources.length === 0 ? (
-            <div className="text-center py-8 text-gray-400">
-              <BookOpen size={48} className="mx-auto mb-4 opacity-50" />
-              <p className="text-lg font-medium">No content resources yet</p>
-              <p className="text-sm">Add your first resource to start sharing helpful content with clients</p>
-            </div>
-          ) : (
-            resources.map((resource) => (
-              <div
-                key={resource.id}
-                className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 hover:border-gray-600 transition-colors"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className={`${getContentTypeColor(resource.content_type)}`}>
-                        {getContentTypeIcon(resource.content_type)}
-                      </span>
-                      <h4 className="font-medium text-white">{resource.title}</h4>
-                      <span className="text-xs text-gray-400 bg-gray-700 px-2 py-1 rounded">
-                        {resource.content_type}
-                      </span>
-                    </div>
-                    
-                    {resource.description && (
-                      <p className="text-gray-300 text-sm mb-2">{resource.description}</p>
-                    )}
-                    
-                    <div className="flex items-center gap-2 mb-3">
-                      <a
-                        href={resource.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-teal-400 hover:text-teal-300 text-sm flex items-center gap-1"
-                      >
-                        <ExternalLink size={14} />
-                        View Resource
-                      </a>
-                      <span className="text-gray-500 text-sm">•</span>
-                      <span className="text-gray-400 text-sm">
-                        Used {resource.usage_count} time{resource.usage_count !== 1 ? 's' : ''}
-                      </span>
-                    </div>
+              {/* Resources List */}
+              <div className="space-y-3">
+                {resources.length === 0 && !isAdding && !editingId ? (
+                  <div className="text-center py-8 text-gray-400">
+                    <BookOpen size={48} className="mx-auto mb-4 opacity-50" />
+                    <p className="text-lg font-medium">No content resources yet</p>
+                    <p className="text-sm">Add your first resource to start sharing helpful content with clients</p>
+                  </div>
+                ) : (
+                  resources.map((resource) => (
+                    <div
+                      key={resource.id}
+                      className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 hover:border-gray-600 transition-colors"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className={`${getContentTypeColor(resource.content_type)}`}>
+                              {getContentTypeIcon(resource.content_type)}
+                            </span>
+                            <h4 className="font-medium text-white">{resource.title}</h4>
+                            <span className="text-xs text-gray-400 bg-gray-700 px-2 py-1 rounded">
+                              {resource.content_type}
+                            </span>
+                          </div>
+                          
+                          {resource.description && (
+                            <p className="text-gray-300 text-sm mb-2">{resource.description}</p>
+                          )}
+                          
+                          <div className="flex items-center gap-2 mb-3">
+                            <a
+                              href={resource.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-teal-400 hover:text-teal-300 text-sm flex items-center gap-1"
+                            >
+                              <ExternalLink size={14} />
+                              View Resource
+                            </a>
+                            <span className="text-gray-500 text-sm">•</span>
+                            <span className="text-gray-400 text-sm">
+                              Used {resource.usage_count} time{resource.usage_count !== 1 ? 's' : ''}
+                            </span>
+                          </div>
 
-                    {resource.categories.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {resource.categories.map((category) => (
-                          <span
-                            key={category}
-                            className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs"
-                          >
-                            {category}
-                          </span>
-                        ))}
+                          {resource.categories.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {resource.categories.map((category) => (
+                                <span
+                                  key={category}
+                                  className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs"
+                                >
+                                  {category}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex gap-2 ml-4">
+                          <button onClick={() => startEditing(resource)} className="p-2 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 rounded">
+                            <Edit3 size={16} />
+                          </button>
+                          <button onClick={() => handleDeleteResource(resource.id)} className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </div>
-                    )}
-                  </div>
-
-                  <div className="flex gap-2 ml-4">
-                    <button
-                      onClick={() => startEditing(resource)}
-                      className="p-2 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 rounded"
-                    >
-                      <Edit3 size={16} />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteResource(resource.id)}
-                      className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
+                    </div>
+                  ))
+                )}
               </div>
-            ))
-          )}
-        </div>
+          </div>
+        )}
+        
+        {activeTab === 'welcomePacks' && (
+            <WelcomePackManager api={api} allResources={resources} userRoles={userRoles} />
+        )}
       </div>
     </>
   );

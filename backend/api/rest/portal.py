@@ -25,6 +25,7 @@ from data.models.client import Client
 from data.models.resource import Resource, ResourceType, ResourceStatus
 from data.models.portal import PortalComment, CommenterType
 from data.models.portal import PortalLink
+from data.models.resource import ContentResource
 from data.models.event import MarketEvent
 
 # Core services and logic
@@ -75,6 +76,9 @@ class PortalDataResponse(BaseModel):
     # --- NEW: Fields to support the two-stage Hub view ---
     survey_completed: bool = False
     survey_template: Optional[Any] = None # For rendering the survey if not complete
+    # --- NEW: Fields for the Welcome Pack ---
+    welcome_message: Optional[str] = None
+    welcome_pack: List[ContentResource] = []
 
 
 # --- Agent-Facing Endpoint ---
@@ -190,20 +194,25 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
     # --- NEW: Get survey status and template if needed ---
     survey_completed = client.intake_survey_completed
     survey_template = None
+    welcome_pack_resources = []
     if not survey_completed:
+        from agent_core.content_resource_service import get_welcome_pack_resources
         # Placeholder for fetching survey template logic
         # survey_template = crm_service.get_default_survey_for_client(client, session)
         logger.info(f"PORTAL API: Client {client.id} has not completed survey. Hub will render kickoff view.")
+        welcome_pack_resources = get_welcome_pack_resources(user, client, session)
 
     return PortalDataResponse(
         client_name=client.full_name,
-        preferences=client.preferences,
+        preferences=client.preferences or {},
         matches=grouped_matches,
         comments=[], # Comments are now nested in each match
         agent_name=user.full_name,
         curation_rationale=curation_rationale,
         survey_completed=survey_completed,
-        survey_template=survey_template
+        survey_template=survey_template,
+        welcome_message=user.welcome_pack_message,
+        welcome_pack=welcome_pack_resources
     )
 
 @router.post("/feedback/{short_id}")

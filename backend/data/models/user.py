@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from .client import Client, ClientIntakeSurvey
     from .message import Message, ScheduledMessage
     from .resource import Resource, ContentResource
-    from .survey import SurveyQuestion  # Import the new model
+    from .survey import SurveyQuestion, SurveyTemplate  # Import the new models
 
 class UserType(str, Enum):
     REALTOR = "realtor"
@@ -64,6 +64,8 @@ class User(SQLModel, table=True):
     timezone: Optional[str] = Field(default=None, index=True)
     # --- NEW: Field to store custom client roles ---
     client_roles: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
+    welcome_pack_message: Optional[str] = Field(default=None)
+    welcome_packs_config: Optional[Dict[str, List[str]]] = Field(default=None, sa_column=Column(JSON))
 
     # --- Relationships ---
     campaigns: List["CampaignBriefing"] = Relationship(back_populates="user")

@@ -3,18 +3,24 @@
 # ---
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
+from pydantic import BaseModel
 
 from data.database import get_session
-from data.models.user import User
+from data.models.user import User, UserUpdate
 from data.models.resource import ContentResource, ContentResourceCreate, ContentResourceUpdate
 from api.security import get_current_user_from_token
 from data import crm as crm_service
 
 router = APIRouter()
+
+# --- NEW: Pydantic model for Welcome Pack configuration ---
+class WelcomePackConfigPayload(BaseModel):
+    config: Dict[str, List[str]]
+    message: Optional[str] = None
 
 @router.get("/", response_model=List[ContentResource])
 async def get_content_resources(
@@ -448,4 +454,44 @@ async def send_content_to_clients(
     except Exception as e:
         logging.error(f"API: Error sending content resource '{resource_id}' to clients: {str(e)}")
         session.rollback()
-        raise HTTPException(status_code=500, detail="Failed to send content to clients") 
+        raise HTTPException(status_code=500, detail="Failed to send content to clients")
+
+
+@router.get("/welcome-packs-config", response_model=Dict[str, Any])
+async def get_welcome_packs_config(
+    current_user: User = Depends(get_current_user_from_token)
+):
+    """
+    Retrieves the user's current Welcome Pack configuration and message.
+    """
+    return {
+        "config": current_user.welcome_packs_config or {},
+        "message": current_user.welcome_pack_message or ""
+    }
+
+@router.put("/welcome-packs-config", response_model=Dict[str, Any])
+async def update_welcome_packs_config(
+    payload: WelcomePackConfigPayload,
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
+):
+    """
+    Updates the user's Welcome Pack configuration and message.
+    """
+    user_to_update = session.get(User, current_user.id)
+    if not user_to_update:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    # Sanitize data before saving
+    sanitized_config = {
+        role: [str(uuid) for uuid in id_list]
+        for role, id_list in payload.config.items()
+    }
+
+    user_to_update.welcome_packs_config = sanitized_config
+    user_to_update.welcome_pack_message = payload.message
+    session.add(user_to_update)
+    session.commit()
+    session.refresh(user_to_update)
+
+    return {"status": "success", "config": user_to_update.welcome_packs_config, "message": user_to_update.welcome_pack_message} 

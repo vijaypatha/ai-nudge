@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 from data.models.resource import ContentResource, Resource
 from data.models.client import Client
 from data.database import engine
+from data.models.user import User
 from agent_core.llm_client import get_chat_completion
 from agent_core.llm_client import generate_embedding
 
@@ -501,4 +502,30 @@ def increment_resource_usage(resource_id: UUID, user_id: UUID) -> bool:
         
     except Exception as e:
         logging.error(f"Error incrementing resource usage: {e}", exc_info=True)
-        return False 
+        return False
+
+def get_welcome_pack_resources(user: User, client: Client, session: Session) -> List[ContentResource]:
+    """
+    Retrieves the specific list of content resources for a client's Welcome Pack.
+    It prioritizes a client-specific override, then falls back to the user's
+    role-based default, ensuring a personalized experience.
+    """
+    resource_ids_to_fetch_str = []
+
+    # 1. Prioritize a per-client override if it exists
+    if client.welcome_pack_override and len(client.welcome_pack_override) > 0:
+        resource_ids_to_fetch_str = client.welcome_pack_override
+    # 2. Fallback to the role-based default defined in user settings
+    elif user.welcome_packs_config and client.client_role in user.welcome_packs_config:
+        resource_ids_to_fetch_str = user.welcome_packs_config[client.client_role]
+
+    if not resource_ids_to_fetch_str:
+        return []
+
+    resource_ids_to_fetch = [UUID(rid) for rid in resource_ids_to_fetch_str]
+    statement = select(ContentResource).where(ContentResource.id.in_(resource_ids_to_fetch))
+    results = session.exec(statement).all()
+
+    # Preserve the exact order from the config
+    results_map = {str(r.id): r for r in results}
+    return [results_map[rid] for rid in resource_ids_to_fetch_str if rid in results_map] 
