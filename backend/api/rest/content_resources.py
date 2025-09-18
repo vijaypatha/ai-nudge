@@ -477,6 +477,10 @@ async def update_welcome_packs_config(
     session: Session = Depends(get_session)
 ):
     """Updates the user's Welcome Pack configuration and message."""
+    
+    # Add request body logging middleware for debugging
+    import json
+    
     try:
         logging.info(f"API: Updating welcome packs config for user {current_user.id}")
         logging.info(f"API: Received payload: {payload.dict()}")
@@ -484,6 +488,21 @@ async def update_welcome_packs_config(
         user_to_update = session.get(User, current_user.id)
         if not user_to_update:
             raise HTTPException(status_code=404, detail="User not found.")
+
+        # Validate payload structure
+        if not isinstance(payload.config, dict):
+            logging.error(f"API: Config is not a dict: {type(payload.config)}")
+            raise HTTPException(status_code=422, detail="Config must be a dictionary")
+        
+        for role, id_list in payload.config.items():
+            if not isinstance(id_list, list):
+                logging.error(f"API: Config[{role}] is not a list: {type(id_list)}")
+                raise HTTPException(status_code=422, detail=f"Config[{role}] must be a list of strings")
+            
+            for item in id_list:
+                if not isinstance(item, (str, int)):
+                    logging.error(f"API: Invalid ID type in {role}: {item} ({type(item)})")
+                    raise HTTPException(status_code=422, detail=f"All IDs must be strings or integers")
 
         # Sanitize data before saving - ensure all IDs are strings
         sanitized_config = {
@@ -506,7 +525,32 @@ async def update_welcome_packs_config(
         
     except ValidationError as e:
         logging.error(f"API: Validation error in welcome packs config: {e.json()}")
-        raise HTTPException(status_code=422, detail=e.errors())
+        # Format validation errors for better debugging
+        error_details = []
+        for error in e.errors():
+            error_details.append({
+                'field': '.'.join(str(loc) for loc in error['loc']),
+                'message': error['msg'],
+                'type': error['type']
+            })
+        raise HTTPException(status_code=422, detail=error_details)
     except Exception as e:
         logging.error(f"API: Error updating welcome packs config: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to update welcome pack config") 
+        import traceback
+        logging.error(f"API: Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Failed to update welcome pack config")
+
+# Add middleware for request body logging
+@router.middleware("http")
+async def log_requests(request, call_next):
+    if request.method == "PUT" and "welcome-packs-config" in str(request.url):
+        body = await request.body()
+        logging.info(f"API: Raw request body: {body.decode()}")
+        # Re-create request with body for processing
+        from fastapi import Request
+        async def receive():
+            return {"type": "http.request", "body": body}
+        request._receive = receive
+    
+    response = await call_next(request)
+    return response 

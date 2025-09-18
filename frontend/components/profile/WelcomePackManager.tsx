@@ -200,22 +200,33 @@ export const WelcomePackManager: FC<WelcomePackManagerProps> = ({ api, allResour
   const handleSave = async () => {
     setIsSaving(true);
     setStatus('idle');
+    
+    // Ensure payload structure matches backend expectations
     const payload = {
       message: welcomeMessage,
       config: Object.fromEntries(
         Object.entries(packConfig)
           .filter(([key]) => key !== 'library')
-          .map(([role, resources]) => [role.toLowerCase(), resources.map(r => String(r.id))])
+          .map(([role, resources]) => [
+            role.toLowerCase(), 
+            (resources || []).map(r => String(r.id))
+          ])
       ),
     };
 
+    // Debug logging
+    console.log('Sending payload:', JSON.stringify(payload, null, 2));
+
     try {
-      await api.put('/api/content-resources/welcome-packs-config', payload);
+      const response = await api.put('/api/content-resources/welcome-packs-config', payload);
+      console.log('Save successful:', response);
       setStatus('success');
     } catch (error: any) {
-      console.error("Save error details:", error.response?.data || error.message);
+      console.error('Save failed:');
+      console.error('Error:', error);
+      console.error('Response:', error.response?.data);
+      console.error('Status:', error.response?.status);
       setStatus('error');
-      console.error("Failed to save welcome pack config", error);
     } finally {
       setIsSaving(false);
       setTimeout(() => setStatus('idle'), 3000);
