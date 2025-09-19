@@ -27,6 +27,7 @@ from data.models.portal import PortalComment, CommenterType
 from data.models.portal import PortalLink
 from data.models.resource import ContentResource
 from data.models.event import MarketEvent
+from data.models.campaign import CampaignBriefing, CampaignStatus
 
 # Core services and logic
 from data import crm as crm_service
@@ -36,7 +37,7 @@ from agent_core.brain.verticals import VERTICAL_CONFIGS
 from agent_core.agents import guidance as guidance_agent
 
 # Shared utility for creating and decoding secure portal links
-from backend.common.jwt_utils import create_portal_token, decode_portal_token
+from common.jwt_utils import create_portal_token, decode_portal_token
 
 
 # --- Router Setup ---
@@ -64,21 +65,29 @@ class PortalMatch(BaseModel):
     mls_status: Optional[str] = None # NEW: To pass the user-facing MLS status (e.g., Pending, Sold)
     reasons: List[str]
 
+class PortalContentResource(BaseModel):
+    """Pydantic-compatible model for ContentResource to include in the response."""
+    id: UUID
+    title: str
+    url: str
+    description: Optional[str]
+    content_type: str
+
+    class Config:
+        orm_mode = True
+
 class PortalDataResponse(BaseModel):
     """Defines the complete data structure for the client portal view."""
     client_name: str
     preferences: Dict[str, Any]
     matches: List[Dict[str, Any]] # Changed to support grouping
-    comments: List[PortalComment]
+    comments: List[Any] # Kept generic for now
     agent_name: Optional[str] = None
     curation_rationale: Optional[str] = None
-
-    # --- NEW: Fields to support the two-stage Hub view ---
     survey_completed: bool = False
     survey_template: Optional[Any] = None # For rendering the survey if not complete
-    # --- NEW: Fields for the Welcome Pack ---
     welcome_message: Optional[str] = None
-    welcome_pack: List[ContentResource] = []
+    welcome_pack: List[PortalContentResource] = []
 
 
 # --- Agent-Facing Endpoint ---
@@ -120,7 +129,6 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
     and includes survey status to power the two-stage Living Hub.
     """
     from data.models.portal import PortalLink
-    from data.models.campaign import CampaignBriefing
     from sqlmodel import select
 
     # 1. Find the link record in the database
@@ -147,11 +155,37 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
     if not client or not user or client.user_id != user_id:
         raise HTTPException(status_code=404, detail="Associated client or agent not found.")
 
+    # --- START: WELCOME PACK LOGIC ---
+    welcome_pack_resources = []
+    # Use the 'client_role' field from the now-provided client.py model
+    client_role = getattr(client, 'client_role', None) 
+    if client_role and user.welcome_packs_config and client_role in user.welcome_packs_config:
+        ordered_resource_ids_str = user.welcome_packs_config[client_role]
+        if ordered_resource_ids_str:
+            try:
+                # Convert string IDs to UUIDs for the query
+                ordered_resource_ids = [UUID(rid) for rid in ordered_resource_ids_str]
+                
+                # Fetch all resources in a single query
+                resources_stmt = select(ContentResource).where(ContentResource.id.in_(ordered_resource_ids))
+                fetched_resources = session.exec(resources_stmt).all()
+                
+                # Create a map for quick lookup
+                resources_map = {res.id: res for res in fetched_resources}
+                
+                # Re-order the fetched resources to match the configured order
+                for res_id in ordered_resource_ids:
+                    if res_id in resources_map:
+                        welcome_pack_resources.append(resources_map[res_id])
+                        
+            except (ValueError, TypeError) as e:
+                logger.error(f"Error processing welcome pack for user {user.id}, client {client.id}: {e}")
+    # --- END: WELCOME PACK LOGIC ---
+
     # 4. Find all active curation campaigns for this client.
     statement = select(CampaignBriefing).where(
         CampaignBriefing.client_id == client_id,
-        CampaignBriefing.campaign_type == "consolidated_initial_matches",
-        CampaignBriefing.status == "draft" # Assuming 'draft' means active for the portal
+        CampaignBriefing.campaign_type == "consolidated_initial_matches", CampaignBriefing.status == CampaignStatus.DRAFT
     ).order_by(CampaignBriefing.created_at.desc())
     active_campaigns = session.exec(statement).all()
 
@@ -191,16 +225,12 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
 
     curation_rationale = active_campaigns[0].key_intel.get("curation_rationale") if active_campaigns else "Welcome to your portal!"
 
-    # --- NEW: Get survey status and template if needed ---
-    survey_completed = client.intake_survey_completed
+    survey_completed = getattr(client, 'intake_survey_completed', False)
     survey_template = None
-    welcome_pack_resources = []
     if not survey_completed:
-        from agent_core.content_resource_service import get_welcome_pack_resources
         # Placeholder for fetching survey template logic
         # survey_template = crm_service.get_default_survey_for_client(client, session)
         logger.info(f"PORTAL API: Client {client.id} has not completed survey. Hub will render kickoff view.")
-        welcome_pack_resources = get_welcome_pack_resources(user, client, session)
 
     return PortalDataResponse(
         client_name=client.full_name,

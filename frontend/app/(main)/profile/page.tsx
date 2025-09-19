@@ -10,7 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useAppContext, User as UserType } from '@/context/AppContext';
 import { TimezoneSelector } from "@/components/ui/TimezoneSelector";
 import { ContentDiscovery } from "@/components/profile/ContentDiscovery";
-import { ContentResourceManager } from "@/components/profile/ContentResourceManager";
+import { ContentResourceManager, ContentResource } from "@/components/profile/ContentResourceManager";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { RoleManager } from "@/components/settings/RoleManager";
 import { ACTIVE_THEME } from '@/utils/theme';
@@ -315,6 +315,7 @@ export default function ProfilePage() {
     const { api, user, clientRoles, loading: isContextLoading, logout, refreshUser } = useAppContext();
     const [profile, setProfile] = useState<UserType | null>(null);
     const [faqs, setFaqs] = useState<FaqItem[]>([]);
+    const [contentResources, setContentResources] = useState<ContentResource[]>([]);
     const [isEditingProfile, setIsEditingProfile] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -379,8 +380,13 @@ export default function ProfilePage() {
             setIsLoading(true);
             setError(null);
             try {
-                const faqData = await api.get('/api/faqs/');
+                // Fetch FAQs and Content Resources in parallel
+                const [faqData, resourceData] = await Promise.all([
+                    api.get('/api/faqs/'),
+                    api.get('/api/content-resources/')
+                ]);
                 setFaqs(faqData);
+                setContentResources(resourceData);
             } catch (err: any) {
                 setError(err.message || "Could not load your settings.");
             } finally {
@@ -440,6 +446,16 @@ export default function ProfilePage() {
             setFaqs(faqs.filter(f => f.id !== id));
         } catch (err) {
             setError("Failed to remove FAQ.");
+        }
+    };
+
+    // Callback to refresh content resources after an update in the child component
+    const refreshContentResources = async () => {
+        try {
+            const data = await api.get('/api/content-resources/');
+            setContentResources(data);
+        } catch (err) {
+            console.error("Failed to refresh content resources", err);
         }
     };
 
@@ -715,7 +731,12 @@ export default function ProfilePage() {
                             title="Content & Resources"
                             description="Manage documents, links, and other resources that your AI assistant can share with clients when relevant to their needs."
                         >
-                            <ContentResourceManager api={api} userRoles={clientRoles} />
+                            <ContentResourceManager 
+                                api={api} 
+                                userRoles={clientRoles} 
+                                allResources={contentResources} 
+                                onResourcesUpdate={refreshContentResources} 
+                            />
                         </MajorSection>
 
                         {/* Customization & Preferences */}

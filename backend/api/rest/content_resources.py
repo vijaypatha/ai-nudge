@@ -1,14 +1,18 @@
 # ---
 # File Path: backend/api/rest/content_resources.py
+# Purpose: manage the welcome pack configuration
+# ---
+
+# ---
+# File Path: backend/api/rest/content_resources.py
 # ---
 
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import ValidationError
+from pydantic import ValidationError, BaseModel, validator, Field
 from sqlmodel import Session, select
-from pydantic import BaseModel
 
 from data.database import get_session
 from data.models.user import User, UserUpdate
@@ -20,8 +24,30 @@ router = APIRouter()
 
 # --- NEW: Pydantic model for Welcome Pack configuration ---
 class WelcomePackConfigPayload(BaseModel):
-    config: Dict[str, List[str]]
+    config: Dict[str, List[Union[str, dict]]]  # Allow both strings and dicts
     message: Optional[str] = None
+    
+    @validator('config', pre=True)
+    def convert_resource_objects_to_strings(cls, v):
+        """Convert resource objects to string IDs"""
+        if not isinstance(v, dict):
+            return v
+            
+        converted = {}
+        for role, resources in v.items():
+            if not isinstance(resources, list):
+                converted[role] = []
+                continue
+                
+            string_ids = []
+            for resource in resources:
+                if isinstance(resource, dict) and 'id' in resource:
+                    string_ids.append(str(resource['id']))
+                else:
+                    string_ids.append(str(resource))
+            converted[role] = string_ids
+            
+        return converted
 
 @router.get("/", response_model=List[ContentResource])
 async def get_content_resources(
@@ -32,13 +58,11 @@ async def get_content_resources(
     Get all content resources for the current user.
     """
     logging.info(f"API: Getting content resources for user '{current_user.id}'")
-    
     statement = select(ContentResource).where(
         ContentResource.user_id == current_user.id,
         ContentResource.status == "active"
     )
     resources = session.exec(statement).all()
-    
     logging.info(f"API: Found {len(resources)} content resources for user '{current_user.id}'")
     return resources
 
@@ -84,7 +108,6 @@ async def update_content_resource(
         ContentResource.user_id == current_user.id
     )
     resource = session.exec(statement).first()
-    
     if not resource:
         raise HTTPException(status_code=404, detail="Content resource not found")
     
@@ -117,7 +140,6 @@ async def delete_content_resource(
         ContentResource.user_id == current_user.id
     )
     resource = session.exec(statement).first()
-    
     if not resource:
         raise HTTPException(status_code=404, detail="Content resource not found")
     
@@ -168,7 +190,6 @@ async def get_content_suggestions_for_client(
         ContentResource.status == "active"
     )
     all_resources = session.exec(statement).all()
-    
     logging.info(f"API_CONTENT_SUGGESTIONS: Found {len(all_resources)} active resources for user '{current_user.id}'")
     
     # Enhanced matching with fuzzy support
@@ -234,7 +255,6 @@ async def increment_resource_usage(
         ContentResource.user_id == current_user.id
     )
     resource = session.exec(statement).first()
-    
     if not resource:
         raise HTTPException(status_code=404, detail="Content resource not found")
     
@@ -266,7 +286,6 @@ async def get_content_recommendations(
             ContentResource.status == "active"
         )
         all_resources = session.exec(statement).all()
-        
         logging.info(f"API_CONTENT_RECOMMENDATIONS: Found {len(all_resources)} active resources for user '{current_user.id}'")
         
         if not all_resources:
@@ -283,7 +302,6 @@ async def get_content_recommendations(
         # Get all clients for the user
         from data.models.client import Client
         clients = session.exec(select(Client).where(Client.user_id == current_user.id)).all()
-        
         logging.info(f"API_CONTENT_RECOMMENDATIONS: Processing {len(clients)} clients")
         
         recommendations = []
@@ -375,6 +393,7 @@ async def get_content_recommendations(
         }
         
         logging.info(f"API_CONTENT_RECOMMENDATIONS: Generated {len(recommendations)} recommendations for user '{current_user.id}'")
+        
         return {
             "recommendations": recommendations,
             "display_config": display_config
@@ -445,6 +464,7 @@ async def send_content_to_clients(
         # Increment usage count
         resource.usage_count += len(clients)
         session.add(resource)
+        
         session.commit()
         
         logging.info(f"API: Successfully sent content resource '{resource_id}' to {len(clients)} clients")
@@ -456,7 +476,6 @@ async def send_content_to_clients(
         logging.error(f"API: Error sending content resource '{resource_id}' to clients: {str(e)}")
         session.rollback()
         raise HTTPException(status_code=500, detail="Failed to send content to clients")
-
 
 @router.get("/welcome-packs-config", response_model=Dict[str, Any])
 async def get_welcome_packs_config(
@@ -478,44 +497,51 @@ async def update_welcome_packs_config(
 ):
     """Updates the user's Welcome Pack configuration and message."""
     
-    # Add request body logging middleware for debugging
-    import json
-    
     try:
         logging.info(f"API: Updating welcome packs config for user {current_user.id}")
-        logging.info(f"API: Received payload: {payload.dict()}")
+        logging.info(f"API: Received payload config keys: {list(payload.config.keys())}")
         
         user_to_update = session.get(User, current_user.id)
         if not user_to_update:
             raise HTTPException(status_code=404, detail="User not found.")
-
-        # Validate payload structure
-        if not isinstance(payload.config, dict):
-            logging.error(f"API: Config is not a dict: {type(payload.config)}")
-            raise HTTPException(status_code=422, detail="Config must be a dictionary")
         
-        for role, id_list in payload.config.items():
-            if not isinstance(id_list, list):
-                logging.error(f"API: Config[{role}] is not a list: {type(id_list)}")
-                raise HTTPException(status_code=422, detail=f"Config[{role}] must be a list of strings")
+        # Validate that all resource IDs exist and belong to the user
+        all_resource_ids = []
+        for role, resource_ids in payload.config.items():
+            all_resource_ids.extend(resource_ids)
+        
+        if all_resource_ids:
+            # Convert string IDs back to UUIDs for database query
+            try:
+                uuid_ids = [UUID(rid) for rid in all_resource_ids]
+            except ValueError as e:
+                logging.error(f"API: Invalid UUID format in resource IDs: {e}")
+                raise HTTPException(status_code=422, detail="Invalid resource ID format")
             
-            for item in id_list:
-                if not isinstance(item, (str, int)):
-                    logging.error(f"API: Invalid ID type in {role}: {item} ({type(item)})")
-                    raise HTTPException(status_code=422, detail=f"All IDs must be strings or integers")
-
-        # Sanitize data before saving - ensure all IDs are strings
-        sanitized_config = {
-            role: [str(uuid_val) for uuid_val in id_list] 
-            for role, id_list in payload.config.items()
-        }
+            # Verify all resources exist and belong to user
+            statement = select(ContentResource).where(
+                ContentResource.id.in_(uuid_ids),
+                ContentResource.user_id == current_user.id,
+                ContentResource.status == "active"
+            )
+            existing_resources = session.exec(statement).all()
+            existing_ids = {str(r.id) for r in existing_resources}
+            
+            # Check for missing resources
+            missing_ids = set(all_resource_ids) - existing_ids
+            if missing_ids:
+                logging.error(f"API: Resources not found or not owned by user: {missing_ids}")
+                raise HTTPException(status_code=422, detail=f"Invalid or inaccessible resource IDs: {list(missing_ids)}")
         
-        user_to_update.welcome_packs_config = sanitized_config
+        # Update user with validated config
+        user_to_update.welcome_packs_config = payload.config
         user_to_update.welcome_pack_message = payload.message
         
         session.add(user_to_update)
         session.commit()
         session.refresh(user_to_update)
+        
+        logging.info(f"API: Successfully updated welcome packs config for user {current_user.id}")
         
         return {
             "status": "success",
@@ -523,19 +549,11 @@ async def update_welcome_packs_config(
             "message": user_to_update.welcome_pack_message
         }
         
-    except ValidationError as e:
-        logging.error(f"API: Validation error in welcome packs config: {e.json()}")
-        # Format validation errors for better debugging
-        error_details = []
-        for error in e.errors():
-            error_details.append({
-                'field': '.'.join(str(loc) for loc in error['loc']),
-                'message': error['msg'],
-                'type': error['type']
-            })
-        raise HTTPException(status_code=422, detail=error_details)
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"API: Error updating welcome packs config: {str(e)}")
         import traceback
         logging.error(f"API: Full traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail="Failed to update welcome pack config") 
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update welcome pack config")
