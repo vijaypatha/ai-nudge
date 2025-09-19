@@ -24,30 +24,8 @@ router = APIRouter()
 
 # --- NEW: Pydantic model for Welcome Pack configuration ---
 class WelcomePackConfigPayload(BaseModel):
-    config: Dict[str, List[Union[str, dict]]]  # Allow both strings and dicts
+    config: Dict[str, List[str]]
     message: Optional[str] = None
-    
-    @validator('config', pre=True)
-    def convert_resource_objects_to_strings(cls, v):
-        """Convert resource objects to string IDs"""
-        if not isinstance(v, dict):
-            return v
-            
-        converted = {}
-        for role, resources in v.items():
-            if not isinstance(resources, list):
-                converted[role] = []
-                continue
-                
-            string_ids = []
-            for resource in resources:
-                if isinstance(resource, dict) and 'id' in resource:
-                    string_ids.append(str(resource['id']))
-                else:
-                    string_ids.append(str(resource))
-            converted[role] = string_ids
-            
-        return converted
 
 @router.get("/", response_model=List[ContentResource])
 async def get_content_resources(
