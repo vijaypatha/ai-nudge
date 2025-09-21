@@ -278,7 +278,7 @@ export const ContentResourceManager: FC<ContentResourceManagerProps> = ({ api, u
                   value={formData.title}
                   onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
                   className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white placeholder-slate-400 focus:border-teal-500 focus:ring-1 focus:ring-teal-500" 
-                  placeholder="e.g., Guide to Pre-Approval"
+                  placeholder="e.g., Welcome Video"
                 />
               </div>
 

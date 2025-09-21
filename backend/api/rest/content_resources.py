@@ -12,8 +12,8 @@ from typing import List, Optional, Dict, Any, Union
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError, BaseModel, validator, Field
+from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, select
-
 from data.database import get_session
 from data.models.user import User, UserUpdate
 from data.models.resource import ContentResource, ContentResourceCreate, ContentResourceUpdate
@@ -24,8 +24,8 @@ router = APIRouter()
 
 # --- NEW: Pydantic model for Welcome Pack configuration ---
 class WelcomePackConfigPayload(BaseModel):
-    config: Dict[str, List[str]]
-    message: Optional[str] = None
+    config: Any  # Temporarily accept any structure for diagnostics
+    message: Any  # Temporarily accept any structure for diagnostics
 
 @router.get("/", response_model=List[ContentResource])
 async def get_content_resources(
@@ -54,19 +54,86 @@ async def create_content_resource(
     Create a new content resource for the current user.
     """
     logging.info(f"API: Creating content resource for user '{current_user.id}'")
-    
     # Create the content resource
     new_resource = ContentResource(
         user_id=current_user.id,
         **resource_data.model_dump()
     )
-    
     session.add(new_resource)
     session.commit()
     session.refresh(new_resource)
-    
     logging.info(f"API: Created content resource '{new_resource.id}' for user '{current_user.id}'")
     return new_resource
+
+# MOVED: Welcome pack configuration endpoints BEFORE the generic /{resource_id} endpoint
+@router.get("/welcome-packs-config", response_model=Dict[str, Any])
+async def get_welcome_packs_config(
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)  # Add this dependency
+):
+    """Retrieves the user's current Welcome Pack configuration and message."""
+    
+    # Fetch fresh user data from database instead of using cached current_user
+    fresh_user = session.get(User, current_user.id)
+    if not fresh_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    logging.warning(f"GET REQUEST: User {fresh_user.id} welcome_packs_config: {fresh_user.welcome_packs_config}")
+    logging.warning(f"GET REQUEST: User {fresh_user.id} welcome_pack_message: {fresh_user.welcome_pack_message}")
+    
+    return {
+        "config": fresh_user.welcome_packs_config or {},
+        "message": fresh_user.welcome_pack_message or ""
+    }
+
+@router.put("/welcome-packs-config", response_model=Dict[str, Any])
+async def update_welcome_packs_config(
+    payload: WelcomePackConfigPayload,
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
+):
+    """Updates the user's Welcome Pack configuration and message."""
+    logging.warning(f"SAVE ATTEMPT: Starting update for user {current_user.id}")
+    logging.warning(f"SAVE ATTEMPT: Received config: {payload.config}")
+    logging.warning(f"SAVE ATTEMPT: Received message: {payload.message}")
+    
+    try:
+        # Get the current user for updating
+        user_to_update = session.get(User, current_user.id)
+        if not user_to_update:
+            logging.error(f"SAVE ERROR: User {current_user.id} not found")
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        logging.warning(f"SAVE ATTEMPT: Found user {user_to_update.id}")
+        logging.warning(f"SAVE ATTEMPT: Current config: {user_to_update.welcome_packs_config}")
+        
+        # Update the welcome pack configuration
+        user_to_update.welcome_packs_config = payload.config
+        user_to_update.welcome_pack_message = payload.message
+        
+        logging.warning(f"SAVE ATTEMPT: Updated config to: {user_to_update.welcome_packs_config}")
+        
+        # Mark the JSON field as modified for SQLAlchemy
+        flag_modified(user_to_update, "welcome_packs_config")
+        logging.warning("SAVE ATTEMPT: Marked welcome_packs_config as modified")
+        
+        session.add(user_to_update)
+        logging.warning("SAVE ATTEMPT: Added user to session")
+        
+        session.commit()
+        logging.warning("SAVE ATTEMPT: Committed transaction")
+        
+        session.refresh(user_to_update)
+        logging.warning(f"SAVE SUCCESS: Final config: {user_to_update.welcome_packs_config}")
+        
+        return {"status": "success", "message": "Welcome pack configuration updated"}
+        
+    except Exception as e:
+        logging.error(f"SAVE ERROR: Exception occurred: {str(e)}")
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update welcome pack configuration: {str(e)}")
+
+
 
 @router.put("/{resource_id}", response_model=ContentResource)
 async def update_content_resource(
@@ -79,7 +146,6 @@ async def update_content_resource(
     Update an existing content resource.
     """
     logging.info(f"API: Updating content resource '{resource_id}' for user '{current_user.id}'")
-    
     # Get the resource
     statement = select(ContentResource).where(
         ContentResource.id == resource_id,
@@ -88,16 +154,13 @@ async def update_content_resource(
     resource = session.exec(statement).first()
     if not resource:
         raise HTTPException(status_code=404, detail="Content resource not found")
-    
     # Update the resource
     update_data = resource_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(resource, field, value)
-    
     session.add(resource)
     session.commit()
     session.refresh(resource)
-    
     logging.info(f"API: Updated content resource '{resource_id}' for user '{current_user.id}'")
     return resource
 
@@ -111,7 +174,6 @@ async def delete_content_resource(
     Delete a content resource (soft delete by setting status to archived).
     """
     logging.info(f"API: Deleting content resource '{resource_id}' for user '{current_user.id}'")
-    
     # Get the resource
     statement = select(ContentResource).where(
         ContentResource.id == resource_id,
@@ -120,12 +182,10 @@ async def delete_content_resource(
     resource = session.exec(statement).first()
     if not resource:
         raise HTTPException(status_code=404, detail="Content resource not found")
-    
     # Soft delete by setting status to archived
     resource.status = "archived"
     session.add(resource)
     session.commit()
-    
     logging.info(f"API: Deleted content resource '{resource_id}' for user '{current_user.id}'")
     return {"message": "Content resource deleted successfully"}
 
@@ -142,7 +202,6 @@ async def get_content_suggestions_for_client(
     Now supports fuzzy matching and case-insensitive matching.
     """
     logging.info(f"API_CONTENT_SUGGESTIONS: Getting content suggestions for client '{client_id}' and user '{current_user.id}' (fuzzy={use_fuzzy}, threshold={fuzzy_threshold})")
-    
     # Get the client
     client = crm_service.get_client_by_id(client_id, current_user.id)
     if not client:
@@ -157,7 +216,6 @@ async def get_content_suggestions_for_client(
         client_tags.extend([tag.lower() for tag in client.ai_tags])
     
     logging.info(f"API_CONTENT_SUGGESTIONS: Client '{client.full_name}' has {len(client_tags)} tags: {client_tags}")
-    
     if not client_tags:
         logging.info(f"API_CONTENT_SUGGESTIONS: No tags found for client '{client_id}', returning empty suggestions")
         return []
@@ -212,7 +270,6 @@ async def get_content_suggestions_for_client(
     
     # Sort by usage count (most used first) and then by creation date
     suggested_resources.sort(key=lambda x: (x.usage_count, x.created_at), reverse=True)
-    
     logging.info(f"API_CONTENT_SUGGESTIONS: Found {len(suggested_resources)} content suggestions for client '{client_id}'")
     return suggested_resources
 
@@ -226,7 +283,6 @@ async def increment_resource_usage(
     Increment the usage count for a content resource.
     """
     logging.info(f"API: Incrementing usage for content resource '{resource_id}' for user '{current_user.id}'")
-    
     # Get the resource
     statement = select(ContentResource).where(
         ContentResource.id == resource_id,
@@ -235,12 +291,10 @@ async def increment_resource_usage(
     resource = session.exec(statement).first()
     if not resource:
         raise HTTPException(status_code=404, detail="Content resource not found")
-    
     # Increment usage count
     resource.usage_count += 1
     session.add(resource)
     session.commit()
-    
     logging.info(f"API: Incremented usage for content resource '{resource_id}' for user '{current_user.id}'")
     return {"message": "Usage count incremented successfully"}
 
@@ -256,7 +310,6 @@ async def get_content_recommendations(
     Now supports fuzzy matching and case-insensitive matching.
     """
     logging.info(f"API_CONTENT_RECOMMENDATIONS: Getting content recommendations for user '{current_user.id}' (fuzzy={use_fuzzy}, threshold={fuzzy_threshold})")
-    
     try:
         # Get all active content resources for the user
         statement = select(ContentResource).where(
@@ -371,12 +424,11 @@ async def get_content_recommendations(
         }
         
         logging.info(f"API_CONTENT_RECOMMENDATIONS: Generated {len(recommendations)} recommendations for user '{current_user.id}'")
-        
         return {
             "recommendations": recommendations,
             "display_config": display_config
         }
-        
+    
     except Exception as e:
         logging.error(f"API_CONTENT_RECOMMENDATIONS: Error getting content recommendations for user '{current_user.id}': {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to get content recommendations")
@@ -392,7 +444,6 @@ async def send_content_to_clients(
     Send a content resource to multiple clients.
     """
     logging.info(f"API: Sending content resource '{resource_id}' to {len(client_ids)} clients for user '{current_user.id}'")
-    
     try:
         # Get the resource
         resource = session.exec(
@@ -442,96 +493,14 @@ async def send_content_to_clients(
         # Increment usage count
         resource.usage_count += len(clients)
         session.add(resource)
-        
         session.commit()
         
         logging.info(f"API: Successfully sent content resource '{resource_id}' to {len(clients)} clients")
         return {"message": f"Content sent to {len(clients)} clients successfully"}
-        
+    
     except HTTPException:
         raise
     except Exception as e:
         logging.error(f"API: Error sending content resource '{resource_id}' to clients: {str(e)}")
         session.rollback()
         raise HTTPException(status_code=500, detail="Failed to send content to clients")
-
-@router.get("/welcome-packs-config", response_model=Dict[str, Any])
-async def get_welcome_packs_config(
-    current_user: User = Depends(get_current_user_from_token)
-):
-    """
-    Retrieves the user's current Welcome Pack configuration and message.
-    """
-    return {
-        "config": current_user.welcome_packs_config or {},
-        "message": current_user.welcome_pack_message or ""
-    }
-
-@router.put("/welcome-packs-config", response_model=Dict[str, Any])
-async def update_welcome_packs_config(
-    payload: WelcomePackConfigPayload,
-    current_user: User = Depends(get_current_user_from_token),
-    session: Session = Depends(get_session)
-):
-    """Updates the user's Welcome Pack configuration and message."""
-    
-    try:
-        logging.info(f"API: Updating welcome packs config for user {current_user.id}")
-        logging.info(f"API: Received payload config keys: {list(payload.config.keys())}")
-        
-        user_to_update = session.get(User, current_user.id)
-        if not user_to_update:
-            raise HTTPException(status_code=404, detail="User not found.")
-        
-        # Validate that all resource IDs exist and belong to the user
-        all_resource_ids = []
-        for role, resource_ids in payload.config.items():
-            all_resource_ids.extend(resource_ids)
-        
-        if all_resource_ids:
-            # Convert string IDs back to UUIDs for database query
-            try:
-                uuid_ids = [UUID(rid) for rid in all_resource_ids]
-            except ValueError as e:
-                logging.error(f"API: Invalid UUID format in resource IDs: {e}")
-                raise HTTPException(status_code=422, detail="Invalid resource ID format")
-            
-            # Verify all resources exist and belong to user
-            statement = select(ContentResource).where(
-                ContentResource.id.in_(uuid_ids),
-                ContentResource.user_id == current_user.id,
-                ContentResource.status == "active"
-            )
-            existing_resources = session.exec(statement).all()
-            existing_ids = {str(r.id) for r in existing_resources}
-            
-            # Check for missing resources
-            missing_ids = set(all_resource_ids) - existing_ids
-            if missing_ids:
-                logging.error(f"API: Resources not found or not owned by user: {missing_ids}")
-                raise HTTPException(status_code=422, detail=f"Invalid or inaccessible resource IDs: {list(missing_ids)}")
-        
-        # Update user with validated config
-        user_to_update.welcome_packs_config = payload.config
-        user_to_update.welcome_pack_message = payload.message
-        
-        session.add(user_to_update)
-        session.commit()
-        session.refresh(user_to_update)
-        
-        logging.info(f"API: Successfully updated welcome packs config for user {current_user.id}")
-        
-        return {
-            "status": "success",
-            "config": user_to_update.welcome_packs_config,
-            "message": user_to_update.welcome_pack_message
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logging.error(f"API: Error updating welcome packs config: {str(e)}")
-        import traceback
-        logging.error(f"API: Full traceback: {traceback.format_exc()}")
-        session.rollback()
-        raise HTTPException(status_code=500, detail="Failed to update welcome pack config")

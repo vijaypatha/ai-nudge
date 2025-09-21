@@ -1,8 +1,13 @@
 # FILE: backend/api/rest/portal.py
+
 """
+
 Manages all API endpoints related to the interactive, public-facing client portal.
+
 This includes generating secure access links, displaying curated matches, and
+
 receiving client feedback.
+
 """
 
 import logging
@@ -15,6 +20,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 
 # --- Local Application Imports ---
+
 # Database and authentication dependencies
 from data.database import get_session
 from backend.api.security import get_current_user_from_token
@@ -39,13 +45,12 @@ from agent_core.agents import guidance as guidance_agent
 # Shared utility for creating and decoding secure portal links
 from common.jwt_utils import create_portal_token, decode_portal_token
 
-
 # --- Router Setup ---
+
 # Initializes the FastAPI router for all portal-related endpoints.
 router = APIRouter(prefix="/portal", tags=["Client Portal"])
 logger = logging.getLogger(__name__)
 settings = get_settings()
-
 
 # --- Pydantic Models for a Clean API Contract ---
 
@@ -89,7 +94,6 @@ class PortalDataResponse(BaseModel):
     welcome_message: Optional[str] = None
     welcome_pack: List[PortalContentResource] = []
 
-
 # --- Agent-Facing Endpoint ---
 
 @router.post("/{client_id}/generate-link")
@@ -116,9 +120,7 @@ async def generate_portal_link(
     # If no link exists, create it (part of the Hub setup)
     from agent_core.brain.nudge_engine import setup_client_portal
     portal_url = await setup_client_portal(client, current_user, session)
-
     return {"portal_url": portal_url}
-
 
 # --- Public, Client-Facing Endpoints ---
 
@@ -157,10 +159,13 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
 
     # --- START: WELCOME PACK LOGIC ---
     welcome_pack_resources = []
+
     # Use the 'client_role' field from the now-provided client.py model
-    client_role = getattr(client, 'client_role', None) 
+    client_role = getattr(client, 'client_role', None)
+
     if client_role and user.welcome_packs_config and client_role in user.welcome_packs_config:
         ordered_resource_ids_str = user.welcome_packs_config[client_role]
+        
         if ordered_resource_ids_str:
             try:
                 # Convert string IDs to UUIDs for the query
@@ -174,30 +179,45 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
                 resources_map = {res.id: res for res in fetched_resources}
                 
                 # Re-order the fetched resources to match the configured order
+                # FIX: Transform ContentResource to PortalContentResource
                 for res_id in ordered_resource_ids:
                     if res_id in resources_map:
-                        welcome_pack_resources.append(resources_map[res_id])
+                        resource = resources_map[res_id]
+                        # Transform to PortalContentResource format
+                        portal_resource = PortalContentResource(
+                            id=resource.id,
+                            title=resource.title,
+                            url=resource.url,
+                            description=resource.description,
+                            content_type=resource.content_type
+                        )
+                        welcome_pack_resources.append(portal_resource)
                         
             except (ValueError, TypeError) as e:
                 logger.error(f"Error processing welcome pack for user {user.id}, client {client.id}: {e}")
+
     # --- END: WELCOME PACK LOGIC ---
 
     # 4. Find all active curation campaigns for this client.
     statement = select(CampaignBriefing).where(
         CampaignBriefing.client_id == client_id,
-        CampaignBriefing.campaign_type == "consolidated_initial_matches", CampaignBriefing.status == CampaignStatus.DRAFT
+        CampaignBriefing.campaign_type == "consolidated_initial_matches",
+        CampaignBriefing.status == CampaignStatus.DRAFT
     ).order_by(CampaignBriefing.created_at.desc())
+
     active_campaigns = session.exec(statement).all()
 
     # 5. Process each campaign to build a grouped list of matches.
     grouped_matches = []
     all_resource_ids = set()
+
     for camp in active_campaigns:
         curated_matches_data = camp.key_intel.get("matched_resource_ids", [])
         if not curated_matches_data: continue
 
         resource_ids = [UUID(match["resource_id"]) for match in curated_matches_data]
         all_resource_ids.update(resource_ids)
+
         grouped_matches.append({
             "curation_date": camp.created_at.isoformat(),
             "matches": curated_matches_data
@@ -206,6 +226,7 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
     # 6. Hydrate all unique resources in a single query
     resource_map = {}
     comments_map = {}
+
     if all_resource_ids:
         resources = session.exec(select(Resource).where(Resource.id.in_(list(all_resource_ids)))).all()
         resource_map = {str(r.id): r for r in resources}
@@ -227,8 +248,9 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
 
     survey_completed = getattr(client, 'intake_survey_completed', False)
     survey_template = None
+
     if not survey_completed:
-        # Placeholder for fetching survey template logic
+        # Placeholder for fetching survey template logic...
         # survey_template = crm_service.get_default_survey_for_client(client, session)
         logger.info(f"PORTAL API: Client {client.id} has not completed survey. Hub will render kickoff view.")
 
@@ -242,13 +264,14 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
         survey_completed=survey_completed,
         survey_template=survey_template,
         welcome_message=user.welcome_pack_message,
-        welcome_pack=welcome_pack_resources
+        welcome_pack=welcome_pack_resources  # Now properly transformed!
     )
+
 
 @router.post("/feedback/{short_id}")
 async def submit_portal_feedback(
     short_id: str,
-    payload: PortalFeedbackPayload, 
+    payload: PortalFeedbackPayload,
     session: Session = Depends(get_session)
 ):
     """
@@ -285,7 +308,13 @@ async def submit_portal_feedback(
 
     # If the client left a comment, save it and format it as a note
     if payload.comment_text:
-        new_comment = PortalComment(user_id=user_id, client_id=client_id, resource_id=payload.resource_id, commenter_type=CommenterType.CLIENT, comment_text=payload.comment_text)
+        new_comment = PortalComment(
+            user_id=user_id, 
+            client_id=client_id, 
+            resource_id=payload.resource_id, 
+            commenter_type=CommenterType.CLIENT, 
+            comment_text=payload.comment_text
+        )
         session.add(new_comment)
         note_to_add = f"Client commented on '{address}': '{payload.comment_text}'"
 
@@ -299,5 +328,6 @@ async def submit_portal_feedback(
         await crm_service.update_client_intel(client_id, user_id, notes_to_add=note_to_add)
 
     session.commit()
+
     logger.info(f"PORTAL API: Received feedback from client {client_id}.")
     return {"status": "success", "message": "Feedback received"}
