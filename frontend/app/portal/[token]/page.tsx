@@ -16,6 +16,17 @@ interface ContentResource {
     description?: string;
     content_type: 'article' | 'video' | 'document';
 }
+
+interface ConversationContext {
+  opening_message: string;
+  relationship_context?: string;
+  personalization_tags: string[];
+}
+
+interface RecommendedContent extends ContentResource {
+  match_score: number;
+  reasoning?: string;
+}
 interface PortalPreferences {
     [key: string]: any;
 }
@@ -55,6 +66,8 @@ interface PortalData {
     survey_template: any | null; // Placeholder for survey structure
     welcome_message?: string;
     welcome_pack: ContentResource[];
+    conversation_context?: ConversationContext;
+    recommended_content: RecommendedContent[];
 }
 
 
@@ -129,6 +142,110 @@ const PreferenceChip: FC<{ label: string; value: any }> = ({ label, value }) => 
             <p className="text-white font-semibold text-sm">{displayValue}</p>
         </div>
     );
+};
+
+const ProfessionalHeader: FC<{ agentName?: string; conversationContext?: ConversationContext }> = ({ 
+  agentName, 
+  conversationContext 
+}) => {
+  return (
+    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-lg border border-blue-100 mb-6">
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-lg">
+          {agentName?.charAt(0) || 'A'}
+        </div>
+        <div className="flex-1">
+          <h2 className="text-xl font-semibold text-gray-900">
+            {agentName || 'Your Agent'}
+          </h2>
+          <p className="text-sm text-blue-600 font-medium">
+            {conversationContext?.personalization_tags.some(tag => 
+              tag.includes('therapy') || tag.includes('wellness') || tag.includes('anxiety')
+            ) 
+              ? 'Your Licensed Therapist'
+              : conversationContext?.personalization_tags.some(tag =>
+                tag.includes('property') || tag.includes('home') || tag.includes('real estate')
+              )
+              ? 'Your Real Estate Professional' 
+              : 'Your Professional Advisor'
+            }
+          </p>
+        </div>
+        {conversationContext?.personalization_tags.length && (
+          <div className="flex flex-wrap gap-1">
+            {conversationContext.personalization_tags.slice(0, 3).map((tag, idx) => (
+              <span key={idx} className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs">
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      {conversationContext?.opening_message && (
+        <div className="mt-4 p-4 bg-white rounded-lg border border-blue-100">
+          <p className="text-gray-700 leading-relaxed">
+            {conversationContext.opening_message}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const RecommendedContentSection: FC<{ content: RecommendedContent[] }> = ({ content }) => {
+  if (!content.length) return null;
+
+  const getContentIcon = (contentType: string) => {
+    switch (contentType) {
+      case 'video': return <Video className="w-4 h-4" />;
+      case 'document': return <FileText className="w-4 h-4" />;
+      default: return <BookOpen className="w-4 h-4" />;
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+      <h3 className="text-lg font-semibold text-gray-900 mb-4">
+        📚 Resources I've Prepared for You
+      </h3>
+      <div className="grid gap-4">
+        {content.map((item) => (
+          <div key={item.id} className="border border-gray-100 rounded-lg p-4 hover:border-blue-200 transition-colors">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 p-2 bg-blue-50 rounded-lg text-blue-600">
+                {getContentIcon(item.content_type)}
+              </div>
+              <div className="flex-1">
+                <h4 className="font-semibold text-gray-900 mb-1">
+                  <a 
+                    href={item.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="hover:text-blue-600 transition-colors"
+                  >
+                    {item.title}
+                  </a>
+                </h4>
+                {item.description && (
+                  <p className="text-sm text-gray-600 mb-2">{item.description}</p>
+                )}
+                {item.reasoning && (
+                  <p className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                    {item.reasoning}
+                  </p>
+                )}
+              </div>
+              <div className="flex-shrink-0 text-right">
+                <div className="text-xs text-gray-500">
+                  {Math.round(item.match_score * 100)}% match
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 };
 
 const PropertyCard: FC<{ resource: PortalMatch; token: string; onImageClick: (images: string[], index: number) => void }> = ({ resource, token, onImageClick }) => {
@@ -244,6 +361,69 @@ const getContentTypeIcon = (type: string) => {
         case 'document': return <FileText className="w-5 h-5 text-orange-400" />;
         default: return <BookOpen className="w-5 h-5 text-blue-400" />;
     }
+};
+
+const WelcomePackSection: FC<{ items: ContentResource[]; onComplete: () => void }> = ({ items, onComplete }) => {
+  const [completedItems, setCompletedItems] = useState<Set<string>>(new Set());
+  
+  const handleItemComplete = (itemId: string) => {
+    setCompletedItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
+    });
+  };
+
+  const allCompleted = completedItems.size === items.length;
+
+  useEffect(() => {
+    if (allCompleted) {
+      onComplete();
+    }
+  }, [allCompleted, onComplete]);
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+      <h3 className="text-lg font-semibold text-gray-900 mb-4">Welcome Pack</h3>
+      <div className="space-y-3">
+        {items.map((item) => (
+          <div key={item.id} className="flex items-center gap-3 p-3 border border-gray-100 rounded-lg">
+            <button
+              onClick={() => handleItemComplete(item.id)}
+              className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                completedItems.has(item.id)
+                  ? 'bg-blue-500 border-blue-500 text-white'
+                  : 'border-gray-300 hover:border-blue-400'
+              }`}
+            >
+              {completedItems.has(item.id) && <CheckSquare className="w-3 h-3" />}
+            </button>
+            <div className="flex-shrink-0">{getContentTypeIcon(item.content_type)}</div>
+            <div className="flex-1">
+              <a 
+                href={item.url} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="font-semibold text-gray-900 hover:text-blue-600 transition-colors"
+              >
+                {item.title}
+              </a>
+              {item.description && <p className="text-sm text-gray-600">{item.description}</p>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {allCompleted && (
+        <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+          <p className="text-sm text-green-700">✅ Welcome pack completed! You're all set.</p>
+        </div>
+      )}
+    </div>
+  );
 };
 
 // --- MODIFIED: Kickoff view now includes the Welcome Pack ---
@@ -398,17 +578,113 @@ export default function PortalPage({ params }: { params: { token: string }}) {
         );
     }
 
+  // Determine vertical context for theming
+  const isRealEstate = portalData?.conversation_context?.personalization_tags.some(tag => 
+    tag.includes('property') || tag.includes('home') || tag.includes('real estate')
+  );
+  const isTherapy = portalData?.conversation_context?.personalization_tags.some(tag =>
+    tag.includes('therapy') || tag.includes('wellness') || tag.includes('healing')
+  );
+
     return (
-        <div className="min-h-screen bg-gray-900 text-white font-sans">
+        <div className="min-h-screen bg-gray-50">
             {isLightboxOpen && <Lightbox images={lightboxImages} startIndex={lightboxStartIndex} onClose={handleCloseLightbox} />}
-            <main>
-                {/* --- MODIFICATION: Conditionally render Hub or Survey view --- */}
-                {portalData.survey_completed ? (
-                    <HubView portalData={portalData} token={token} onOpenLightbox={handleOpenLightbox} />
-                ) : (
-                    <SurveyKickoffView portalData={portalData} />
+            
+            {/* Header */}
+            <header className="bg-white shadow-sm border-b border-gray-200">
+                <div className="max-w-6xl mx-auto px-6 py-4">
+                    <h1 className="text-2xl font-bold text-gray-900">
+                        Welcome, {portalData.client_name}
+                    </h1>
+                </div>
+            </header>
+
+            {/* Main Content */}
+            <div className="max-w-6xl mx-auto p-6">
+                
+                {/* Professional Header with Conversation Context */}
+                <ProfessionalHeader 
+                  agentName={portalData.agent_name}
+                  conversationContext={portalData.conversation_context}
+                />
+                
+                {/* Survey Section - Only show if not completed */}
+                {!portalData.survey_completed && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="w-5 h-5 text-blue-600" />
+                      <div>
+                        <h3 className="font-semibold text-blue-900">Let's Get to Know You Better</h3>
+                        <p className="text-blue-700 text-sm mt-1"> 
+                          {portalData.conversation_context?.relationship_context === 'new client' 
+                            ? "To provide the best recommendations, I'd love to learn more about what you're looking for..."
+                            : "I'd like to understand how your needs might have evolved since we last spoke..."
+                          }
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 )}
-            </main>
+                
+                {/* Recommended Content Section */}
+                {portalData.recommended_content && portalData.recommended_content.length > 0 && (
+                  <RecommendedContentSection content={portalData.recommended_content} />
+                )}
+
+                {/* Welcome Pack Section */}
+                {portalData.welcome_pack && portalData.welcome_pack.length > 0 && (
+                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Welcome Pack</h3>
+                    <div className="grid gap-4">
+                      {portalData.welcome_pack.map((item) => (
+                        <a key={item.id} href={item.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 border border-gray-100 rounded-lg hover:border-blue-200 transition-colors">
+                          <div className="flex-shrink-0">{getContentTypeIcon(item.content_type)}</div>
+                          <div>
+                            <h4 className="font-semibold text-gray-900">{item.title}</h4>
+                            {item.description && <p className="text-sm text-gray-600">{item.description}</p>}
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Matches Section */}
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Your Curated Matches</h3>
+                  {portalData.matches && portalData.matches.length > 0 ? (
+                    <div className="space-y-8">
+                      {portalData.matches.map((group: GroupedMatch) => (
+                        <div key={group.curation_date}>
+                          <h4 className="text-md font-medium text-gray-700 mb-4">
+                            Matches from {format(new Date(group.curation_date), 'MMMM d, yyyy')}
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {group.matches.map((match: any) => (
+                              <PropertyCard key={match.resource.id} resource={match.resource} token={token} onImageClick={(imgs, idx) => handleOpenLightbox(imgs, idx)} />
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                        {portalData.conversation_context?.relationship_context === 'established client'
+                          ? `I'm currently reviewing the latest opportunities that match your criteria...`
+                          : portalData.curation_rationale
+                        }
+                      </h3>
+                      <p className="text-gray-600">
+                        {portalData.conversation_context?.relationship_context === 'established client'
+                          ? "I'll have your personalized matches ready very soon. Check back in a few hours!"
+                          : "I'm currently curating your first set of matches based on what you've told me. Check back soon!"
+                        }
+                      </p>
+                    </div>
+                  )}
+                </div>
+            </div>
         </div>
     );
 }

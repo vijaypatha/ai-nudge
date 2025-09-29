@@ -1,6 +1,6 @@
 # AI Nudge Database Documentation
 
-**Last Updated**: 01/15/2025
+**Last Updated**: 09/21/2025
 
 ## Database Overview
 
@@ -30,12 +30,13 @@ The application contains **18 main tables**:
 **Purpose**: Stores user account information and preferences
 **Key Fields**:
 - `id` (UUID, Primary Key)
-- `user_type` (Enum: LOAN_OFFICER, etc.)
+- `user_type` (Enum: THERAPIST, LOAN_OFFICER) - **UPDATED**: Added THERAPIST option
 - `full_name` (String)
 - `email` (String, indexed)
 - `phone_number` (String, indexed, unique)
 - `vertical` (String, indexed) - Business vertical (real_estate, therapy, etc.)
 - `tool_provider` (String, indexed) - Integration tool factory key
+- `super_user` (Boolean, indexed) - **NEW**: Super user privileges
 - `onboarding_complete` (Boolean)
 - `onboarding_state` (JSON) - Tracks onboarding progress
 - `market_focus` (JSON) - List of market focus areas
@@ -47,9 +48,12 @@ The application contains **18 main tables**:
 - `faq_auto_responder_enabled` (Boolean)
 - `twilio_phone_number` (String, indexed)
 - `timezone` (String, indexed)
-- `intake_survey_enabled` (Boolean, default=True) - **NEW**: Enable/disable intake surveys
-- `intake_survey_auto_send` (Boolean, default=True) - **NEW**: Auto-send intake surveys
-- `intake_survey_delay_hours` (Integer, default=24) - **NEW**: Delay before sending survey
+- `intake_survey_enabled` (Boolean, default=True) - Enable/disable intake surveys
+- `intake_survey_auto_send` (Boolean, default=True) - Auto-send intake surveys
+- `intake_survey_delay_hours` (Integer, default=24) - Delay before sending survey
+- `client_roles` (JSON) - **NEW**: Custom client roles for welcome pack matching
+- `welcome_pack_message` (String) - **NEW**: Custom welcome pack message
+- `welcome_packs_config` (JSON) - **NEW**: Welcome pack configuration by client role
 
 ### 2. `client` Table
 **Purpose**: Stores client/contact information
@@ -66,8 +70,10 @@ The application contains **18 main tables**:
 - `preferences` (JSON) - Client preferences
 - `last_interaction` (String)
 - `timezone` (String)
-- `intake_survey_completed` (Boolean, default=False, indexed) - **NEW**: Survey completion status
-- `intake_survey_sent_at` (String) - **NEW**: When survey was sent
+- `intake_survey_completed` (Boolean, default=False, indexed) - Survey completion status
+- `intake_survey_sent_at` (String) - When survey was sent
+- `client_role` (String, default="client") - **NEW**: Role for welcome pack matching
+- `welcome_pack_override` (JSON) - **NEW**: Override welcome pack configuration for this client
 
 ### 3. `message` Table
 **Purpose**: Stores all messages (sent and received)
@@ -204,36 +210,7 @@ The application contains **18 main tables**:
 - `source_campaign_id` (UUID, indexed) - ID of dismissed campaign
 - `created_at` (DateTime)
 
-### 13. `clientintakesurvey` Table - **NEW**
-**Purpose**: Stores client intake survey responses and processing
-**Key Fields**:
-- `id` (UUID, Primary Key)
-- `client_id` (UUID, Foreign Key to client.id, indexed)
-- `user_id` (UUID, Foreign Key to user.id, indexed)
-- `survey_type` (String, indexed) - Type of survey (e.g., "real_estate_buyer")
-- `survey_version` (String, default="1.0") - Survey version
-- `completed_at` (String) - When survey was completed
-- `responses` (JSON) - Raw survey responses
-- `processed` (Boolean, default=False, indexed) - Whether responses have been processed
-- `preferences_extracted` (JSON) - Extracted preferences from responses
-- `tags_generated` (JSON) - AI-generated tags from responses
-
-### 14. `surveyquestion` Table - **NEW**
-**Purpose**: Stores user-defined survey questions for client intake
-**Key Fields**:
-- `id` (UUID, Primary Key)
-- `user_id` (UUID, Foreign Key to user.id, indexed)
-- `survey_type` (String, indexed) - Survey type this question belongs to
-- `question_text` (String) - The actual question
-- `question_type` (Enum: TEXT, TEXTAREA, MULTIPLE_CHOICE, CHECKBOXES, SCALE, indexed)
-- `options` (JSON) - Available options for multiple choice/checkbox questions
-- `is_required` (Boolean, default=False) - Whether question is required
-- `placeholder` (String) - Placeholder text for input fields
-- `help_text` (String) - Additional help text
-- `preference_key` (String) - Key for extracting preferences
-- `display_order` (Integer, default=0) - Order of question display
-
-### 15. `surveytemplate` Table - **NEW**
+### 13. `surveytemplate` Table - **NEW**
 **Purpose**: Stores survey templates that contain multiple questions
 **Key Fields**:
 - `id` (UUID, Primary Key)
@@ -242,14 +219,14 @@ The application contains **18 main tables**:
 - `description` (String) - Template description
 - `created_at` (DateTime) - When template was created
 
-### 16. `surveyquestion` Table - **UPDATED**
+### 14. `surveyquestion` Table - **NEW**
 **Purpose**: Stores survey questions linked to templates
 **Key Fields**:
 - `id` (UUID, Primary Key)
 - `user_id` (UUID, Foreign Key to user.id, indexed)
-- `template_id` (UUID, Foreign Key to surveytemplate.id, indexed) - **UPDATED**: Now linked to template
+- `template_id` (UUID, Foreign Key to surveytemplate.id, indexed) - Links to survey template
 - `question_text` (String) - The actual question
-- `question_type` (Enum: TEXT, NUMBER, SELECT, MULTI_SELECT, RANGE, BOOLEAN, indexed) - **UPDATED**: New enum values
+- `question_type` (Enum: TEXT, NUMBER, SELECT, MULTI_SELECT, RANGE, BOOLEAN, indexed) - Question type
 - `options` (JSON) - Available options for select/multi-select questions
 - `is_required` (Boolean, default=False) - Whether question is required
 - `placeholder` (String) - Placeholder text for input fields
@@ -257,22 +234,18 @@ The application contains **18 main tables**:
 - `preference_key` (String) - Key for extracting preferences
 - `display_order` (Integer, default=0) - Order of question display
 
-### 17. `clientintakesurvey` Table - **UPDATED**
+### 15. `clientintakesurvey` Table - **UPDATED**
 **Purpose**: Stores client intake survey responses and processing
 **Key Fields**:
 - `id` (UUID, Primary Key)
 - `client_id` (UUID, Foreign Key to client.id, indexed)
 - `user_id` (UUID, Foreign Key to user.id, indexed)
-- `template_id` (UUID, Foreign Key to surveytemplate.id, indexed) - **NEW**: Links to survey template
-- `survey_type` (String, indexed) - Type of survey (e.g., "real_estate_buyer")
-- `survey_version` (String, default="1.0") - Survey version
+- `template_id` (UUID, Foreign Key to surveytemplate.id, indexed) - **UPDATED**: Now links to survey template
 - `completed_at` (String) - When survey was completed
 - `responses` (JSON) - Raw survey responses
 - `processed` (Boolean, default=False, indexed) - Whether responses have been processed
-- `preferences_extracted` (JSON) - Extracted preferences from responses
-- `tags_generated` (JSON) - AI-generated tags from responses
 
-### 18. `portalcomment` Table - **NEW**
+### 16. `portalcomment` Table - **NEW**
 **Purpose**: Stores comments made within the client portal on resources
 **Key Fields**:
 - `id` (UUID, Primary Key)
@@ -283,7 +256,7 @@ The application contains **18 main tables**:
 - `comment_text` (String) - The comment content
 - `created_at` (DateTime) - When comment was created
 
-### 19. `portallink` Table - **NEW**
+### 17. `portallink` Table - **NEW**
 **Purpose**: Stores secure portal links for client access
 **Key Fields**:
 - `id` (String, Primary Key) - Short, URL-safe ID
@@ -306,28 +279,28 @@ The application contains **18 main tables**:
 - **User** → **ContentResource** (One-to-Many)
 - **User** → **MarketEvent** (One-to-Many)
 - **User** → **Faq** (One-to-Many)
-- **User** → **SurveyTemplate** (One-to-Many) - **NEW**
-- **User** → **SurveyQuestion** (One-to-Many) - **UPDATED**
-- **User** → **PortalComment** (One-to-Many) - **NEW**
-- **User** → **PortalLink** (One-to-Many) - **NEW**
+- **User** → **SurveyTemplate** (One-to-Many)
+- **User** → **SurveyQuestion** (One-to-Many)
+- **User** → **PortalComment** (One-to-Many)
+- **User** → **PortalLink** (One-to-Many)
 
 - **Client** → **Message** (One-to-Many)
 - **Client** → **ScheduledMessage** (One-to-Many)
 - **Client** → **CampaignBriefing** (One-to-Many)
 - **Client** → **NegativePreference** (One-to-Many)
-- **Client** → **ClientIntakeSurvey** (One-to-Many) - **UPDATED**
-- **Client** → **PortalComment** (One-to-Many) - **NEW**
-- **Client** → **PortalLink** (One-to-Many) - **NEW**
+- **Client** → **ClientIntakeSurvey** (One-to-Many)
+- **Client** → **PortalComment** (One-to-Many)
+- **Client** → **PortalLink** (One-to-Many)
 
 - **Message** → **CampaignBriefing** (One-to-Many) - AI drafts
 - **CampaignBriefing** → **ScheduledMessage** (One-to-Many)
 - **Resource** → **CampaignBriefing** (One-to-Many) - Triggering resources
-- **Resource** → **PortalComment** (One-to-Many) - **NEW**
-- **Resource** → **PortalLink** (One-to-Many) - **NEW**
+- **Resource** → **PortalComment** (One-to-Many)
+- **Resource** → **PortalLink** (One-to-Many)
 
-- **SurveyTemplate** → **SurveyQuestion** (One-to-Many) - **NEW**
-- **SurveyTemplate** → **ClientIntakeSurvey** (One-to-Many) - **NEW**
-- **CampaignBriefing** → **PortalLink** (One-to-Many) - **NEW**
+- **SurveyTemplate** → **SurveyQuestion** (One-to-Many)
+- **SurveyTemplate** → **ClientIntakeSurvey** (One-to-Many)
+- **CampaignBriefing** → **PortalLink** (One-to-Many)
 
 ## Database Features
 
@@ -359,6 +332,7 @@ The application contains **18 main tables**:
 - **Survey Processing**: AI-powered extraction of preferences and tags from responses
 - **Survey Configuration**: Per-user settings for survey behavior
 - **Question Types**: Support for TEXT, NUMBER, SELECT, MULTI_SELECT, RANGE, and BOOLEAN question types
+- **Template-Based Architecture**: Surveys now use templates instead of hardcoded types
 
 ### 6. Client Portal System - **UPDATED**
 - **Interactive Comments**: Clients and agents can comment on shared resources
@@ -367,7 +341,14 @@ The application contains **18 main tables**:
 - **Secure Portal Links**: JWT-based secure links for client portal access
 - **Portal Link Management**: Track and manage portal link expiration and status
 
-### 7. Migration History
+### 7. Welcome Pack System - **NEW**
+- **Client Role Management**: Users can define custom client roles for personalized welcome packs
+- **Welcome Pack Configuration**: Per-role welcome pack content configuration
+- **Client Role Assignment**: Clients can be assigned specific roles for targeted content
+- **Override Support**: Individual clients can have custom welcome pack overrides
+- **Multi-Vertical Support**: Welcome packs work across all business verticals
+
+### 8. Migration History
 The database uses Alembic for migrations with the following key migrations:
 - `ea68fcacaed1_initial_database_schema.py` - Initial schema
 - `357f39f135c0_add_explicit_tablename_to_.py` - Explicit table names
@@ -379,23 +360,27 @@ The database uses Alembic for migrations with the following key migrations:
 - `remove_flexmls_oauth_token_fields.py` - Cleanup of OAuth fields
 - `add_negativepreference_table.py` - User feedback
 - `e0664be3e4b6_add_globalmlsevent_table.py` - Global MLS events
-- `cbe7cd5783fa_add_source_column_to_campaignbriefing.py` - **NEW**: Campaign source tracking
-- `add_client_intake_survey_table.py` - **NEW**: Client intake survey system
-- `8d8a21dcd8ba_add_survey_and_portal_models.py` - **NEW**: Portal and survey models
-- `447f04b9000c_create_surveyquestion_table.py` - **NEW**: Survey question system
-- `8027110b2edf_add_portal_link_table.py` - **NEW**: Portal link system for secure client access
-- `57cf42b7f456_add_surveytemplate_model_and_link_.py` - **NEW**: Survey template system
-- `35ea1f544186_add_missing_enum_values_to_questiontype.py` - **NEW**: Updated question types
-- `71598edfe977_set_native_enum_false_for_questiontype.py` - **NEW**: Question type enum fixes
+- `cbe7cd5783fa_add_source_column_to_campaignbriefing.py` - Campaign source tracking
+- `add_client_intake_survey_table.py` - Client intake survey system
+- `8d8a21dcd8ba_add_survey_and_portal_models.py` - Portal and survey models
+- `447f04b9000c_create_surveyquestion_table.py` - Survey question system
+- `8027110b2edf_add_portal_link_table.py` - Portal link system for secure client access
+- `57cf42b7f456_add_surveytemplate_model_and_link_.py` - Survey template system
+- `35ea1f544186_add_missing_enum_values_to_questiontype.py` - Updated question types
+- `71598edfe977_set_native_enum_false_for_questiontype.py` - Question type enum fixes
+- `570d8dedf60e_add_client_roles_to_user_model.py` - **NEW**: Client roles for welcome pack matching
+- `658563a47839_add_welcome_pack_fields_to_user_and_.py` - **NEW**: Welcome pack system
+- `ac6bf1de5ef5_refactor_clientintakesurvey_to_use_.py` - **NEW**: Refactored survey system to use templates
+- `015cefa1a6b3_merge_survey_migration.py` - **NEW**: Survey migration merge
 
 ## Database Statistics
 
-- **Total Tables**: 18 (increased from 15)
-- **Primary Tables**: 18 (all main tables)
+- **Total Tables**: 17 (core tables)
+- **Primary Tables**: 17 (all main tables)
 - **Total Indexes**: 60+ (including composite indexes)
-- **JSON Fields**: 20+ across all tables
-- **UUID Primary Keys**: All tables
-- **Foreign Key Relationships**: 30+ relationships
+- **JSON Fields**: 25+ across all tables
+- **UUID Primary Keys**: All tables (except portallink.id which is String)
+- **Foreign Key Relationships**: 35+ relationships
 
 ## Database Architecture Patterns
 
@@ -429,6 +414,8 @@ The database uses Alembic for migrations with the following key migrations:
 - **Custom Question Support**: User-defined survey questions with various types
 - **Secure Portal Access**: JWT-based portal links with expiration management
 - **Question Type Support**: TEXT, NUMBER, SELECT, MULTI_SELECT, RANGE, BOOLEAN
+- **Template-Based Architecture**: Modern survey system using templates instead of hardcoded types
+- **Welcome Pack Integration**: Survey responses can trigger personalized welcome pack delivery
 
 ## Database Security
 
@@ -447,4 +434,4 @@ The database uses Alembic for migrations with the following key migrations:
 
 ---
 
-*This documentation covers the complete database structure of the AI Nudge application as of 01/15/2025.* 
+*This documentation covers the complete database structure of the AI Nudge application as of 09/21/2025.* 

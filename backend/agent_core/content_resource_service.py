@@ -68,8 +68,9 @@ def get_content_recommendations_for_user(user_id: UUID, use_fuzzy: bool = True, 
             for resource in all_resources:
                 # Find matching clients based on resource categories and client tags
                 matched_clients = find_matching_clients_generic(resource, clients, use_fuzzy, fuzzy_threshold)
-                
                 if matched_clients:
+                    # Calculate match score based on matching quality
+                    match_score = calculate_match_score(resource, matched_clients)
                     total_matches += len(matched_clients)
                     # Generate personalized message for each matched client
                     for client in matched_clients:
@@ -106,6 +107,7 @@ def get_content_recommendations_for_user(user_id: UUID, use_fuzzy: bool = True, 
                                 'client_name': client.full_name,
                                 'match_reason': f"Matches categories: {', '.join(resource_data['categories'])}"
                             }],
+                            'match_score': match_score,
                             'generated_message': message
                         }
                         recommendations.append(recommendation)
@@ -116,6 +118,38 @@ def get_content_recommendations_for_user(user_id: UUID, use_fuzzy: bool = True, 
     except Exception as e:
         logging.error(f"CONTENT_RECOMMENDATIONS: Error getting content recommendations for user {user_id}: {e}", exc_info=True)
         return []
+
+def calculate_match_score(resource, matched_clients: List[Client]) -> float:
+    """
+    Calculate match score based on the quality of tag matches.
+    Returns a score between 0.0 and 1.0 where 1.0 is perfect match.
+    """
+    if not matched_clients:
+        return 0.0
+    
+    # Get resource categories
+    if isinstance(resource, ContentResource):
+        resource_categories = set(cat.lower() for cat in resource.categories or [])
+    else:  # Resource with web_content type
+        resource_categories = set(cat.lower() for cat in resource.attributes.get("categories", []) or [])
+    
+    if not resource_categories:
+        return 0.0
+    
+    # Calculate highest match score among all matched clients
+    max_score = 0.0
+    for client in matched_clients:
+        client_user_tags = set(tag.lower() for tag in client.user_tags or [])
+        client_ai_tags = set(tag.lower() for tag in client.ai_tags or [])
+        all_client_tags = client_user_tags.union(client_ai_tags)
+        
+        # Calculate exact match percentage
+        exact_matches = resource_categories.intersection(all_client_tags)
+        if exact_matches:
+            score = len(exact_matches) / len(resource_categories)
+            max_score = max(max_score, min(score, 1.0))
+    
+    return round(max_score, 2)
 
 def find_matching_clients(resource: ContentResource, clients: List[Client], use_fuzzy: bool = True, fuzzy_threshold: float = 0.8) -> List[Client]:
     """

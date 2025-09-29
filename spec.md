@@ -1,5 +1,5 @@
 # AI Nudge - Project Specification
-**Last Updated**: 09/16/2025
+**Last Updated**: 09/21/2025
 
 
 ## **Product Vision & Architecture**
@@ -93,9 +93,31 @@ This is the fundamental engine of the application:
 
 #### **API Layer (`/api/`)**
 - **`main.py`:** FastAPI application entry point with CORS and middleware
-- **`rest/`:** REST API endpoints organized by domain
+- **`rest/`:** REST API endpoints organized by domain (20+ endpoint categories)
 - **`security.py`:** JWT authentication and user management
 - **`websocket_manager.py`:** Real-time communication handling
+- **`vercel_handler.py`:** Vercel deployment handler
+- **`webhooks/`:** Webhook handlers for external services
+
+#### **Complete API Endpoint Categories**
+- **Authentication (`/auth`):** User login, registration, OAuth integration
+- **User Management (`/users`):** Profile management, preferences, settings
+- **Client Management (`/clients`):** CRUD operations, import, deduplication
+- **Campaign Management (`/campaigns`):** Campaign creation, approval, execution
+- **Conversation Management (`/conversations`):** Message handling, search, scheduling
+- **Nudge Management (`/nudges`):** AI-generated nudge recommendations
+- **Survey System (`/surveys`):** Template management, response processing
+- **Portal System (`/portal`):** Secure portal generation and management
+- **Content Resources (`/content-resources`):** Resource management and recommendations
+- **MLS Integration (`/mls`):** Real estate data integration and testing
+- **Twilio Integration (`/twilio-numbers`):** Phone number management and SMS
+- **Scheduled Messages (`/scheduled-messages`):** Message scheduling and management
+- **Community Features (`/community`):** User community and sharing
+- **Admin Functions (`/admin`):** System administration and triggers
+- **Settings Management (`/settings`):** User preferences and configuration
+- **Inbox Management (`/inbox`):** Incoming message handling
+- **FAQ Management (`/faqs`):** Frequently asked questions
+- **WebSocket Support (`/ws`):** Real-time communication
 
 #### **Agent Core (`/agent_core/`)**
 - **`brain/`:** AI decision-making and reasoning engine
@@ -213,10 +235,27 @@ This is the fundamental engine of the application:
 - **Mobile-Responsive:** Portal interface works seamlessly on mobile devices
 - **Agent Commentary:** AI-generated commentary explains why each property was selected for the client
 
-### **8. Personalization & Learning**
-- **Style Adaptation:** AI learns from user message edits
-- **Behavior Profiling:** User interaction pattern analysis
-- **Performance Optimization:** Continuous improvement based on outcomes
+### **8. Advanced Personalization & AI Learning System**
+- **Style Adaptation:** AI learns from user message edits and adapts communication style
+- **Behavior Profiling:** Comprehensive user interaction pattern analysis
+- **Performance Optimization:** Continuous improvement based on campaign outcomes
+- **Client Intelligence Engine:** AI-powered client profiling and segmentation
+- **Context Awareness:** Dynamic adaptation to user context and preferences
+- **Learning Mechanisms:**
+  - **Edit Analysis:** Learns from user modifications to AI-generated content
+  - **Response Tracking:** Monitors client engagement and response patterns
+  - **Success Pattern Recognition:** Identifies what works best for each user
+  - **Style Guide Generation:** Creates personalized communication guidelines
+- **Personalization Components:**
+  - **User Context Management:** Tracks user preferences and business context
+  - **Client Intelligence:** Builds detailed client profiles and preferences
+  - **User Profiling:** Analyzes user behavior and communication patterns
+  - **Style Adaptation:** Learns and adapts to user's communication style
+- **AI Learning Features:**
+  - **Message Edit Learning:** Analyzes differences between AI drafts and user edits
+  - **Engagement Pattern Analysis:** Tracks what content and timing works best
+  - **Success Metrics Tracking:** Monitors campaign performance and outcomes
+  - **Adaptive Recommendations:** Improves suggestions based on user feedback
 
 ### **9. Seamless Timezone Scheduling**
 - **Zero Timezone Complexity:** Users schedule messages in their local time without any timezone selection
@@ -239,6 +278,382 @@ This is the fundamental engine of the application:
   - ✅ Works globally - any timezone, any user
   - ✅ Minimal clicks - just pick time and send
   - ✅ Dead simple: pick a time, write a message, schedule it. Everything else is handled automatically by the system
+
+### **10. Comprehensive API Ecosystem**
+- **RESTful API Design:** Complete REST API with 20+ endpoint categories
+- **Authentication & Security:** JWT-based authentication with OAuth2 integration
+- **Real-time Communication:** WebSocket support for live updates
+- **API Categories:**
+  - **Authentication:** User login, registration, OAuth integration
+  - **Client Management:** CRUD operations, import, deduplication
+  - **Campaign Management:** Campaign creation, approval, execution
+  - **Conversation Management:** Message handling, search, scheduling
+  - **Survey System:** Template management, response processing
+  - **Portal System:** Secure portal generation and management
+  - **Content Resources:** Resource management and recommendations
+  - **MLS Integration:** Real estate data integration
+  - **Twilio Integration:** Phone number management and SMS
+  - **Admin Functions:** System administration and triggers
+  - **Community Features:** User community and sharing
+  - **Settings Management:** User preferences and configuration
+
+### **11. Advanced Workflow & Automation Engine**
+- **Conversational Playbooks:** Industry-specific conversation flows
+- **Relationship Planning:** Automated relationship nurturing sequences
+- **Event Processing Pipeline:** Automated event detection and response
+- **Campaign Automation:** Intelligent campaign generation and execution
+- **Vertical-Specific Workflows:**
+  - **Real Estate:** MLS integration, property alerts, market updates
+  - **Therapy:** HIPAA-compliant workflows, appointment reminders
+  - **Extensible Framework:** Easy addition of new business verticals
+- **Playbook Types:**
+  - **Long-term Nurture:** Ongoing relationship building
+  - **Short-term Lead Conversion:** Immediate engagement strategies
+  - **Personal Event Reminders:** Birthday, anniversary, holiday messages
+  - **Custom Frequency Playbooks:** User-defined engagement schedules
+
+### **12. AI Learning & Personalization System**
+- **Style Adaptation:** AI learns from user message edits and adapts communication style
+- **Behavior Profiling:** Analysis of user interaction patterns and preferences
+- **Performance Optimization:** Continuous improvement based on campaign outcomes
+- **Client Intelligence:** AI-powered client profiling and segmentation
+- **Context Awareness:** Dynamic adaptation to user context and preferences
+- **Learning Mechanisms:**
+  - **Edit Analysis:** Learns from user modifications to AI-generated content
+  - **Response Tracking:** Monitors client engagement and response patterns
+  - **Success Pattern Recognition:** Identifies what works best for each user
+  - **Style Guide Generation:** Creates personalized communication guidelines
+
+---
+
+## **Codebase Structure**
+
+### **Project Tree Structure**
+
+```
+ai-nudge/
+├── backend/                          # Python FastAPI Backend
+│   ├── __init__.py
+│   ├── agent_core/                   # Core AI Agent System
+│   │   ├── __init__.py
+│   │   ├── agents/                   # Specialized AI Agents
+│   │   │   ├── __init__.py
+│   │   │   ├── conversation.py       # Conversation management agent
+│   │   │   ├── guidance.py          # Guidance and recommendations
+│   │   │   ├── profiler.py          # Client profiling agent
+│   │   │   ├── relationship.py      # Relationship management
+│   │   │   ├── scheduler.py         # Message scheduling
+│   │   │   ├── survey.py            # Survey processing agent
+│   │   │   └── verticals.py         # Vertical-specific logic
+│   │   ├── audience_builder.py      # Client targeting and segmentation
+│   │   ├── brain/                   # AI Decision Engine
+│   │   │   ├── __init__.py
+│   │   │   ├── nudge_engine.py      # Core nudge generation logic
+│   │   │   ├── relationship_planner.py # Relationship planning
+│   │   │   ├── semantic_service.py  # Semantic search and matching
+│   │   │   └── verticals/           # Industry-specific AI logic
+│   │   │       ├── __init__.py
+│   │   │       ├── real_estate.py   # Real estate AI logic
+│   │   │       └── therapy.py       # Therapy AI logic
+│   │   ├── content_resource_service.py # Content recommendation engine
+│   │   ├── deduplication/           # Contact deduplication
+│   │   │   └── __init__.py
+│   │   ├── llm_client.py           # LLM integration client
+│   │   ├── orchestrator.py         # AI component coordination
+│   │   ├── semantic_service.py     # Semantic search capabilities
+│   │   ├── survey_config.py        # Survey configuration management
+│   │   ├── survey_processor.py     # Survey response processing
+│   │   └── tools/                  # AI tools and utilities
+│   │       ├── __init__.py
+│   │       ├── base.py
+│   │       ├── content.py
+│   │       ├── conversation.py
+│   │       └── relationship.py
+│   ├── alembic/                    # Database migrations
+│   │   ├── env.py
+│   │   ├── README
+│   │   ├── script.py.mako
+│   │   └── versions/               # Migration files
+│   │       └── [23 migration files]
+│   ├── api/                        # API Layer
+│   │   ├── __init__.py
+│   │   ├── main.py                 # FastAPI application entry point
+│   │   ├── rest/                   # REST API endpoints
+│   │   │   ├── __init__.py
+│   │   │   ├── admin_triggers.py   # Admin trigger endpoints
+│   │   │   ├── api_endpoints.py    # Main API router
+│   │   │   ├── auth.py             # Authentication endpoints
+│   │   │   ├── campaigns.py        # Campaign management
+│   │   │   ├── clients.py          # Client management
+│   │   │   ├── community.py        # Community features
+│   │   │   ├── conversations.py    # Conversation management
+│   │   │   ├── content_resources.py # Content resource management
+│   │   │   ├── faqs.py             # FAQ management
+│   │   │   ├── inbox.py            # Inbox management
+│   │   │   ├── mls.py              # MLS integration
+│   │   │   ├── nudges.py           # Nudge management
+│   │   │   ├── portal.py           # Portal system
+│   │   │   ├── resources.py        # Resource management
+│   │   │   ├── scheduled_messages.py # Message scheduling
+│   │   │   ├── settings.py         # Settings management
+│   │   │   ├── surveys.py          # Survey system
+│   │   │   ├── twilio_numbers.py   # Twilio integration
+│   │   │   ├── users.py            # User management
+│   │   │   └── websockets.py       # WebSocket handling
+│   │   ├── security.py             # Authentication and security
+│   │   ├── vercel_handler.py       # Vercel deployment handler
+│   │   └── webhooks/               # Webhook handlers
+│   │       ├── __init__.py
+│   │       └── twilio.py           # Twilio webhooks
+│   ├── celery_beat_data/           # Celery beat scheduler data
+│   ├── celery_tasks.py             # Celery task definitions
+│   ├── celery_worker.py            # Celery worker configuration
+│   ├── common/                     # Shared utilities
+│   │   ├── __init__.py
+│   │   ├── async_utils.py          # Async utility functions
+│   │   ├── config.py               # Configuration management
+│   │   ├── errors.py               # Error handling
+│   │   ├── jwt_utils.py            # JWT token utilities
+│   │   ├── log.py                  # Logging configuration
+│   │   ├── redis_client.py         # Redis client
+│   │   └── utils.py                # General utilities
+│   ├── data/                       # Data Layer
+│   │   ├── __init__.py
+│   │   ├── crm.py                  # CRM operations
+│   │   ├── database.py             # Database connection
+│   │   ├── models/                 # Database models
+│   │   │   ├── __init__.py
+│   │   │   ├── campaign.py         # Campaign models
+│   │   │   ├── client.py           # Client models
+│   │   │   ├── event.py            # Event models
+│   │   │   ├── message.py          # Message models
+│   │   │   ├── portal.py           # Portal models
+│   │   │   ├── resource.py         # Resource models
+│   │   │   ├── survey.py           # Survey models
+│   │   │   ├── user.py             # User models
+│   │   │   └── [additional models]
+│   │   ├── seed.py                 # Database seeding
+│   │   └── vector.py               # Vector search
+│   ├── integrations/               # External Integrations
+│   │   ├── __init__.py
+│   │   ├── calendar.py             # Calendar integration
+│   │   ├── gemini.py               # Google Gemini AI
+│   │   ├── google_search.py        # Google Search API
+│   │   ├── mls/                    # MLS integrations
+│   │   │   ├── __init__.py
+│   │   │   ├── flexmls.py          # FlexMLS integration
+│   │   │   ├── reso.py             # RESO API integration
+│   │   │   └── [additional MLS files]
+│   │   ├── oauth/                  # OAuth integrations
+│   │   │   └── google.py           # Google OAuth
+│   │   ├── openai.py               # OpenAI integration
+│   │   ├── tool_factory.py         # Integration factory
+│   │   ├── tool_interface.py       # Integration interface
+│   │   ├── twilio_incoming.py      # Twilio incoming SMS
+│   │   ├── twilio_otp.py           # Twilio OTP
+│   │   └── twilio_outgoing.py      # Twilio outgoing SMS
+│   ├── personalization/            # Personalization Engine
+│   │   ├── __init__.py
+│   │   ├── context.py              # User context
+│   │   ├── intel.py                # Client intelligence
+│   │   ├── profiler.py             # User profiling
+│   │   └── style.py                # Style adaptation
+│   ├── workflow/                   # Workflow Engine
+│   │   ├── __init__.py
+│   │   ├── actions.py              # Workflow actions
+│   │   ├── campaigns.py            # Campaign workflows
+│   │   ├── definitions.py          # Workflow definitions
+│   │   ├── outbound.py             # Outbound messaging
+│   │   ├── pipeline.py             # Main workflow pipeline
+│   │   ├── playbooks/              # Industry playbooks
+│   │   │   ├── __init__.py
+│   │   │   ├── base.py             # Base playbook classes
+│   │   │   ├── real_estate.py      # Real estate playbooks
+│   │   │   └── therapy.py          # Therapy playbooks
+│   │   ├── relationship_playbooks.py # Relationship playbooks
+│   │   └── triggers.py             # Workflow triggers
+│   ├── tests/                      # Test Suite
+│   │   ├── test_auth.py
+│   │   ├── test_campaigns.py
+│   │   ├── test_clients.py
+│   │   ├── test_community.py
+│   │   ├── test_content_resource_service.py
+│   │   ├── test_content_resources.py
+│   │   ├── test_conversations.py
+│   │   ├── test_database_schema.py
+│   │   ├── test_live_reso_connection.py
+│   │   ├── test_manual_contact_performance.py
+│   │   ├── test_messaging.py
+│   │   ├── test_migrations.py
+│   │   ├── test_mls_integration.py
+│   │   ├── test_orchestrator.py
+│   │   ├── test_pipeline.py
+│   │   ├── test_profiler.py
+│   │   ├── test_scheduled_messages.py
+│   │   ├── test_semantic_service.py
+│   │   ├── test_simple_db.py
+│   │   └── test_users.py
+│   ├── alembic.ini                 # Alembic configuration
+│   ├── conftest.py                 # Pytest configuration
+│   ├── create_all_access_account_docker.sh
+│   ├── create_all_access_account.sh
+│   ├── create_super_user.py
+│   ├── database_analysis_report.json
+│   ├── database_analysis_simple.py
+│   ├── database_analysis.py
+│   ├── Dockerfile                  # Docker configuration
+│   ├── env.example                 # Environment variables template
+│   ├── pytest.ini                 # Pytest configuration
+│   ├── README.md
+│   ├── requirements-render.txt     # Production requirements
+│   ├── requirements.txt            # Development requirements
+│   ├── rescore_all.py
+│   ├── start_render.sh
+│   └── test.db                     # Test database
+├── frontend/                       # Next.js Frontend
+│   ├── app/                        # Next.js App Router
+│   │   ├── (main)/                 # Main application pages
+│   │   │   ├── clients/
+│   │   │   ├── conversations/
+│   │   │   ├── dashboard/
+│   │   │   ├── nudges/
+│   │   │   ├── portal/
+│   │   │   ├── settings/
+│   │   │   └── [additional pages]
+│   │   ├── auth/                   # Authentication pages
+│   │   │   ├── login/
+│   │   │   ├── register/
+│   │   │   └── [auth components]
+│   │   ├── onboarding/             # User onboarding
+│   │   │   └── [onboarding pages]
+│   │   ├── portal/                 # Client portal pages
+│   │   │   └── [portal_id]/
+│   │   ├── privacy/                # Privacy policy
+│   │   ├── survey/                 # Survey pages
+│   │   │   └── [surveyId]/
+│   │   ├── terms/                  # Terms of service
+│   │   ├── test/                   # Test pages
+│   │   ├── favicon.ico
+│   │   ├── globals.css             # Global styles
+│   │   ├── layout.tsx              # Root layout
+│   │   ├── page.tsx                # Home page
+│   │   └── providers.tsx           # Context providers
+│   ├── components/                 # React Components
+│   │   ├── AuthGuard.tsx           # Authentication guard
+│   │   ├── client-intake/          # Client intake components
+│   │   │   ├── ClientImport.tsx
+│   │   │   ├── ClientList.tsx
+│   │   │   └── ClientProfile.tsx
+│   │   ├── conversation/           # Conversation components
+│   │   │   ├── ConversationList.tsx
+│   │   │   ├── ConversationView.tsx
+│   │   │   ├── MessageComposer.tsx
+│   │   │   ├── MessageList.tsx
+│   │   │   ├── RecommendationActions.tsx
+│   │   │   └── [additional components]
+│   │   ├── modals/                 # Modal components
+│   │   │   ├── CampaignModal.tsx
+│   │   │   ├── ClientModal.tsx
+│   │   │   ├── ConfirmModal.tsx
+│   │   │   ├── MessageModal.tsx
+│   │   │   ├── PortalModal.tsx
+│   │   │   └── SurveyModal.tsx
+│   │   ├── nudges/                 # Nudge components
+│   │   │   ├── NudgeCard.tsx
+│   │   │   ├── NudgeList.tsx
+│   │   │   ├── NudgePreview.tsx
+│   │   │   ├── NudgeScheduler.tsx
+│   │   │   └── NudgeStats.tsx
+│   │   ├── onboarding/             # Onboarding components
+│   │   │   ├── OnboardingFlow.tsx
+│   │   │   └── OnboardingStep.tsx
+│   │   ├── profile/                # Profile components
+│   │   │   ├── ProfileForm.tsx
+│   │   │   ├── ProfileSettings.tsx
+│   │   │   └── ProfileStats.tsx
+│   │   ├── settings/               # Settings components
+│   │   │   └── SettingsPanel.tsx
+│   │   ├── survey/                 # Survey components
+│   │   │   ├── ClientIntakeSurvey.tsx
+│   │   │   ├── SurveyBuilder.tsx
+│   │   │   ├── SurveyPreview.tsx
+│   │   │   └── SurveyResults.tsx
+│   │   ├── ui/                     # UI components
+│   │   │   ├── Button.tsx
+│   │   │   ├── Card.tsx
+│   │   │   ├── Input.tsx
+│   │   │   ├── Modal.tsx
+│   │   │   ├── TagFilter.tsx
+│   │   │   └── [additional UI components]
+│   │   ├── ThemeProvider.tsx       # Theme provider
+│   │   └── ThemeSwitcher.tsx       # Theme switcher
+│   ├── context/                    # React Context
+│   │   ├── AppContext.tsx          # Main app context
+│   │   └── SidebarContext.tsx      # Sidebar context
+│   ├── utils/                      # Utility functions
+│   │   ├── theme.ts                # Theme utilities
+│   │   ├── timezone.test.ts        # Timezone tests
+│   │   └── timezone.ts             # Timezone utilities
+│   ├── public/                     # Static assets
+│   │   ├── AI Nudge Logo.png
+│   │   ├── file.svg
+│   │   ├── globe.svg
+│   │   ├── google2b88652066896ead.html
+│   │   ├── logo.svg
+│   │   ├── next.svg
+│   │   ├── vercel.svg
+│   │   └── window.svg
+│   ├── Dockerfile                  # Docker configuration
+│   ├── eslint.config.mjs           # ESLint configuration
+│   ├── next-env.d.ts               # Next.js type definitions
+│   ├── next.config.js              # Next.js configuration
+│   ├── package-lock.json           # NPM lock file
+│   ├── package.json                # NPM dependencies
+│   ├── postcss.config.js           # PostCSS configuration
+│   ├── README.md
+│   ├── tailwind.config.js          # Tailwind CSS configuration
+│   ├── THEME_GUIDE.md              # Theme documentation
+│   ├── tsconfig.json               # TypeScript configuration
+│   └── tsconfig.tsbuildinfo        # TypeScript build info
+├── node_modules/                   # NPM dependencies
+├── package-lock.json               # Root package lock file
+├── package.json                    # Root package.json
+├── production.env                  # Production environment
+├── pytest.ini                     # Pytest configuration
+├── render-build.sh                 # Render deployment script
+├── render.yaml                     # Render configuration
+├── spec.md                         # Project specification (this file)
+├── venv/                          # Python virtual environment
+└── [additional root files]
+```
+
+### **Key Architecture Components**
+
+#### **Backend Architecture**
+- **FastAPI Framework:** Modern, fast Python web framework
+- **SQLModel ORM:** Type-safe database operations with Pydantic integration
+- **PostgreSQL Database:** Robust relational database with JSON support
+- **Redis + Celery:** Asynchronous task processing and caching
+- **Alembic Migrations:** Database schema version control
+
+#### **Frontend Architecture**
+- **Next.js 14:** React framework with App Router
+- **TypeScript:** Type-safe JavaScript development
+- **Tailwind CSS:** Utility-first CSS framework
+- **Framer Motion:** Animation and interaction library
+- **React Context:** State management without external libraries
+
+#### **AI & ML Integration**
+- **OpenAI API:** GPT models for text generation and analysis
+- **Google Generative AI:** Gemini models for additional AI capabilities
+- **Vector Search:** Semantic search and similarity matching
+- **Embedding Generation:** Text embedding for content matching
+
+#### **External Integrations**
+- **Twilio:** SMS and voice communication
+- **Google OAuth:** Authentication and contact import
+- **MLS APIs:** Real estate data integration (FlexMLS, RESO)
+- **Redis:** Caching and session management
 
 ---
 
@@ -341,6 +756,28 @@ This is the fundamental engine of the application:
 4. **Feedback Collection:** Clients provide feedback on properties through the portal interface
 5. **Agent Notification:** Agents receive real-time updates on client feedback and engagement
 6. **Continuous Improvement:** Client feedback improves future matching and portal curation
+
+### **Advanced Workflow Engine**
+- **Conversational Playbooks:** Industry-specific conversation flows with configurable steps
+- **Relationship Planning:** Automated relationship nurturing sequences with timing controls
+- **Event Processing Pipeline:** Real-time event detection and intelligent response generation
+- **Campaign Automation:** End-to-end campaign lifecycle management
+- **Vertical-Specific Workflows:**
+  - **Real Estate:** MLS integration, property alerts, market updates, buyer/seller workflows
+  - **Therapy:** HIPAA-compliant workflows, appointment reminders, wellness check-ins
+  - **Extensible Framework:** Easy addition of new business verticals through pluggable modules
+- **Playbook Types:**
+  - **Long-term Nurture:** Ongoing relationship building with configurable intervals
+  - **Short-term Lead Conversion:** Immediate engagement strategies for new prospects
+  - **Personal Event Reminders:** Birthday, anniversary, holiday, and milestone messages
+  - **Custom Frequency Playbooks:** User-defined engagement schedules and triggers
+  - **Event-Driven Workflows:** Automated responses to market events and client actions
+- **Workflow Components:**
+  - **Actions:** Reusable workflow actions for common tasks
+  - **Triggers:** Event-driven workflow initiation
+  - **Conditions:** Smart decision points in workflow execution
+  - **Timing Controls:** Sophisticated scheduling and delay mechanisms
+  - **Personalization:** Dynamic content adaptation based on client profile
 
 ---
 

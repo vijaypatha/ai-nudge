@@ -13,7 +13,7 @@ receiving client feedback.
 import logging
 import asyncio
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session
+from sqlmodel import Session, select
 from uuid import UUID
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -44,6 +44,13 @@ from agent_core.agents import guidance as guidance_agent
 
 # Shared utility for creating and decoding secure portal links
 from common.jwt_utils import create_portal_token, decode_portal_token
+
+# Content intelligence integration
+from agent_core.content_resource_service import get_content_recommendations_for_user
+
+# Survey intelligence integration
+from agent_core.survey_config import get_survey_config, determine_survey_type
+from data.models.survey import SurveyTemplate, SurveyQuestion
 
 # --- Router Setup ---
 
@@ -81,6 +88,22 @@ class PortalContentResource(BaseModel):
     class Config:
         orm_mode = True
 
+class ConversationContext(BaseModel):
+    """Conversation context generated from client intelligence."""
+    opening_message: str
+    relationship_context: Optional[str] = None
+    personalization_tags: List[str] = []
+
+class RecommendedContent(BaseModel):
+    """Content recommendation with reasoning.""" 
+    id: UUID
+    title: str
+    url: str
+    description: Optional[str]
+    content_type: str
+    match_score: float
+    reasoning: Optional[str] = None
+
 class PortalDataResponse(BaseModel):
     """Defines the complete data structure for the client portal view."""
     client_name: str
@@ -93,6 +116,9 @@ class PortalDataResponse(BaseModel):
     survey_template: Optional[Any] = None # For rendering the survey if not complete
     welcome_message: Optional[str] = None
     welcome_pack: List[PortalContentResource] = []
+    # NEW: Conversation intelligence
+    conversation_context: Optional[ConversationContext] = None
+    recommended_content: List[RecommendedContent] = []
 
 # --- Agent-Facing Endpoint ---
 
@@ -121,6 +147,178 @@ async def generate_portal_link(
     from agent_core.brain.nudge_engine import setup_client_portal
     portal_url = await setup_client_portal(client, current_user, session)
     return {"portal_url": portal_url}
+
+def generate_conversation_context(client: Client, user: User) -> ConversationContext:
+    """Generate personalized conversation context using client tags and user style."""
+    all_tags = (client.ai_tags or []) + (client.user_tags or [])
+    
+    # Detect relationship indicators from tags
+    relationship_indicators = [tag for tag in all_tags 
+                             if any(keyword in tag.lower() 
+                                  for keyword in ['year', 'established', 'returning', 'previous'])]
+    
+    # Generate opening message based on relationship context and user style
+    if relationship_indicators:
+        relationship_context = "established client"
+        if user.vertical == "real_estate":
+            opening_message = f"Hi {client.full_name}! Great to have you back on our platform. I've been tracking the market in your area and found some exciting opportunities that match your preferences..."
+        elif user.vertical == "therapy":
+            opening_message = f"Welcome back, {client.full_name}. I hope you're continuing to feel supported in your wellness journey. I have some new resources that might help with your goals..."
+        else:
+            opening_message = f"Hi {client.full_name}! Wonderful to have you back. I've been thinking about your needs and have some personalized recommendations..."
+    else:
+        relationship_context = "new client"
+        if user.vertical == "real_estate":
+            opening_message = f"Hi {client.full_name}! Welcome to your personalized property portal. I'm {user.full_name}, and I'm excited to help you find your perfect home..."
+        elif user.vertical == "therapy":
+            opening_message = f"Hello {client.full_name}. I'm {user.full_name}, and I'm honored to support you on your wellness journey. I've created this space where we can work together..."
+        else:
+            opening_message = f"Welcome {client.full_name}! I'm {user.full_name}, and I'm excited to work with you. I've prepared some personalized resources..."
+    
+    # Apply user's ai_style_guide if available
+    if user.ai_style_guide:
+        if "warm" in user.ai_style_guide.lower():
+            opening_message = opening_message.replace("Hi", "Hello").replace("Great", "Wonderful")
+        elif "professional" in user.ai_style_guide.lower():
+            opening_message = opening_message.replace("excited", "pleased").replace("perfect", "ideal")
+    
+    return ConversationContext(
+        opening_message=opening_message,
+        relationship_context=relationship_context,
+        personalization_tags=all_tags[:5]  # Top 5 tags for context
+    )
+
+async def get_intelligent_content_recommendations(client: Client, user: User) -> List[RecommendedContent]:
+    """Get content recommendations using existing content service.""" 
+    try:
+        raw_recommendations = get_content_recommendations_for_user(user.id, use_fuzzy=True, fuzzy_threshold=0.7)
+        
+        recommendations = []
+        for rec in raw_recommendations[:5]:  # Top 5 recommendations
+            # Fix data structure mismatch - content service returns nested 'resource' object
+            resource_data = rec.get("resource", {})
+            if not resource_data:
+                continue
+                
+            recommendations.append(RecommendedContent(
+                id=UUID(str(resource_data["id"])),
+                title=resource_data.get("title", "Untitled"),
+                url=resource_data.get("url", ""),
+                description=resource_data.get("description"),
+                content_type=resource_data.get("content_type", "article"),
+                match_score=rec.get("match_score", 0.0),
+                reasoning=rec.get("generated_message", "Matched based on your profile and preferences")
+            ))
+        return recommendations
+    except Exception as e:
+        logger.error(f"Error getting content recommendations for client {client.id}: {e}")
+        return []
+
+def find_best_survey_match(client_tags: List[str], custom_surveys: List[SurveyTemplate]) -> Optional[SurveyTemplate]:
+    """
+    Use client tags to intelligently match the best custom survey template.
+    """
+    if not custom_surveys or not client_tags:
+        return None
+    
+    # Score each survey based on tag matches
+    survey_scores = []
+    
+    for survey in custom_surveys:
+        score = 0
+        survey_name_lower = survey.name.lower()
+        survey_desc_lower = (survey.description or "").lower()
+        
+        for tag in client_tags:
+            tag_lower = tag.lower()
+            # Higher score for exact matches in survey name
+            if tag_lower in survey_name_lower:
+                score += 5
+            # Medium score for matches in description
+            if tag_lower in survey_desc_lower:
+                score += 2
+            # Special scoring for common therapy patterns
+            if tag_lower == "depression" and "depression" in survey_name_lower:
+                score += 10
+            if tag_lower == "anxiety" and ("anxiety" in survey_name_lower or "stress" in survey_name_lower):
+                score += 8
+            if tag_lower == "trauma" and "trauma" in survey_name_lower:
+                score += 10
+            # Generic patterns
+            if "new" in tag_lower and ("intake" in survey_name_lower or "initial" in survey_name_lower):
+                score += 6
+            if "follow" in tag_lower and ("progress" in survey_name_lower or "follow" in survey_name_lower):
+                score += 6
+        
+        survey_scores.append((survey, score))
+    
+    # Return survey with highest score, or first survey if no matches
+    survey_scores.sort(key=lambda x: x[1], reverse=True)
+    best_survey = survey_scores[0][0] if survey_scores[0][1] > 0 else custom_surveys[0]
+    
+    logger.info(f"PORTAL API: Selected survey '{best_survey.name}' with score {survey_scores[0][1]} for client tags: {client_tags}")
+    return best_survey
+
+async def get_survey_template_for_client(client: Client, user: User, session: Session) -> Optional[Dict[str, Any]]:
+    """
+    Get the appropriate survey template using intelligent tag-based matching.
+    Priority: Custom surveys → Default surveys
+    """
+    # Get client tags for intelligent matching
+    all_tags = (client.ai_tags or []) + (client.user_tags or [])
+    
+    # PRIORITY 1: Check for custom user survey templates
+    custom_surveys = session.exec(
+        select(SurveyTemplate).where(SurveyTemplate.user_id == user.id)
+    ).all()
+    
+    if custom_surveys:
+        # Use intelligent tag matching to select best survey
+        selected_survey = find_best_survey_match(all_tags, custom_surveys)
+        if selected_survey:
+            # Get questions for this survey
+            questions = session.exec(
+                select(SurveyQuestion).where(SurveyQuestion.template_id == selected_survey.id)
+            ).all()
+            
+            return {
+                "template_id": str(selected_survey.id),
+                "title": selected_survey.name,
+                "description": selected_survey.description,
+                "questions": [
+                    {
+                        "id": str(q.id),
+                        "question": q.question_text,
+                        "type": q.question_type,
+                        "required": q.is_required or False,
+                        "options": q.options or [],
+                        "preference_key": q.preference_key
+                    } for q in questions
+                ]
+            }
+    
+    # PRIORITY 2: Fall back to default surveys
+    survey_type = determine_survey_type(user.vertical, all_tags)
+    if survey_type:
+        survey_config = get_survey_config(survey_type, user, session)
+        if survey_config:
+            return {
+                "template_id": survey_type,  # Use survey type as ID for default surveys
+                "title": survey_config.title,
+                "description": survey_config.description,
+                "questions": [
+                    {
+                        "id": q.id,
+                        "question": q.question,
+                        "type": q.type.value,
+                        "required": q.required,
+                        "options": q.options,
+                        "preference_key": q.preference_key
+                    } for q in survey_config.questions
+                ]
+            }
+    
+    return None
 
 # --- Public, Client-Facing Endpoints ---
 
@@ -246,13 +444,23 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
 
     curation_rationale = active_campaigns[0].key_intel.get("curation_rationale") if active_campaigns else "Welcome to your portal!"
 
+    # --- SURVEY STATUS AND TEMPLATE LOGIC ---
     survey_completed = getattr(client, 'intake_survey_completed', False)
     survey_template = None
 
+    # Get intelligent survey template for client
     if not survey_completed:
-        # Placeholder for fetching survey template logic...
-        # survey_template = crm_service.get_default_survey_for_client(client, session)
-        logger.info(f"PORTAL API: Client {client.id} has not completed survey. Hub will render kickoff view.")
+        survey_template = await get_survey_template_for_client(client, user, session)
+        logger.info(f"PORTAL API: {'Found' if survey_template else 'No'} survey template for client {client.id}")
+
+    # Generate conversation context using client intelligence  
+    conversation_context = generate_conversation_context(client, user)
+    
+    # Get intelligent content recommendations
+    recommended_content = await get_intelligent_content_recommendations(client, user)
+
+    logger.info(f"PORTAL API: Generated {len(recommended_content)} content recommendations for client {client.id}")
+    logger.info(f"PORTAL API: Conversation context - {conversation_context.relationship_context} with {len(conversation_context.personalization_tags)} tags")
 
     return PortalDataResponse(
         client_name=client.full_name,
@@ -264,7 +472,9 @@ async def get_portal_data(short_id: str, session: Session = Depends(get_session)
         survey_completed=survey_completed,
         survey_template=survey_template,
         welcome_message=user.welcome_pack_message,
-        welcome_pack=welcome_pack_resources  # Now properly transformed!
+        welcome_pack=welcome_pack_resources,
+        conversation_context=conversation_context,
+        recommended_content=recommended_content
     )
 
 

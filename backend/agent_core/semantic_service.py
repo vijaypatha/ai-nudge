@@ -45,16 +45,28 @@ async def initialize_vector_index():
     if not clients_with_embedding:
         logging.warning("SEMANTIC SERVICE: No clients with embeddings found. Index will be empty.")
         return
-
+    
+    # Validate embedding dimensions before adding to FAISS
+    valid_clients = []
+    for c in clients_with_embedding:
+        if len(c.notes_embedding) != DIMENSION:
+            logging.warning(f"SEMANTIC SERVICE: Client {c.id} has embedding dimension {len(c.notes_embedding)}, expected {DIMENSION}. Skipping.")
+            continue
+        valid_clients.append(c)
+    
+    if not valid_clients:
+        logging.warning("SEMANTIC SERVICE: No clients with valid embedding dimensions found. Index will be empty.")
+        return
+        
     logging.info(f"SEMANTIC SERVICE: Loading {len(clients_with_embedding)} composite client embeddings into index...")
 
-    embeddings = np.array([c.notes_embedding for c in clients_with_embedding]).astype('float32')
+    embeddings = np.array([c.notes_embedding for c in valid_clients]).astype('float32')
     faiss.normalize_L2(embeddings)
     
-    item_ids = np.arange(len(clients_with_embedding))
+    item_ids = np.arange(len(valid_clients))
 
     faiss_index.add_with_ids(embeddings, item_ids)
-    index_to_client_id_map = [c.id for c in clients_with_embedding]
+    index_to_client_id_map = [c.id for c in valid_clients]
     
     logging.info(f"SEMANTIC SERVICE: Index built successfully with {faiss_index.ntotal} vectors.")
 
